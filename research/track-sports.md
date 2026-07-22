@@ -222,6 +222,14 @@ and labeled as such; activity-only and contact-sports recall are under-measured 
   weak-label contact-sports recall handed over (boxing 0.102, martial-arts 0.146 — LOW;
   under-measured, cite WITH the weak label). The compose-claim (boxing → sports:match as
   the exculpatory label) is NOT measured-strong on the sports side; open item.
+- **2026-07-22 · off-COCO p-spread CONFIRMED (ALL-CLEAR) — `calibration:"fitted"` HOLDS.**
+  Scored the fitted head over two off-COCO corpora (drugs-saturation lesson: a fit is only
+  honest if its p spreads off the training distribution). unsplash-demo (n=2000):
+  match_rate 0.093, q50=0.014, q95=0.347, q99=0.739, frac(p>0.98)=**0.002**. unsplashb
+  (n=9930): match_rate 0.084, q99=0.739, frac(p>0.98)=**0.001**. Genuinely spread — the top
+  is even MORE conservative off-COCO (q99 0.74 vs COCO 0.99) because there are fewer true
+  sports and p correctly stays low. NOT the drugs failure (218 benign piled at p=0.99). No
+  demotion. Handed to b-daemon for independent second-party confirmation.
 - **2026-07-22 · verified (track-sports3, folded in).** COCO/LVIS exhaustive-GT numbers
   reproduced to the digit over existing embeddings; §6 weak-label rates re-measured on the
   grown `unsplashb` (n≈9926) — direction/ranking unchanged; the corpus-dependent phrasing
