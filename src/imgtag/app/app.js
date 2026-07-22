@@ -38,9 +38,12 @@ const dur = (s) => {
   if (m < 60) return `${m}m ${Math.round(s % 60)}s`;
   return `${Math.floor(m / 60)}h ${m % 60}m`;
 };
+// accepts epoch seconds, epoch millis, or an ISO-8601 string (the daemon sends ISO)
 const ago = (ts) => {
   if (!ts) return '';
-  const s = Date.now() / 1000 - (ts > 1e12 ? ts / 1000 : ts);
+  const t = typeof ts === 'string' ? Date.parse(ts) / 1000 : ts > 1e12 ? ts / 1000 : ts;
+  if (!Number.isFinite(t)) return '';
+  const s = Date.now() / 1000 - t;
   return s < 60 ? 'just now' : s < 3600 ? `${Math.round(s / 60)}m ago`
     : s < 86400 ? `${Math.round(s / 3600)}h ago` : `${Math.round(s / 86400)}d ago`;
 };
@@ -56,7 +59,8 @@ const splitPath = (p) => {
 // "why this matched" — straight from the API payload, never inferred client-side
 const whyText = (why) => {
   if (!why || !why.path) return '';
-  return why.tag ? `${why.path} · ${why.tag}` : String(why.path);
+  if (why.tag) return `tag · ${why.tag}`;
+  return why.path === 'text' ? 'text match' : String(why.path);
 };
 
 // ── API layer ──────────────────────────────────────────────────────────────
@@ -578,7 +582,7 @@ async function viewSearch(q, dataset) {
   paintBanner(res);
   paintFilters(res);
   $('#resSum').textContent = res.hits.length
-    ? `${n0(res.hits.length)} hits · ${res.tookMs != null ? `${res.tookMs.toFixed(1)} ms server` : ''}`
+    ? `${n0(res.hits.length)} ${res.hits.length === 1 ? 'hit' : 'hits'}${res.tookMs != null ? ` · ${res.tookMs.toFixed(1)} ms server` : ''}`
     : '';
 
   if (!res.hits.length) {
@@ -604,7 +608,7 @@ async function viewSearch(q, dataset) {
     latency: res.tookMs != null
       ? `<b>${res.tookMs.toFixed(1)} ms</b> server · ${res.rttMs.toFixed(0)} ms round-trip`
       : `${res.rttMs.toFixed(0)} ms round-trip`,
-    hits: `${n0(res.hits.length)} hits`,
+    hits: `${n0(res.hits.length)} ${res.hits.length === 1 ? 'hit' : 'hits'}`,
     coverage: res.coverage ? `coverage ${n0(res.coverage.indexed)}/${n0(res.coverage.total)}` : '',
   });
   markPainted();

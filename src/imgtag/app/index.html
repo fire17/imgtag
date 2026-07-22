@@ -5,7 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
 <title>imgtag</title>
-<link rel="stylesheet" href="./app.css">
+<!-- absolute: the daemon serves index.html at "/" but its assets under "/app/*" -->
+<link rel="stylesheet" href="/app/app.css">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' rx='3' fill='%23111'/><circle cx='6.5' cy='6.5' r='3.2' fill='none' stroke='%23f0a850' stroke-width='1.6'/><path d='M9 9l4 4' stroke='%23f0a850' stroke-width='1.8' stroke-linecap='round'/></svg>">
 </head>
 <body>
@@ -42,6 +43,6 @@
 
 <dialog id="detail" class="detail" aria-label="Image detail"></dialog>
 
-<script src="./app.js"></script>
+<script src="/app/app.js"></script>
 </body>
 </html>
