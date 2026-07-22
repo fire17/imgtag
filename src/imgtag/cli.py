@@ -178,6 +178,27 @@ def _daemon_state() -> dict:
 def cmd_info(args) -> int:
     t0 = time.perf_counter()
     args.dataset = getattr(args, "dataset_flag_info", None) or args.dataset
+    if getattr(args, "image", None):
+        # per-image all-tracks (B20 parity with GET /api/image/<ds>/<id>/tracks) —
+        # delegate to the ONE owner (core.search.Searcher) so the object is identical
+        from .core.search import Searcher
+
+        s = Searcher()
+        for ds in ([args.dataset] if args.dataset else store.list_datasets()):
+            try:
+                obj = s.image_tracks(ds, args.image)
+            except (FileNotFoundError, store.UnknownDatasetError):
+                continue
+            obj["tookMs"] = round((time.perf_counter() - t0) * 1000, 2)
+            _out(args, obj, "\n".join(
+                f"{e['category']:14s} {e.get('tier') or 'none':10s} "
+                f"p={e['p'] if e.get('scored') else 'pending'}" for e in obj["tracks"]))
+            return 0
+        _err(f"image {args.image!r} not found in any dataset")
+        if args.json:
+            json.dump({"error": "UnknownImage", "image_id": args.image, "exit": 4}, sys.stdout)
+            sys.stdout.write("\n")
+        return 4
     if getattr(args, "job", None):
         job = read_job(args.job)
         if job is None:
@@ -606,6 +627,8 @@ def build_parser() -> argparse.ArgumentParser:
     n.add_argument("--dataset", dest="dataset_flag_info")
     n.add_argument("--job", help="report one job's live status")
     n.add_argument("--flags", action="store_true", help="moderation rollup (all datasets, or one with --dataset)")
+    n.add_argument("--image", metavar="IMAGE_ID", help="per-image all-tracks panel (with --tracks)")
+    n.add_argument("--tracks", action="store_true", help="with --image: every track's confidence for it")
     n.set_defaults(fn=cmd_info)
 
     m = sub.add_parser("manage", help="create/rename/reindex/delete a dataset", parents=[common])

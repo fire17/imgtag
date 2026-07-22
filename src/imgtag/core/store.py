@@ -177,14 +177,17 @@ def _moderation_json_cfg(category: str) -> dict:
 
 
 def resolve_track_cfg(category: str, model_id: str, spec: dict | None = None) -> dict:
-    """Effective tier config, FITTED-FILE-WINS precedence — byte-identical inputs to
-    b-daemon's reader (search.py): moderation.json spec < fitted(base_model) <
-    fitted(model_id). The recorded spec (head τ baked into the manifest at index time) is
-    an even-lower fallback so an index that predates a fitted file still derives. A τ refit
-    is free: derivation reads the CURRENT fitted file, never a value frozen at index time.
-    `model_id` is the index manifest's model_id (the reader's own input)."""
+    """Effective tier config, FITTED-FILE-WINS precedence:
+
+        moderation.json (disk base) < caller spec < fitted(base_model) < fitted(model_id)
+
+    A caller's `spec` overrides the bundled base (so any consumer that passes an
+    intentional spec gets it, not the disk default — b-daemon's general-consumer fix), and
+    the per-model fitted file wins over everything, which is why a τ refit is free (T1) and
+    why store-side and b-daemon's reader resolve τ identically: both read the SAME
+    `fitted_tau`. `model_id` is the index manifest's model_id (the reader's own input)."""
     base = model_id.rsplit("-", 1)[0] if model_id else ""
-    return {**(spec or {}), **_moderation_json_cfg(category),
+    return {**_moderation_json_cfg(category), **(spec or {}),
             **fitted_tau(category, base), **fitted_tau(category, model_id)}
 
 

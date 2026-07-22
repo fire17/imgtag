@@ -372,3 +372,44 @@ def test_multi_column_people_track_stores_N_by_4(tmp_path, imgs):
     assert s["content"]["match"]["multi-person"] == 1   # i=2
     # and no vestigial all-NaN bare column now that pre-seeding is gone (ask #2)
     assert set(snap.tracks) == {"people", "one-person", "multi-person"}
+
+
+@needs_model
+def test_cli_info_image_tracks_matches_the_per_image_object(tmp_path, imgs):
+    """B20 parity with GET /api/image/<ds>/<id>/tracks: `info --image <id> --tracks`
+    returns the exact per-image all-tracks object (delegated to the one owner, Searcher)."""
+    home = tmp_path / "home"
+    (tmp_path / "fakemod.py").write_text(
+        "def detect(embs, recs, images=None):\n"
+        "    return [[{'category':'weapons','p':0.9,'tier':'violation'}] for _ in recs]\n"
+        "detect.specs = {'weapons': {'tau_violation': 0.5}}\n")
+    import os as _os
+    env = {**_os.environ, "IMGTAG_HOME": str(home), "PYTHONPATH": str(tmp_path)}
+    cli = [sys.executable, "-m", "imgtag.cli"]
+
+    def run(*a):
+        p = subprocess.run(cli + list(a), capture_output=True, text=True, timeout=600, env=env)
+        assert p.returncode == 0, p.stderr[-400:]
+        return json.loads(p.stdout)
+
+    run("index", str(imgs), "--dataset", "shop", "--wait", "--json", "--moderation-hook", "fakemod:detect")
+    obj = run("info", "--image", _read_first_id(home, "shop"), "--tracks", "--dataset", "shop", "--json")
+    assert set(obj) >= {"image_id", "dataset", "path", "tracks"}
+    assert obj["tracks"] and all({"category", "kind", "tier", "scored"} <= set(t) for t in obj["tracks"])
+    # a missing image is a clean exit 4, not a crash
+    p = subprocess.run(cli + ["info", "--image", "0" * 16, "--tracks", "--dataset", "shop", "--json"],
+                       capture_output=True, text=True, env=env)
+    assert p.returncode == 4
+
+
+def _read_first_id(home, dataset):
+    import os as _os
+
+    from imgtag.core import store
+    old = _os.environ.get("IMGTAG_HOME")
+    _os.environ["IMGTAG_HOME"] = str(home)
+    try:
+        return store.open_snapshot(dataset).ids[0]["image_id"]
+    finally:
+        if old:
+            _os.environ["IMGTAG_HOME"] = old

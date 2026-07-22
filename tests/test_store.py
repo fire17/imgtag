@@ -284,8 +284,11 @@ def test_fitted_tau_wins_over_recorded_spec(tmp_path, monkeypatch):
     (data / "weapons-m.json").write_text(_json.dumps(
         {"category": "weapons", "tau_violation": 0.8, "tau_review": 0.1, "calibration": "fitted"}))
 
-    cfg = store.resolve_track_cfg("weapons", "m-fp32", spec={"tau_violation": 0.0})  # spec loses
+    cfg = store.resolve_track_cfg("weapons", "m-fp32", spec={"tau_violation": 0.0})  # fitted wins
     assert cfg["tau_violation"] == 0.8 and cfg["tau_review"] == 0.1
+    # a caller spec overrides the moderation.json base (general-consumer guarantee) but a
+    # fitted file still wins over the caller — the T1 law
+    assert store.resolve_track_cfg("nofit", "m", spec={"tau_violation": 0.42})["tau_violation"] == 0.42
     # a score above the fitted violation tau derives 'violation', not 'none'
     assert store.derive_tiers([0.99, 0.5, 0.05], cfg) == ["violation", "review", "none"]
     # absent fitted file -> falls back to the recorded spec, still deterministic
