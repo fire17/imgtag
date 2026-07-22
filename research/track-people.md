@@ -13,14 +13,17 @@
 
 ---
 
-> **Checkpoint 2026-07-22 ~14:30Z.** Track COMPLETE and committed (`6342eae`): module +
-> shipped cascade + 16 tests (green) + 3 bench scripts + fetch script + this doc. All
-> numbers below are measured first-party on COCO val2017 and verified end-to-end through
-> the real CLI. Open items are coordination-only (not blocking): b-engine to register a
-> non-counting `match` tier (14:16Z-sanctioned) so per-image category chips can flag;
-> b-daemon to derive the four labels from the raw count sidecars at read. Darwin item
-> D-people-1 (distil a person-count head to lift one-person past 0.561) is logged, not owed.
-> Latency re-measure on the 🐧 target still pending (FLOPs is the trustworthy budget number).
+> **Checkpoint 2026-07-22 ~18:00Z.** Track COMPLETE, all-clear flip DONE (`17bc5f9`, from
+> `6342eae`): module + shipped cascade + 17 tests (green) + 3 bench scripts + fetch script
+> + this doc. Now emits the single `people.f32 [N,4]` multi-column sidecar + `match`-tier
+> chips into the manifest `content` bucket — verified end-to-end through the real engine
+> (`{match:{one-person:2,multi-person:1,one-face:1,multi-face:1}}` on the acceptance set).
+> Open items: (1) b-engine 1-line crash fix at `indexer.py:275` (`(roles.get(cat) or
+> ["p"])[0]`) — blocks the FULL multi-track index (all single-value tracks), people verified
+> in isolation until it lands; (2) b-daemon derives the 4 labels from `people.f32` cols 0/1
+> (validation npy handed over). Darwin D-people-1 (distil person-count head, lift one-person
+> past 0.561) logged, not owed. Latency: dev-Mac ~5 ms/img but still contended → re-measure
+> on the 🐧 target; FLOPs 0.688G is the trustworthy budget number.
 
 ---
 
