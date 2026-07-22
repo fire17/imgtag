@@ -166,13 +166,26 @@ def fitted_tau(category: str, model_id: str) -> dict:
         return {}
 
 
+def _moderation_json_cfg(category: str) -> dict:
+    """The category's entry in the bundled ``data/moderation.json`` — b-daemon's `spec`
+    base layer (τ/prompts declared there, before any per-model fit)."""
+    try:
+        cats = json.loads((_DATA / "moderation.json").read_bytes()).get("categories", {})
+        return cats.get(category, {}) or {}
+    except (OSError, ValueError):
+        return {}
+
+
 def resolve_track_cfg(category: str, model_id: str, spec: dict | None = None) -> dict:
-    """Effective tier config, FITTED-FILE-WINS precedence — byte-identical to b-daemon's
-    reader (search.py): spec < fitted(base_model) < fitted(model_id). This is why a τ
-    refit is free: derivation reads the CURRENT fitted file, never a value baked at index
-    time. `model_id` is the index manifest's model_id (the reader's own input)."""
+    """Effective tier config, FITTED-FILE-WINS precedence — byte-identical inputs to
+    b-daemon's reader (search.py): moderation.json spec < fitted(base_model) <
+    fitted(model_id). The recorded spec (head τ baked into the manifest at index time) is
+    an even-lower fallback so an index that predates a fitted file still derives. A τ refit
+    is free: derivation reads the CURRENT fitted file, never a value frozen at index time.
+    `model_id` is the index manifest's model_id (the reader's own input)."""
     base = model_id.rsplit("-", 1)[0] if model_id else ""
-    return {**(spec or {}), **fitted_tau(category, base), **fitted_tau(category, model_id)}
+    return {**(spec or {}), **_moderation_json_cfg(category),
+            **fitted_tau(category, base), **fitted_tau(category, model_id)}
 
 
 def dataset_flags(dataset: str, home: Path | None = None, snap=None) -> dict:
@@ -202,11 +215,10 @@ def derive_tiers(scores, spec: dict) -> list[str]:
     Bands are read from the spec, highest first; a score below every band is "none",
     and NaN (not scored) is "unknown" rather than a silently-passing "none".
     """
-    bands = [(t, float(spec[k])) for t, k in
-             (("alert", "tau_alert"), ("violation", "tau_violation"), ("review", "tau_review"))
-             if spec.get(k) is not None]
-    if not bands and spec.get("tau") is not None:  # single-threshold spec
-        bands = [("violation", float(spec["tau"]))]
+    def _tau_of(tier):  # byte-identical to b-daemon's tau_of: tau_<tier>, or `tau` for violation
+        return spec.get(f"tau_{tier}", spec.get("tau") if tier == "violation" else None)
+
+    bands = [(t, float(_tau_of(t))) for t in ("alert", "violation", "review") if _tau_of(t) is not None]
     bands.sort(key=lambda b: -b[1])
     out = []
     for v in np.asarray(scores, np.float32).reshape(-1):

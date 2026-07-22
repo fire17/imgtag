@@ -491,9 +491,11 @@ def cmd_track(args) -> int:
     if args.action == "recount":
         # ADR-15 T1: re-derive stored counts from the sidecars under CURRENT fitted tau —
         # no re-embed, no re-score. Fixes indexes whose counts were empty at index time.
+        # recount takes NO category, so its positional names the dataset: `recount <ds>`.
         from .core.indexer import track_recount
 
-        names = [args.dataset] if args.dataset else store.list_datasets()
+        target = args.dataset or args.category
+        names = [target] if target else store.list_datasets()
         res = [track_recount(ds) for ds in names]
         _out(args, {"results": res, "tookMs": round((time.perf_counter() - t0) * 1000, 2)},
              "\n".join(f"{r['dataset']}: " + _moderation_line(r["moderation"]) for r in res))
