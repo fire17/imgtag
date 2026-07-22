@@ -395,8 +395,18 @@ class LoopbackHTTPServer(ThreadingHTTPServer):
 # ---------------------------------------------------------------- lifecycle
 
 
+def _text_ttl_watch(d: "Daemon", ttl: float) -> None:
+    """ADR-5 (revised on measured RSS): the DAEMON stays up; only the text tower is
+    evicted after `ttl` idle seconds. Never an idle-exit — that is immich's sin."""
+    while not d.stop.wait(min(ttl / 4, 30.0)):
+        be = d.searcher._backend
+        if be is not None and d.searcher.last_query and time.time() - d.searcher.last_query > ttl:
+            be.release_text()
+            d.searcher.last_query = 0.0
+
+
 def serve(home: Path | None = None, tcp: int | None = None, backend: str | None = None,
-          log=print) -> int:
+          log=print, text_ttl: float = 0.0) -> int:
     """Run the daemon. Returns a process exit code (3 = another instance holds the lock)."""
     home = home or imgtag_home()
     home.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -442,6 +452,8 @@ def serve(home: Path | None = None, tcp: int | None = None, backend: str | None 
     log(f"imgtag daemon {VERSION} pid={os.getpid()} socket={sock_p}"
         + (f" http=127.0.0.1:{port}" if port else ""))
 
+    if text_ttl > 0:
+        threading.Thread(target=_text_ttl_watch, args=(d, text_ttl), daemon=True).start()
     threads = [threading.Thread(target=s.serve_forever, kwargs={"poll_interval": 0.2}, daemon=True)
                for s in servers]
     for t in threads:
@@ -548,10 +560,13 @@ def main(argv=None) -> int:
     ap.add_argument("--backend", default=None, help="preload this model backend by name")
     ap.add_argument("--idle-timeout", type=float, default=0.0,
                     help="0 = never exit (ADR-13 default; model_ttl is the proven anti-pattern)")
+    ap.add_argument("--text-ttl", type=float, default=0.0, metavar="SECONDS",
+                    help="release the text tower after SECONDS idle (ADR-5 revised: 0 = never "
+                         "on desktop, 300 on the 8GB server). The daemon stays up either way.")
     a = ap.parse_args(argv)
     if a.idle_timeout:
         print("--idle-timeout is accepted but ignored: ADR-13 pins the default at 0", file=sys.stderr)
-    return serve(a.home, a.tcp, a.backend)
+    return serve(a.home, a.tcp, a.backend, text_ttl=a.text_ttl)
 
 
 if __name__ == "__main__":

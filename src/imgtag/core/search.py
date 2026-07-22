@@ -148,6 +148,7 @@ class Searcher:
         self._snaps: dict[str, tuple[tuple, object]] = {}
         self._tags: dict[str, TagTable | None] = {}
         self._qvec = lru_cache(maxsize=cache)(self._embed_uncached)
+        self.last_query = 0.0  # for the daemon's --text-ttl eviction (ADR-5, revised)
 
     # -- resources -------------------------------------------------
     def _manifest_stamp(self, dataset: str) -> tuple:
@@ -306,6 +307,7 @@ class Searcher:
     def search(self, query: str, dataset: str | None = None, k: int = 50, strict: bool = False) -> dict:
         """Search one dataset, or every dataset on disk when ``dataset`` is None."""
         t0 = time.perf_counter()
+        self.last_query = time.time()
         names = [dataset] if dataset else list_datasets(self.home)
         hits: list[dict] = []
         indexed, gated, best_text = 0, False, 0.0

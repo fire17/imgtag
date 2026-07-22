@@ -229,3 +229,20 @@ def test_search_while_appending_stays_consistent(live):
     assert counts and max(counts) >= 30 and counts == sorted(counts)  # never goes backwards
     st, r = get(live, "/api/search?q=cat&dataset=d1&k=100")
     assert r["coverage"]["indexed"] == 54
+
+
+def test_text_ttl_releases_the_tower_but_not_the_daemon(live):
+    """ADR-5 (revised): --text-ttl evicts the text tower only; the daemon stays up."""
+    d = D.Handler.daemon
+    released = []
+    d.searcher._backend.release_text = lambda: released.append(True)
+    d.searcher.last_query = time.time() - 100
+    t = threading.Thread(target=D._text_ttl_watch, args=(d, 1.0), daemon=True)
+    t.start()
+    for _ in range(40):
+        if released:
+            break
+        time.sleep(0.05)
+    assert released, "text tower was never released"
+    st, _ = get(live, "/api/hello")
+    assert st == 200  # daemon still serving
