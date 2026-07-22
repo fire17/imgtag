@@ -152,20 +152,46 @@ def read_track(dataset: str, category: str, home: Path | None = None, manifest: 
     return np.memmap(p, np.float32, "r", shape=shape)
 
 
+_DATA = Path(__file__).resolve().parent.parent / "data"
+
+
+def fitted_tau(category: str, model_id: str) -> dict:
+    """Per-MODEL fitted thresholds (TRACKS.md T3): tau is per-model, so it lives BESIDE
+    the spec in ``data/moderation/<category>-<model_id>.json`` — {tau, tau_<tier>, platt,
+    calibration, scorer}. Absent = the track is unfitted for that model. Shared with
+    b-daemon's reader so store-side and daemon-side derivation cannot split-brain."""
+    try:
+        return json.loads((_DATA / "moderation" / f"{category}-{model_id}.json").read_bytes())
+    except (OSError, ValueError):
+        return {}
+
+
+def resolve_track_cfg(category: str, model_id: str, spec: dict | None = None) -> dict:
+    """Effective tier config, FITTED-FILE-WINS precedence — byte-identical to b-daemon's
+    reader (search.py): spec < fitted(base_model) < fitted(model_id). This is why a τ
+    refit is free: derivation reads the CURRENT fitted file, never a value baked at index
+    time. `model_id` is the index manifest's model_id (the reader's own input)."""
+    base = model_id.rsplit("-", 1)[0] if model_id else ""
+    return {**(spec or {}), **fitted_tau(category, base), **fitted_tau(category, model_id)}
+
+
 def dataset_flags(dataset: str, home: Path | None = None, snap=None) -> dict:
     """Derive the per-image tier view from the stored SCORE sidecars (ADR-15 T1).
 
-    Flags are no longer stored — they are computed here from raw scores and the tier
-    spec recorded in the manifest, so a threshold change re-derives for free. Returns
+    Flags are no longer stored — they are computed here from raw scores and the CURRENT
+    fitted thresholds (fitted file → recorded spec), so a threshold change re-derives for
+    free and store-side matches the daemon's live derivation. Returns
     ``{category: {"scores": memmap, "tiers": [...]}}`` for every scored track.
     """
     snap = snap or open_snapshot(dataset, home)
-    specs = ((snap.manifest.get("tracks_spec") or {}).get("tiers")) or {}
+    recorded = ((snap.manifest.get("tracks_spec") or {}).get("tiers")) or {}
+    model_id = snap.manifest.get("model_id", "")
     out = {}
     for cat, col in snap.tracks.items():
         if col is None:
             continue
-        out[cat] = {"scores": col, "tiers": derive_tiers(col, specs.get(cat, {}))}
+        cfg = resolve_track_cfg(cat, model_id, recorded.get(cat, {}))
+        out[cat] = {"scores": col, "tiers": derive_tiers(col, cfg)}
     return out
 
 

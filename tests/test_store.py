@@ -269,3 +269,45 @@ def test_track_sidecar_header_is_the_read_authority(tmp_path):
     # spec_sha is order-independent so both writer and reader hash identically
     assert meta["spec_sha"] == store.spec_sha({"tau_review": 0.2, "scorer": "marqo-384",
                                                "tau_violation": 0.5, "model_sha": "a" * 64})
+
+
+def test_fitted_tau_wins_over_recorded_spec(tmp_path, monkeypatch):
+    """P1-2: derivation must read the CURRENT fitted file (fitted wins), not a τ baked at
+    index time — the store-side/daemon-side split-brain that made every weapons row 'none'."""
+    import json as _json
+
+    data = tmp_path / "data" / "moderation"
+    data.mkdir(parents=True)
+    (data.parent / "moderation").mkdir(exist_ok=True)
+    monkeypatch.setattr(store, "_DATA", tmp_path / "data")
+    # a fitted file with a real threshold; base model id = "m" (from "m-fp32".rsplit)
+    (data / "weapons-m.json").write_text(_json.dumps(
+        {"category": "weapons", "tau_violation": 0.8, "tau_review": 0.1, "calibration": "fitted"}))
+
+    cfg = store.resolve_track_cfg("weapons", "m-fp32", spec={"tau_violation": 0.0})  # spec loses
+    assert cfg["tau_violation"] == 0.8 and cfg["tau_review"] == 0.1
+    # a score above the fitted violation tau derives 'violation', not 'none'
+    assert store.derive_tiers([0.99, 0.5, 0.05], cfg) == ["violation", "review", "none"]
+    # absent fitted file -> falls back to the recorded spec, still deterministic
+    assert store.resolve_track_cfg("weapons", "other", spec={"tau_violation": 0.3})["tau_violation"] == 0.3
+
+
+def test_dataset_flags_uses_fitted_tau(tmp_path, monkeypatch):
+    import json as _json
+
+    class M:
+        model_id = "m-fp32"
+        model_sha = "0" * 64
+        dim = 8
+
+    data = tmp_path / "data" / "moderation"
+    data.mkdir(parents=True)
+    monkeypatch.setattr(store, "_DATA", tmp_path / "data")
+    (data / "weapons-m.json").write_text(_json.dumps({"tau_violation": 0.5, "tau_review": 0.1}))
+
+    with store.Writer("ds", M(), home=tmp_path) as w:
+        e, r = _rows(3)
+        w.append(e, r, tracks={"weapons": np.array([0.99, 0.2, 0.01], np.float32)})
+    # manifest recorded NO spec (tracks_spec absent) — fitted file must still drive tiers
+    tiers = store.dataset_flags("ds", tmp_path)["weapons"]["tiers"]
+    assert tiers == ["violation", "review", "none"], tiers

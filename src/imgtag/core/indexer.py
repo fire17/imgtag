@@ -901,3 +901,61 @@ def _write_track_column(dataset: str, category: str, scores: np.ndarray, home=No
     finally:
         fcntl.flock(fd, fcntl.LOCK_UN)
         os.close(fd)
+
+
+def track_recount(dataset: str, home: Path | None = None) -> dict:
+    """Re-derive the stored moderation/content COUNTS from the score sidecars (ADR-15 T1).
+
+    Pure read-side: no image is re-embedded and no track is re-scored — tiers are derived
+    from the raw columns under the CURRENT fitted thresholds, then the manifest's
+    moderation (enforcement) + content buckets are rewritten atomically under the writer
+    lock. This is what makes the user's stored batch summaries survive a τ refit; a fit
+    that was empty at index time (weaponprobe, tracks_spec: null) fills in the moment its
+    fitted file lands, with zero recompute.
+    """
+    import fcntl
+
+    from .store import dataset_dir, dataset_flags, open_snapshot
+
+    snap = open_snapshot(dataset, home)
+    flags = dataset_flags(dataset, home, snap)
+    counts: dict[str, dict] = {}
+    for cat, d in flags.items():
+        for tier in d["tiers"]:
+            if tier in ("unknown", "none"):
+                continue
+            counts.setdefault(tier, {})
+            counts[tier][cat] = counts[tier].get(cat, 0) + 1
+    enf, content = split_tiers(counts)
+    stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+    d = dataset_dir(dataset, home)
+    fd = os.open(d / ".writer.lock", os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        os.close(fd)
+        from .store import LockedError
+
+        raise LockedError(f"{dataset} is being written — recount refused") from None
+    try:
+        man = json.loads((d / "manifest.json").read_bytes())
+        man["moderation"] = {"counts": merge_counts(enf), "schema": "ADR-14",
+                             "calibration": "unfitted", "enforcement_ready": False, "updated": stamp}
+        if content:
+            man["content"] = {"counts": accumulate({}, content), "tiers": list(CONTENT_TIERS),
+                              "updated": stamp}
+        tmp = d / "manifest.json.tmp"
+        tmp.write_text(json.dumps(man, indent=1))
+        os.replace(tmp, d / "manifest.json")
+        dfd = os.open(d, os.O_RDONLY)   # the rename must be durable (ADR-6 step 7)
+        try:
+            os.fsync(dfd)
+        finally:
+            os.close(dfd)
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+    return {"dataset": dataset, "total": snap.count,
+            "moderation": merge_counts(enf), "content": accumulate({}, content),
+            "tracks": sorted(flags)}
