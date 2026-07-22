@@ -1,7 +1,7 @@
 {
  "version": 2,
  "policy": "ADR-14 two-tier moderation (user ruling 2026-07-22)",
- "note": "Each category carries TWO prompt sets. `violation` = the policy breach itself (human nudity/explicit, REAL weapons, illegal drugs and paraphernalia). `review` = the look-alike a human should judge (swimwear/lingerie, toy or replica weapons, tobacco/vape). `negatives` are subtracted from BOTH and exist to kill the true false-positive class: mannequins, statues, sculptures and other non-person figures never flag. Tracks are PROMPT SETS, not tag lookups — the 2177-tag vocabulary has no nudity concept at all, only clothing, and a swimsuit is not nudity.",
+ "note": "Each category carries TWO prompt sets. `violation` = the policy breach itself (human nudity/explicit, REAL weapons, illegal drugs and paraphernalia). `review` = the look-alike a human should judge (swimwear/lingerie, toy or replica weapons, tobacco/vape). `negatives` are subtracted from BOTH and exist to kill the true false-positive class: mannequins, statues, sculptures and other non-person figures never flag. Tracks are PROMPT SETS, not tag lookups \u2014 the 2177-tag vocabulary has no nudity concept at all, only clothing, and a swimsuit is not nudity.",
  "enforcement_ready": false,
  "categories": {
   "nudity": {
@@ -59,28 +59,110 @@
   "drugs": {
    "label": "drugs / drug paraphernalia",
    "violation": [
-    "illegal drugs",
-    "cocaine powder arranged in lines",
-    "a syringe used for injecting drugs",
     "marijuana buds",
-    "a bong for smoking cannabis",
-    "pills spilled out as recreational drugs"
+    "a cannabis plant with leaves and buds",
+    "a bag of marijuana buds",
+    "a jar of cannabis buds",
+    "a grinder full of ground marijuana",
+    "a person smoking a marijuana joint",
+    "a rolled joint and rolling papers",
+    "a glass bong for smoking marijuana",
+    "a glass bong with a bowl and a stem",
+    "a glass pipe for smoking drugs",
+    "a crack pipe",
+    "a meth pipe with smoke",
+    "aluminium foil with burnt drug residue",
+    "lines of white powder cocaine on a mirror with a rolled banknote",
+    "a pile of white powder drugs on a table",
+    "small plastic baggies of white powder",
+    "a digital scale weighing white powder in a bag",
+    "a brick of packaged cocaine",
+    "a pile of colorful ecstasy pills",
+    "loose pills scattered on a table next to a plastic baggie",
+    "recreational drug pills in a plastic bag",
+    "sheets of LSD blotter tabs",
+    "a syringe with a spoon and a lighter for heroin",
+    "a used needle and drug injection kit",
+    "a syringe and a tourniquet on an arm",
+    "dried psilocybin magic mushrooms",
+    "a bag of dried magic mushrooms",
+    "drug paraphernalia laid out on a table",
+    "illegal drugs and drug equipment"
    ],
    "review": [
     "a person smoking a cigarette",
-    "a person vaping an electronic cigarette",
+    "a lit cigarette in an ashtray",
     "a cigar",
-    "a hookah water pipe",
-    "an ashtray full of cigarette butts",
-    "rolling papers and tobacco"
+    "an e-cigarette vape pen",
+    "a hookah water pipe with shisha"
    ],
    "negatives": [
-    "a pharmacy shelf of packaged medicine",
-    "medical equipment in a hospital",
-    "a person drinking coffee",
-    "a chemistry laboratory",
-    "steam rising from a hot drink"
-   ]
+    "a photograph of a scene",
+    "a photo of an ordinary everyday object",
+    "a person",
+    "an indoor room",
+    "an outdoor landscape",
+    "food on a plate",
+    "an animal",
+    "a vehicle",
+    "fresh snow on the ground",
+    "a snowy mountain slope",
+    "sugar spilled on a kitchen counter",
+    "flour on a baking table",
+    "salt in a bowl",
+    "baking soda",
+    "chalk dust on a blackboard",
+    "spices in small bowls",
+    "plumbing pipes on a wall",
+    "a bathroom with tiles",
+    "electrical cables and wires",
+    "laboratory glassware",
+    "a green houseplant in a pot",
+    "fresh basil and parsley herbs",
+    "a leafy green plant",
+    "a fern",
+    "loose leaf tea",
+    "a bowl of edible mushrooms",
+    "incense sticks burning",
+    "a birthday cake with lit candles",
+    "a campfire",
+    "a barbecue grill with smoke"
+   ],
+   "policy_neighbours": [
+    "a pharmacy shelf with medicine boxes",
+    "a prescription pill bottle",
+    "a medicine cabinet with vitamins and supplements",
+    "a doctor giving a vaccine injection in a clinic",
+    "an insulin pen for diabetes",
+    "a medical syringe on a sterile tray",
+    "a first aid kit",
+    "a glass of beer or wine"
+   ],
+   "templates": [
+    "a photo of {}.",
+    "a close-up photo of {}.",
+    "{}"
+   ],
+   "scorer": "margin",
+   "platt": [
+    105.2162,
+    -6.6182
+   ],
+   "tau": 0.0191,
+   "tau_review": 0.0316,
+   "calibration": "proxy-fitted",
+   "enforcement_ready": false,
+   "spec_sha": "7e950ff6eac4bc75",
+   "fit": {
+    "model": "pecore-s16-384-fp32",
+    "feature": "margin = max(positive concepts) - max(background concepts)",
+    "corpus": "5000 COCO val2017 + 328 Unsplash keyword-probe images",
+    "violation": "AP 0.726 \u00b7 recall .944 at 1% FP \u00b7 fitted on 18 hand-verified drug images vs 5145 negatives. tau=0.0191 \u2192 18/18 recall, 79/5145 (1.54%) flagged.",
+    "review": "WEAK AND SAID SO: tobacco recall at a 1% FP budget is 0.17 (LVIS smoking labels) / 0.15 (Unsplash smoking photos). A cigarette is usually a 20-pixel object and whole-image embeddings do not see it.",
+    "caveat": "small positive sets (18 violation / 36 review). Wide-CI estimates on ONE corpus, not a benchmark. Recall on cocaine/heroin/meth imagery specifically is UNMEASURED \u2014 no labelled image of it exists in any corpus we may use."
+   },
+   "policy_questions": 10
   }
- }
+ },
+ "note_drugs": "drugs: `policy_neighbours` are scored for EXPLANATION ONLY and must never be subtracted \u2014 measured, subtracting them collapses AP 0.58 to 0.04 (a clinical syringe is visually identical to a drug syringe). See research/track-drugs.md."
 }
