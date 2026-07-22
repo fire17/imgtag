@@ -19,5 +19,6 @@
 | D8 | CoreML/accel opt-in lane for Macs | rclip CoreML 180 img/s reference; CPU-only law keeps it opt-in | feature |
 | D9 | Real-server bench run (locks all 🐧 budgets) | LOCK LAW: no 🐧 locks on proxy numbers | validation |
 | D10 | git filter-repo history rewrite (611MB) at full quiescence, pre-publish | weights-in-history debt (field log 11:48Z) | hygiene |
+| D-violence-1 | violence-track residual FP + optional distilled teacher | intimate/embracing poses fire the "throat-grab" concept (CLIP pose confusion) — the top violation-tier FPs are couples embracing (track-violence.md §3c "residual"). Fix path when labelled data exists: distil a tiny embedding head from a permissive teacher — jaranohaal/vit-base-violence-detection (Apache, fights-only) or LAION violence_detection_*.npy (MIT, unvalidated); gore has NO permissive published-metric teacher (research/violence-models.md §6) | quality/track |
 
 > 2026-07-22: seeded by conductor pre-loop.
