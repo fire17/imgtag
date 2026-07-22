@@ -18,6 +18,7 @@ from __future__ import annotations
 import fcntl
 import json
 import os
+import re
 import signal
 import threading
 import time
@@ -184,6 +185,10 @@ class Writer:
         self.dataset = dataset
         self.model = model
         self.dir = dataset_dir(dataset, home)
+        if job_id and not re.fullmatch(r"[0-9A-Za-z_-]{1,32}", job_id):
+            # the id becomes a FILENAME (shard-<id>-0000.f32) — never let a caller's
+            # string reach the filesystem unchecked
+            raise ValueError(f"invalid job_id {job_id!r}: expected [0-9A-Za-z_-]{{1,32}}")
         self.job_id = job_id or uuid.uuid4().hex[:8]
         self.name = f"shard-{self.job_id}-0000.f32"
         self._buf_e: list[np.ndarray] = []

@@ -259,8 +259,8 @@ def preprocess_image(im: Image.Image, size: int, squash: bool = True, resample=I
     s = size / min(w, h)
     im = im.resize((max(size, round(w * s)), max(size, round(h * s))), resample)
     w, h = im.size
-    l, t = (w - size) // 2, (h - size) // 2
-    return np.asarray(im.crop((l, t, l + size, t + size)), np.uint8)
+    left, top = (w - size) // 2, (h - size) // 2
+    return np.asarray(im.crop((left, top, left + size, top + size)), np.uint8)
 
 
 def _embed_output(sess) -> str:

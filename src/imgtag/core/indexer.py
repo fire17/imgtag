@@ -374,7 +374,8 @@ def index(
             for q in (task_q, ready_q, free_q):
                 q.close()
                 q.join_thread()
-            del slab
+            slab = None  # release the shm export WITHOUT unbinding the name: `del` empties
+            # flush_batch's closure cell, so any future flush-on-abort would NameError
             shm.close()
             shm.unlink()  # always, in a finally (ADR-11 segment hygiene)
             if on_progress:

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import sys
 import time
@@ -237,8 +238,30 @@ def cmd_manage(args) -> int:
         _out(args, s, f"reindexed {s['indexed']} images from {root} ({s['img_s']} img/s)")
     elif args.action == "delete":
         d = store.dataset_dir(args.dataset, home)
+        # A delete racing an index job must be UNAMBIGUOUS: refuse with the documented
+        # dataset-locked code rather than delete bytes a live (or queued) writer is about
+        # to recreate — that would silently undo the user's delete and leave orphans.
+        live = next((j for j in list_jobs()
+                     if j.get("dataset") == args.dataset and j.get("state") in ("queued", "running")), None)
+        if live:
+            raise store.LockedError(
+                f"{args.dataset} has an active job {live['job_id']} ({live['state']}) — "
+                f"wait for it to finish, then delete"
+            )
         if not d.exists():
             raise store.UnknownDatasetError(args.dataset)
+        lock = d / ".writer.lock"
+        if lock.exists():  # kernel-owned truth, no pid heuristics (ADR-6)
+            import fcntl
+
+            fd = os.open(lock, os.O_RDWR)
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            except OSError:
+                raise store.LockedError(f"{args.dataset} is being written right now — delete refused") from None
+            finally:
+                os.close(fd)
         freed = _dir_bytes(d)
         shutil.rmtree(d)  # leaves 0 orphan bytes: everything lives under this dir (B20)
         _out(args, {"dataset": args.dataset, "deleted": True, "freedBytes": freed,
@@ -432,7 +455,9 @@ def build_parser() -> argparse.ArgumentParser:
     i.add_argument("dataset", nargs="?", help="dataset slug (defaults to the folder name)")
     i.add_argument("--dataset", dest="dataset_flag")
     i.add_argument("--wait", action="store_true", help="run in the foreground instead of returning a job id")
-    i.add_argument("--job-id", dest="job_id", help=argparse.SUPPRESS)
+    i.add_argument("--job-id", dest="job_id", metavar="ID",
+                   help="use this job id instead of minting one (the daemon mints ids so it "
+                        "can answer POST /api/index inside B20's 500ms); [0-9A-Za-z_-]{1,32}")
     i.add_argument("--model")
     i.add_argument("--full-speed", action="store_true")
     i.add_argument("--no-recursive", action="store_true")
