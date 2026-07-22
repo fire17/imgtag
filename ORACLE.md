@@ -500,6 +500,8 @@ highest-bar protocol — verbatim vision, budgets as tests, honest verification,
   weights in defaults or published artifacts.
 - Every spawned agent: explicit non-Fable model + effort; MODEL line first in reports.
 - `git add -A` is FORBIDDEN in this repo — explicit paths only (784MB lesson, field log 11:48Z).
+- Bare `git stash` is FORBIDDEN in the shared worktree — it sweeps EVERY lane's uncommitted
+  work (13:38Z incident). Bisect by copying your files aside or `git stash push -- <your files>` only.
 - Nothing leaves the machine without fire17's explicit confirmation (registry law #2).
 
 ## 7. Escalation contract (for every worker on this project)
@@ -556,6 +558,13 @@ label, or to compare a dev-machine number against a target-profile (🐧) budget
   params×4B arithmetic) verified by ORT load+forward. LAW: fetch validation must include
   expected-size-or-load-test — ">1MB and binary" passes truncated files. SHA256SUMS.fp32-
   verified is the new baseline in both dirs.
+- 2026-07-22 13:38Z · track-nudity ran bare `git stash` in the shared worktree — swept 15
+  files across lanes (~4 min blast). Its recovery was exemplary: restored the 9 whose
+  worktree copies were clean, REFUSED to overwrite the 3 re-modified since (indexer.py,
+  drugs.py, uv.lock — live edits), preserved stash@{0} as sole copy, reported immediately
+  with exact recovery commands. New invariant added (§6). Silver lining: the bisect
+  exposed that test_meta_moderation hard-codes the 3-category world — the 100-track
+  scaling law arriving in test form.
 - 2026-07-22 13:30Z · 🚨 RULE-4 TRIPWIRE FIRED: track-sports' MODEL line read
   claude-fable-5 DESPITE an explicit model:"opus" at spawn — the harness has drifted
   model overrides all session (haiku→opus4.8, opus→opus4.6, opus→FABLE). Agent stopped
