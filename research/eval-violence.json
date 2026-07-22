@@ -1,0 +1,639 @@
+{
+ "model": "pecore-s16-384",
+ "law": "FP-side only; no violence corpus on this machine",
+ "coco": {
+  "n": 5000,
+  "margin_q": {
+   "p50": -0.0075,
+   "p90": 0.0326,
+   "p95": 0.0441,
+   "p99": 0.0656,
+   "p995": 0.0709,
+   "p999": 0.0874,
+   "max": 0.114
+  },
+  "p_q": {
+   "p05": 0.0023,
+   "p50": 0.0501,
+   "p95": 0.4605,
+   "p99": 0.731,
+   "p999": 0.8982
+  },
+  "p_over_0.9": 0.001,
+  "tiers": {
+   "alert": 0.04,
+   "violation": 0.44,
+   "review": 5.24,
+   "n": 5000
+  }
+ },
+ "coco_caption_probe": {
+  "n_captioned": 5000,
+  "hits_1of5": 53,
+  "hits_2of5": 14,
+  "top": [
+   {
+    "file": "000000354307.jpg",
+    "margin": 0.114,
+    "caption": "A man badly beating laying unconscious near a nurse."
+   },
+   {
+    "file": "000000384136.jpg",
+    "margin": 0.0612,
+    "caption": "A woman points a hair drier like it is a gun."
+   },
+   {
+    "file": "000000566923.jpg",
+    "margin": 0.0482,
+    "caption": "A man covered in blood trying to destroy a fire hydrant."
+   },
+   {
+    "file": "000000322944.jpg",
+    "margin": 0.0454,
+    "caption": "An injured woman holding a teddy bear close to her chest"
+   },
+   {
+    "file": "000000258388.jpg",
+    "margin": 0.0451,
+    "caption": "A teenager shoots flames at a friend balancing on a skateboard."
+   },
+   {
+    "file": "000000234607.jpg",
+    "margin": 0.0447,
+    "caption": "A couple fighting each other over a wii remote control"
+   },
+   {
+    "file": "000000447611.jpg",
+    "margin": 0.0334,
+    "caption": "a knife being stuck into a laptop and stabbed"
+   },
+   {
+    "file": "000000473118.jpg",
+    "margin": 0.0316,
+    "caption": "A person kicking up on their skateboard at the top of a ramp."
+   },
+   {
+    "file": "000000043816.jpg",
+    "margin": 0.0299,
+    "caption": "A batter getting ready to hit his pitch."
+   },
+   {
+    "file": "000000190648.jpg",
+    "margin": 0.0297,
+    "caption": "a bed that looks like it has blood on it and a big hole in the paneling "
+   },
+   {
+    "file": "000000481582.jpg",
+    "margin": 0.0287,
+    "caption": "a group of people are with a horse in a stable"
+   },
+   {
+    "file": "000000217872.jpg",
+    "margin": 0.0284,
+    "caption": "A snowboarder hitting a trick on a mountain."
+   },
+   {
+    "file": "000000292456.jpg",
+    "margin": 0.0281,
+    "caption": "A man and a woman riding on a motorcycle are getting ready to hit the road."
+   },
+   {
+    "file": "000000392481.jpg",
+    "margin": 0.0266,
+    "caption": "A fighter jet plane ascending into the sky."
+   },
+   {
+    "file": "000000035279.jpg",
+    "margin": 0.0241,
+    "caption": "unable to see this image in this particular hit"
+   }
+  ]
+ },
+ "slices": {
+  "contact-sport": {
+   "alert": 0.0,
+   "violation": 0.38,
+   "review": 4.58,
+   "n": 262,
+   "mean_margin": -0.0108,
+   "max_margin": 0.0918,
+   "p_mean": 0.0922
+  },
+  "costume-horror": {
+   "alert": 0.0,
+   "violation": 0.34,
+   "review": 9.25,
+   "n": 292,
+   "mean_margin": -0.0047,
+   "max_margin": 0.0918,
+   "p_mean": 0.1185
+  },
+  "medical": {
+   "alert": 0.4,
+   "violation": 0.4,
+   "review": 5.67,
+   "n": 247,
+   "mean_margin": -0.0095,
+   "max_margin": 0.0918,
+   "p_mean": 0.104
+  },
+  "military": {
+   "alert": 0.26,
+   "violation": 0.26,
+   "review": 5.87,
+   "n": 392,
+   "mean_margin": -0.0086,
+   "max_margin": 0.0918,
+   "p_mean": 0.1014
+  },
+  "misc-hard": {
+   "alert": 0.23,
+   "violation": 0.4,
+   "review": 6.46,
+   "n": 1735,
+   "mean_margin": -0.0066,
+   "max_margin": 0.0918,
+   "p_mean": 0.1127
+  },
+  "protest": {
+   "alert": 0.0,
+   "violation": 0.0,
+   "review": 7.27,
+   "n": 110,
+   "mean_margin": -0.02,
+   "max_margin": 0.0601,
+   "p_mean": 0.0927
+  },
+  "red-liquid": {
+   "alert": 0.0,
+   "violation": 0.1,
+   "review": 2.54,
+   "n": 1024,
+   "mean_margin": -0.0131,
+   "max_margin": 0.078,
+   "p_mean": 0.0769
+  },
+  "team-sport": {
+   "alert": 0.0,
+   "violation": 0.0,
+   "review": 4.21,
+   "n": 214,
+   "mean_margin": -0.0178,
+   "max_margin": 0.0555,
+   "p_mean": 0.0747
+  }
+ },
+ "slice_tails": {
+  "contact-sport": [
+   {
+    "id": "KN-iHEzqvWE",
+    "margin": 0.0918,
+    "tier": "violation",
+    "why": "a man grabbing a woman by the throat",
+    "desc": "A couple is sharing a sweet kiss."
+   },
+   {
+    "id": "h3224rhY-P4",
+    "margin": 0.0631,
+    "tier": "review",
+    "why": "a person kicking someone who is on the ground",
+    "desc": "man in black and white camouflage jacket and blue denim jeans jumping on brown r"
+   },
+   {
+    "id": "GBWhJMxp-jY",
+    "margin": 0.0555,
+    "tier": "review",
+    "why": "a person pointing a gun at another person",
+    "desc": "Two people pose outdoors, one leaning on the other."
+   },
+   {
+    "id": "RB39JDOwvnI",
+    "margin": 0.0535,
+    "tier": "review",
+    "why": "a man grabbing a woman by the throat",
+    "desc": "A person rests their head on a rocky surface."
+   },
+   {
+    "id": "2jA_YoQuvaA",
+    "margin": 0.0526,
+    "tier": "review",
+    "why": "a person kicking someone who is on the ground",
+    "desc": "man jumping on rock beside lake"
+   }
+  ],
+  "costume-horror": [
+   {
+    "id": "KN-iHEzqvWE",
+    "margin": 0.0918,
+    "tier": "violation",
+    "why": "a man grabbing a woman by the throat",
+    "desc": "A couple is sharing a sweet kiss."
+   },
+   {
+    "id": "Oz7_usBqwuY",
+    "margin": 0.078,
+    "tier": "review",
+    "why": "a bleeding facial injury on a person",
+    "desc": "man portraying The Joker"
+   },
+   {
+    "id": "OjffNmVYBpE",
+    "margin": 0.0757,
+    "tier": "review",
+    "why": "a person with a bleeding head injury",
+    "desc": "woman with skull makeup"
+   },
+   {
+    "id": "eNoiv5h1O3o",
+    "margin": 0.074,
+    "tier": "review",
+    "why": "a person cowering in fear from an attacker",
+    "desc": "man with fire on his face"
+   },
+   {
+    "id": "OD9nNRAyVTY",
+    "margin": 0.0606,
+    "tier": "review",
+    "why": "a person kicking someone who is on the ground",
+    "desc": "person in grand canyon during daytime"
+   }
+  ],
+  "medical": [
+   {
+    "id": "KN-iHEzqvWE",
+    "margin": 0.0918,
+    "tier": "violation",
+    "why": "a man grabbing a woman by the throat",
+    "desc": "A couple is sharing a sweet kiss."
+   },
+   {
+    "id": "3gme3suB1_8",
+    "margin": 0.0837,
+    "tier": "alert",
+    "why": "a person shoving another person violently",
+    "desc": "Bare feet dip into flowing water."
+   },
+   {
+    "id": "N_G2Sqdy9QY",
+    "margin": 0.0707,
+    "tier": "review",
+    "why": "a person being bullied and pushed against a wall",
+    "desc": "woman and cat joining hands"
+   },
+   {
+    "id": "GBWhJMxp-jY",
+    "margin": 0.0555,
+    "tier": "review",
+    "why": "a person pointing a gun at another person",
+    "desc": "Two people pose outdoors, one leaning on the other."
+   },
+   {
+    "id": "2U4buf8lnBE",
+    "margin": 0.0546,
+    "tier": "review",
+    "why": "a person threatening someone with a weapon",
+    "desc": "Photographer silhouetted against a dusky sky."
+   }
+  ],
+  "military": [
+   {
+    "id": "KN-iHEzqvWE",
+    "margin": 0.0918,
+    "tier": "violation",
+    "why": "a man grabbing a woman by the throat",
+    "desc": "A couple is sharing a sweet kiss."
+   },
+   {
+    "id": "DkbWmcQIl3A",
+    "margin": 0.0664,
+    "tier": "review",
+    "why": "the aftermath of a violent attack with blood on the floor",
+    "desc": "man in black t-shirt and black pants standing on green grass field"
+   },
+   {
+    "id": "t9wX36U3BEs",
+    "margin": 0.0601,
+    "tier": "review",
+    "why": "riot police beating protesters with batons",
+    "desc": "group of men in black and gray helmet and helmet standing near black car during "
+   },
+   {
+    "id": "P3BwhD8sa6M",
+    "margin": 0.0589,
+    "tier": "alert",
+    "why": "a bloody wound on a person's body",
+    "desc": "brown wooden stick in body of water"
+   },
+   {
+    "id": "KmH8CHIK-rA",
+    "margin": 0.0561,
+    "tier": "review",
+    "why": "a person threatening someone with a weapon",
+    "desc": "man in gray jacket and black pants standing on brown wooden log"
+   }
+  ],
+  "misc-hard": [
+   {
+    "id": "KN-iHEzqvWE",
+    "margin": 0.0918,
+    "tier": "violation",
+    "why": "a man grabbing a woman by the throat",
+    "desc": "A couple is sharing a sweet kiss."
+   },
+   {
+    "id": "VxA3wqsHQ00",
+    "margin": 0.0853,
+    "tier": "violation",
+    "why": "a man grabbing a woman by the throat",
+    "desc": "couple on outdor"
+   },
+   {
+    "id": "7k1hBrAvK0w",
+    "margin": 0.0851,
+    "tier": "violation",
+    "why": "a person raising a fist to strike someone",
+    "desc": "person wearing black jacket"
+   },
+   {
+    "id": "3gme3suB1_8",
+    "margin": 0.0837,
+    "tier": "alert",
+    "why": "a person shoving another person violently",
+    "desc": "Bare feet dip into flowing water."
+   },
+   {
+    "id": "zRpfHuz1hUM",
+    "margin": 0.0801,
+    "tier": "review",
+    "why": "a person with a bleeding head injury",
+    "desc": "woman with red and blue face paint"
+   }
+  ],
+  "protest": [
+   {
+    "id": "t9wX36U3BEs",
+    "margin": 0.0601,
+    "tier": "review",
+    "why": "riot police beating protesters with batons",
+    "desc": "group of men in black and gray helmet and helmet standing near black car during "
+   },
+   {
+    "id": "GBWhJMxp-jY",
+    "margin": 0.0555,
+    "tier": "review",
+    "why": "a person pointing a gun at another person",
+    "desc": "Two people pose outdoors, one leaning on the other."
+   },
+   {
+    "id": "RB39JDOwvnI",
+    "margin": 0.0535,
+    "tier": "review",
+    "why": "a man grabbing a woman by the throat",
+    "desc": "A person rests their head on a rocky surface."
+   },
+   {
+    "id": "LgfyVnN-c40",
+    "margin": 0.0523,
+    "tier": "review",
+    "why": "riot police beating protesters with batons",
+    "desc": "group of police men walking on street"
+   },
+   {
+    "id": "7DdP7IaC5u0",
+    "margin": 0.0501,
+    "tier": "review",
+    "why": "a person threatening someone with a weapon",
+    "desc": "A hooded figure paints graffiti on a wall."
+   }
+  ],
+  "red-liquid": [
+   {
+    "id": "Oz7_usBqwuY",
+    "margin": 0.078,
+    "tier": "review",
+    "why": "a bleeding facial injury on a person",
+    "desc": "man portraying The Joker"
+   },
+   {
+    "id": "dn6JR6W7Jq4",
+    "margin": 0.0756,
+    "tier": "violation",
+    "why": "a man grabbing a woman by the throat",
+    "desc": "silhouette photography of woman standing at beach"
+   },
+   {
+    "id": "L6NIw3POnjA",
+    "margin": 0.062,
+    "tier": "review",
+    "why": "a child cowering from an adult raising a hand to hit them",
+    "desc": "shallow focus photo of person holding flare"
+   },
+   {
+    "id": "OD9nNRAyVTY",
+    "margin": 0.0606,
+    "tier": "review",
+    "why": "a person kicking someone who is on the ground",
+    "desc": "person in grand canyon during daytime"
+   },
+   {
+    "id": "GdGE2xwj7Pg",
+    "margin": 0.0546,
+    "tier": "review",
+    "why": "a person shoving another person violently",
+    "desc": "man holding dog leash with dog walking on the field"
+   }
+  ],
+  "team-sport": [
+   {
+    "id": "GBWhJMxp-jY",
+    "margin": 0.0555,
+    "tier": "review",
+    "why": "a person pointing a gun at another person",
+    "desc": "Two people pose outdoors, one leaning on the other."
+   },
+   {
+    "id": "zeNeAUwoJvs",
+    "margin": 0.0541,
+    "tier": "review",
+    "why": "a child cowering from an adult raising a hand to hit them",
+    "desc": "three kids standing beside concrete building"
+   },
+   {
+    "id": "ympe58UPxnU",
+    "margin": 0.0498,
+    "tier": "review",
+    "why": "a child cowering from an adult raising a hand to hit them",
+    "desc": "boy sitting on ball while staring at the ocean"
+   },
+   {
+    "id": "ZL4t9yucR_o",
+    "margin": 0.049,
+    "tier": "review",
+    "why": "a person being bullied and pushed against a wall",
+    "desc": "Shadows of two people are cast on a wall."
+   },
+   {
+    "id": "d8bq6a-uwKQ",
+    "margin": 0.0463,
+    "tier": "review",
+    "why": "a street fight between two men",
+    "desc": "Two people walk past a brightly lit japanese restaurant."
+   }
+  ]
+ },
+ "arbitration": {
+  "contact-sport": {
+   "alert_before": 0,
+   "alert_after": 0,
+   "violation_before": 1,
+   "violation_after": 1,
+   "n": 262
+  },
+  "costume-horror": {
+   "alert_before": 3,
+   "alert_after": 0,
+   "violation_before": 1,
+   "violation_after": 1,
+   "n": 292
+  },
+  "medical": {
+   "alert_before": 1,
+   "alert_after": 1,
+   "violation_before": 2,
+   "violation_after": 1,
+   "n": 247
+  },
+  "military": {
+   "alert_before": 1,
+   "alert_after": 1,
+   "violation_before": 1,
+   "violation_after": 1,
+   "n": 392
+  },
+  "misc-hard": {
+   "alert_before": 10,
+   "alert_after": 4,
+   "violation_before": 9,
+   "violation_after": 7,
+   "n": 1735
+  },
+  "protest": {
+   "alert_before": 0,
+   "alert_after": 0,
+   "violation_before": 0,
+   "violation_after": 0,
+   "n": 110
+  },
+  "red-liquid": {
+   "alert_before": 1,
+   "alert_after": 0,
+   "violation_before": 1,
+   "violation_after": 1,
+   "n": 1024
+  },
+  "team-sport": {
+   "alert_before": 0,
+   "alert_after": 0,
+   "violation_before": 0,
+   "violation_after": 0,
+   "n": 214
+  },
+  "coco": {
+   "alert_before": 6,
+   "alert_after": 2,
+   "violation_before": 25,
+   "violation_after": 22,
+   "n": 5000
+  }
+ },
+ "sweep": {
+  "0": {
+   "coco": 41.6,
+   "contact-sport": 33.97,
+   "costume-horror": 41.78,
+   "medical": 35.22,
+   "military": 36.22,
+   "misc-hard": 38.79,
+   "protest": 30.0,
+   "red-liquid": 28.91,
+   "team-sport": 27.57
+  },
+  "0.005": {
+   "coco": 35.92,
+   "contact-sport": 28.24,
+   "costume-horror": 34.59,
+   "medical": 28.34,
+   "military": 30.36,
+   "misc-hard": 32.22,
+   "protest": 27.27,
+   "red-liquid": 22.36,
+   "team-sport": 23.36
+  },
+  "0.01": {
+   "coco": 30.26,
+   "contact-sport": 23.28,
+   "costume-horror": 29.45,
+   "medical": 23.48,
+   "military": 25.26,
+   "misc-hard": 26.92,
+   "protest": 22.73,
+   "red-liquid": 17.48,
+   "team-sport": 19.16
+  },
+  "0.02": {
+   "coco": 19.84,
+   "contact-sport": 15.65,
+   "costume-horror": 19.52,
+   "medical": 17.41,
+   "military": 15.56,
+   "misc-hard": 18.44,
+   "protest": 16.36,
+   "red-liquid": 11.13,
+   "team-sport": 11.21
+  },
+  "0.03": {
+   "coco": 11.48,
+   "contact-sport": 8.4,
+   "costume-horror": 11.99,
+   "medical": 11.34,
+   "military": 9.95,
+   "misc-hard": 11.7,
+   "protest": 12.73,
+   "red-liquid": 6.25,
+   "team-sport": 7.48
+  },
+  "0.05": {
+   "coco": 3.08,
+   "contact-sport": 1.91,
+   "costume-horror": 3.42,
+   "medical": 2.83,
+   "military": 2.81,
+   "misc-hard": 3.57,
+   "protest": 4.55,
+   "red-liquid": 0.88,
+   "team-sport": 0.93
+  },
+  "0.075": {
+   "coco": 0.46,
+   "contact-sport": 0.38,
+   "costume-horror": 1.03,
+   "medical": 0.81,
+   "military": 0.26,
+   "misc-hard": 0.52,
+   "protest": 0.0,
+   "red-liquid": 0.2,
+   "team-sport": 0.0
+  },
+  "0.1": {
+   "coco": 0.02,
+   "contact-sport": 0.0,
+   "costume-horror": 0.0,
+   "medical": 0.0,
+   "military": 0.0,
+   "misc-hard": 0.0,
+   "protest": 0.0,
+   "red-liquid": 0.0,
+   "team-sport": 0.0
+  }
+ }
+}

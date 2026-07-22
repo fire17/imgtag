@@ -1,0 +1,305 @@
+# track-violence — the VIOLENCE / ABUSE moderation track
+
+> Mandate: VISION-ADDENDA 2026-07-22 13:29Z (verbatim) — *"and one track for general
+> violence or abuse"*. Defensive trust-and-safety tooling for the user's own public sites.
+> Policy: ORACLE ADR-14 (tiers) · ADR-15 / TRACKS.md (the scaling law) · ADR-3 (probability
+> space, background-margin experiment) · ADR-7 (no new runtime deps). Escalation: ORACLE §7.
+> Code: `src/imgtag/moderation/violence.py` · eval: `scripts/eval_violence.py` ·
+> tests: `tests/test_violence.py` · numbers: `research/eval-violence.json` (machine-written) ·
+> model survey: `research/violence-models.md`.
+>
+> **OPERATING POINT LAW — recall-first.** A missed assault reaches a public site; a false
+> flag costs one human glance. Thresholds are the smallest that hold the false-positive
+> budget, never max-F1.
+>
+> **EVAL DATA LAW — obeyed.** No graphic-violence corpus was downloaded to this machine.
+> Every number below labelled *measured* is first-party and comes from **safe** corpora
+> already on disk (COCO val2017 + Unsplash keyword slices), and therefore describes the
+> **FALSE-POSITIVE side only**. True-positive recall is **not reproduced here**; it is
+> cited from published model evaluations (`research/violence-models.md`) and labelled as
+> cited every time it appears. Nothing here is a recall claim.
+
+---
+
+## 0. The one-paragraph answer
+
+Violence rides the embeddings the index already computed — a prompt-ensemble background
+margin, one `[N,D]·[D,P]` matmul, **zero new FLOPs** — because the B25 dedicated-model
+budget is already ~25% spent by nudity and the model survey found **no permissively-licensed
+still-image violence/gore model with published metrics worth a second forward pass**
+(§6). Four banks and their arbitration are the whole design: a `SEVERE` gore bank (→
+`alert`), a `VIOLENT` bank of eight assault/abuse subcategories (→ `violation`), a
+`CONTEXT` bank of staged & clinical twins — halloween SFX, film gore, surgery, butchery —
+that is **never subtracted, only arbitrated** (→ `review`), and a subtracted `BACKGROUND`
+bank whose headline members are **contact sports** (boxing / martial arts / wrestling /
+rugby), lifted verbatim from `sports.py` so the two tracks share a concept space. Measured
+on 5,000 COCO images and 3,058 Unsplash confusables: **contact sports flag 0.00% alert /
+0.38% violation, boxing-and-martial-arts specifically flag 0% violation** (§3) — the
+classic false-positive class does not fire — while the detector ranks COCO's own most
+violent caption ("a man badly beating laying unconscious", margin 0.114) as the single
+highest of 5,000 images (§3b). τ is a false-positive budget, not a recall fit — no
+labelled positives exist here — so **`calibrated: false`, `enforcement_ready: false`**,
+permanently, until labelled ground truth exists on the target host. **Verdict: ship as a
+recall-first REVIEW QUEUE.**
+
+## 1. Approaches, ranked (what was tried, what won, what died)
+
+| # | Approach | Verdict | Evidence |
+|---|---|---|---|
+| 1 | **Prompt-ensemble background margin** over the existing embeddings — `max(bank) − max(BACKGROUND)`, 3 templates/concept | **SHIPPED** | one matmul, zero new models, zero new deps (ADR-7 clean), runs on the 8GB target unchanged (ADR-10); contact-sport violation FP 0.38%, COCO 0.44% (§3) |
+| 2 | Four banks with **tier arbitration** (severe/violent must beat CONTEXT by TIER_MARGIN or demote to review) | **SHIPPED — the anti-defect** | halloween-SFX alert flags demote 3→0, COCO alert 6→2, violation 25→22 (§4). Reuses the drugs-lane arbiter that killed the vape-exhale-as-violation bug |
+| 3 | **CONTEXT twins subtracted** (halloween/surgery in the BACKGROUND bank) | **DEAD END — the drugs-lane lesson, applied forward** | subtracting a concept visually identical to the positive subtracts the signal (drugs measured AP 0.58→0.04 on clinical syringes). Fake blood *is* blood; it must arbitrate, not subtract |
+| 4 | A dedicated per-image violence model (nudity's path) | **Rejected for v1** | B25 budget ~25% spent; and the survey found no permissive still-image model with published metrics (§6). Logged as the distillation-teacher darwin item, not a v1 dependency |
+| 5 | A trained logistic head on labelled positives (the weapons-lane path) | **Not possible here** | zero labelled violence positives may be fetched (EVAL DATA LAW). A head cannot be fitted or validated on this machine |
+
+## 2. What was measurable, and what was not — plainly
+
+| Question | Status | Number |
+|---|---|---|
+| Does it over-fire on **contact sports** (the classic FP class)? | **MEASURED** (262 Unsplash imgs) | **0.00% alert · 0.38% violation · 4.58% review**; boxing/boxer/martial-arts specifically **0% violation** (§3) |
+| Does it over-fire on other confusables (protest, red liquids, costume gore, military)? | **MEASURED** (2,796 Unsplash imgs) | violation ≤0.4% every slice; peaceful protest & team sport **0% violation** (§3) |
+| How often does it cry wolf on ordinary photos? | **MEASURED** (5,000 COCO val2017) | **0.04% alert · 0.44% violation · 5.24% review** at the shipped τ (§3) |
+| Does the score distribution saturate (b-daemon's rolled-back defect)? | **MEASURED** | **NO** — only 0.10% of COCO maps above p=0.9; p50 0.05, p95 0.46, p99 0.73 (§5) |
+| Does the CONTEXT arbiter earn its keep? | **MEASURED** (ablation) | halloween alert 3→0, misc-hard alert 10→4 / violation 9→7, COCO alert 6→2 (§4) |
+| Does it find depicted violence (assault, gore, abuse)? | **NOT MEASURED — no labelled violence image may be fetched here** | weak proxy only: it ranks COCO's most-violent *caption* image #1 of 5,000 (§3b) |
+| Published true-positive metrics for the category? | **CITED, not reproduced** | see §6 + `research/violence-models.md` |
+
+**The structural finding, honestly:** this is the same whole-image CLIP property the drugs
+lane found. The detector sees **subjects, not objects** — a scene *about* an assault scores;
+a 20-pixel scuffle in a wide shot does not. It also inherits CLIP's **pose confusions**: the
+strongest false positives are couples embracing (fired on "a man grabbing a woman by the
+throat") and horror-makeup portraits (fired on "a bleeding facial injury") — the latter
+correctly demoted to `review` by the CONTEXT arbiter, the former the honest residual FP
+class (§3c). No prompt engineering removed either; an object-level instrument would, and
+ADR-7 / the 8GB target rule that out for v1.
+
+## 3. Measured — the false-positive side (first-party)
+
+Corpus: **5,000 COCO val2017** (already embedded by the engine) + **3,058 unique Unsplash
+images** in eight confusable slices, built by joining `data/unsplash/keywords.tsv000` to the
+images on disk (`scripts/eval_violence.py`, model `pecore-s16-384-fp32`). Every flag below is
+a false positive (COCO and the confusable slices contain no depicted violence by
+construction — the swimwear-style caveat does not apply, these are sports/costume/medical
+photos).
+
+**Tier rates at the shipped τ** (alert τ=0.055 severe-margin · violation τ=0.071 · review τ=0.044):
+
+| slice | n | mean margin | max margin | alert % | violation % | review % |
+|---|---|---|---|---|---|---|
+| **COCO val2017** | 5000 | −0.0075 | 0.1140 | **0.04** | **0.44** | **5.24** |
+| **contact-sport** | 262 | −0.0108 | 0.0918 | **0.00** | **0.38** | 4.58 |
+| team-sport | 214 | −0.0178 | 0.0555 | 0.00 | **0.00** | 4.21 |
+| protest | 110 | −0.0200 | 0.0601 | 0.00 | **0.00** | 7.27 |
+| red-liquid | 1024 | −0.0131 | 0.0780 | 0.00 | 0.10 | 2.54 |
+| medical | 247 | −0.0095 | 0.0918 | 0.40 | 0.40 | 5.67 |
+| military | 392 | −0.0086 | 0.0918 | 0.26 | 0.26 | 5.87 |
+| costume-horror | 292 | −0.0047 | 0.0918 | **0.00** | 0.34 | 9.25 |
+| misc-hard | 1735 | −0.0066 | 0.0918 | 0.23 | 0.40 | 6.46 |
+
+### 3a. Contact sports — the required negative, per keyword (the brief's headline)
+
+The brief singles out boxing / martial-arts / rugby as *the* false-positive class. Measured
+per keyword (Unsplash slices, same head):
+
+| keyword | n | mean margin | max margin | alert % | **violation %** | review % |
+|---|---|---|---|---|---|---|
+| **boxing** | 38 | 0.0025 | 0.0918 | 0.0 | **2.6** (1 img) | 21.1 |
+| **boxer** | 126 | −0.0109 | 0.0455 | 0.0 | **0.0** | 0.8 |
+| **martial arts** | 107 | −0.0077 | 0.0631 | 0.0 | **0.0** | 6.5 |
+| karate | 30 | −0.0105 | 0.0327 | 0.0 | **0.0** | 0.0 |
+| judo | 24 | −0.0098 | 0.0360 | 0.0 | **0.0** | 0.0 |
+| wrestling | 20 | −0.0068 | 0.0490 | 0.0 | **0.0** | 15.0 |
+| fencing | 25 | −0.0036 | 0.0490 | 0.0 | **0.0** | 4.0 |
+| football | 99 | −0.0102 | 0.0555 | 0.0 | 0.0 | 8.1 |
+| hockey | 110 | −0.0236 | 0.0413 | 0.0 | 0.0 | 2.7 |
+| soccer | 87 | −0.0173 | 0.0555 | 0.0 | 0.0 | 3.4 |
+| basketball | 98 | −0.0141 | 0.0490 | 0.0 | 0.0 | 6.1 |
+
+**Boxing and martial arts flag 0% violation** (the single boxing "violation" is one
+outlier of 38, characterised in §3c). Review is the wide recall-first net — a boxing match
+with punching poses reasonably reaches a human queue, and the composition ruling (§7)
+exculpates it. **This is the falsification, on our own corpus, of "a violence detector will
+just call boxing a fight"** — because boxing lives in the subtracted BACKGROUND bank.
+
+### 3b. The closest thing to a true positive we may measure (COCO caption probe)
+
+COCO's five-captions-per-image are mined for violence words (same technique track-safety
+uses for danger; regex + a benign-context filter for "shooting a *photo*", "a *blood* orange").
+53 of 5,000 images carry ≥1/5 violence-word captions, 14 carry ≥2/5. The head **ranks the
+most violent of them at the very top of all 5,000**:
+
+| margin | file | caption |
+|---|---|---|
+| **+0.1140** (max of 5000) | 000000354307 | *"A man badly beating laying unconscious near a nurse."* |
+| +0.0612 | 000000384136 | *"A woman points a hair drier like it is a gun."* |
+| +0.0482 | 000000566923 | *"A man covered in blood trying to destroy a fire hydrant."* |
+| +0.0454 | 000000322944 | *"An injured woman holding a teddy bear close to her chest"* |
+| +0.0447 | 000000234607 | *"A couple fighting each other over a wii remote control"* |
+| +0.0334 | 000000447611 | *"a knife being stuck into a laptop and stabbed"* |
+
+This is **weak** TP evidence — captions, not verified violence labels, on a corpus curated to
+be benign — and it is offered as exactly that. But it is directionally real: the one image a
+human called *"badly beating … unconscious"* is the highest-margin image in the corpus.
+
+### 3c. The false-positive tail, characterised (by the corpora's own descriptions)
+
+Top slice scorers, named from their Unsplash `ai_description` (no image inspection needed):
+
+| margin | tier | fired concept | what it actually is |
+|---|---|---|---|
+| +0.0918 | violation | *grabbing a woman by the throat* | **"A couple is sharing a sweet kiss."** |
+| +0.0851 | violation | *raising a fist to strike someone* | "person wearing black jacket" |
+| +0.0837 | alert | *shoving another person violently* | "Bare feet dip into flowing water." |
+| +0.0801 | review | *bleeding head injury* | "woman with red and blue face paint" |
+| +0.0780 | review | *bleeding facial injury* | **"man portraying The Joker"** |
+| +0.0757 | review | *bleeding head injury* | **"woman with skull makeup"** |
+
+**The FP class is intimate/embracing poses and horror makeup.** Two couples embracing top the
+violation tier ("throat grab" and intimate poses are near-neighbours in CLIP space) — the
+honest residual, the class most worth re-checking if the operator ever supplies labels.
+Horror makeup (Joker, skull, face paint) is caught by the CONTEXT arbiter and correctly
+lands at **review, not violation** — the arbitration working. It is the reason the review
+queue must show a human the image and never auto-act.
+
+## 4. Measured — the arbitration ablation (does the CONTEXT bank earn its keep?)
+
+Flags **before → after** the CONTEXT demotion (a severe/violent hit that a staged/clinical
+concept explains as well or better, within TIER_MARGIN, demotes to `review`):
+
+| slice | alert before→after | violation before→after |
+|---|---|---|
+| COCO val2017 | 6 → **2** | 25 → **22** |
+| costume-horror | 3 → **0** | 1 → 1 |
+| misc-hard | 10 → **4** | 9 → **7** |
+| medical | 1 → 1 | 2 → **1** |
+| red-liquid | 1 → **0** | 1 → 1 |
+
+The arbiter removes two-thirds of costume-horror alert flags and a third of misc-hard alerts —
+exactly the halloween-SFX / fake-blood class it exists to catch — **without dropping the
+image** (a demoted flag lands at review, where ADR-14 says a human decides). Nothing leaves
+the queue; a permanent test asserts it (`test_nothing_that_fires_leaves_the_queue`).
+
+## 5. Thresholds and the rationale
+
+All three τ are quantiles of the **safe-corpus margin distribution** (COCO val2017, n=5000) —
+a false-positive budget, never a recall fit, because no labelled positives may be fetched here.
+
+| tier | τ (margin space) | measured FP on COCO | why this number |
+|---|---|---|---|
+| `alert` | **0.055** (severe-bank margin) | 0.04% (2 / 5000) | severe-bank p99.9; the rarest tier — reserved for graphic gore imagery itself (track-safety boundary, §7) |
+| `violation` | **0.071** | 0.44% (22 / 5000) | COCO p99.5 — the confident band; matches the sibling tracks' violation FP profile (nudity 0.22%, drugs 0.9%) |
+| `review` | **0.044** | 5.24% (262 / 5000) | COCO p95 — the wide recall-first net, sited just above the safe-corpus bulk |
+
+**The margin→p map is fitted to the SPREAD, not to labels** (`PLATT_A=54.0, PLATT_B=−2.54`):
+it sends the safe-corpus median margin (−0.0075) to p≈0.05 and the p99.9 margin (0.0874) to
+p≈0.90. **Measured result: only 0.10% of COCO maps above p=0.9** (p50 0.05 · p95 0.46 · p99
+0.73 · p99.9 0.90) — the distribution does **not** saturate. This is the deliberate avoidance
+of b-daemon's rolled-back defect (the drugs proxy logistic pinned 218 benign images at
+p=0.99). `p` is a monotone triage score and is never called a probability.
+
+Every τ and the tier margin are overridable per install without a code change via
+`moderation.json` → `categories.violence.tau_{alert,violation,review}` / `tier_margin`
+(a ruling is an edit, never a retrain; a typo falls back to the default rather than taking
+moderation offline — `test_thresholds_are_config_driven`).
+
+### Published true-positive metrics (cited, NOT reproduced here)
+
+From `research/violence-models.md` (full survey), the honest state of the published field:
+
+> **No permissively-licensed still-image violence/gore model with published, dataset-and-split
+> metrics exists.** The strongest gore labeler, **ShieldGemma 2** (arXiv 2504.01081), reports
+> internal Violence P/R/F1 = 80.3 / 90.4 / 85.0 and UnsafeBench-Violence 1−FPR = 95.9% — but
+> is **Gemma-licensed (non-permissive) and 4B params**, failing both the license and the B25
+> budget. The only documented permissive per-image classifier,
+> `jaranohaal/vit-base-violence-detection` (Apache-2.0, ViT-base), reports "Test accuracy
+> 98.80%" **in-domain on video frames only, no external eval** — fights/assault, no gore.
+
+None of these numbers describe *our* head; they describe what a future distilled teacher
+could aim at. No recall number in this project may be attributed to first-party measurement
+until labelled ground truth exists on the target host.
+
+## 6. The instrument choice, and the FLOPs budget (TRACKS.md T2)
+
+This track is instrument **tier 1** — embedding-space matvec, the unconditionally-allowed
+default. It adds **no FLOPs to the index hot path** beyond a small text-tower batch computed
+**once** per (model, prompt-set) and cached to `~/.imgtag/models/<model_sha>/violence-<spec_sha>.npz`
+(~250KB); an index run then loads that file instead of a text tower. At 100 tracks the index
+time is unchanged (ADR-15 / B25 bench-enforced). It never re-decodes an image (`wants_images = False`).
+
+**The distillation-teacher darwin item (owed, per TRACKS.md T2).** If the false-positive
+tail (§3c) proves costly on the operator's real traffic, the survey names the upgrade path,
+already triaged for license and budget:
+- **fights/assault slice:** `jaranohaal/vit-base-violence-detection` (Apache-2.0) as an
+  offline teacher → distil a tiny MLP over these same embeddings. Narrow (no gore).
+- **CLIP-embedding drop-in:** LAION's `violence_detection_vit_b_32.npy` (MIT) — architectural
+  bullseye but **zero published metrics**, so trust only after local validation.
+- **gore:** **no permissive published-metric teacher exists** — the single biggest gap. A
+  gore head would need a hand-labelled, lawfully-held holdout on the target host.
+The teacher, when one is adopted, ships as a distilled head over our embeddings — **never as
+a second forward pass** (T2). Logged as a darwin item, not a v1 dependency.
+
+## 7. Boundaries — how this composes with the sibling tracks
+
+**With track-safety (the `alert` boundary, coordinated).** safety owns person-**down** ∧
+danger-context (the victim's state); this track owns depicted interpersonal **violence**, and
+its `alert` is reserved for **graphic imagery itself** (the SEVERE gore bank). A bloodless
+fight reaches `violation` at most, **never** `alert` (`test_alert_needs_the_severe_bank`).
+Blood / wreckage cues may appear in both specs; each category scores **independently** into
+its own dense sidecar (ADR-15), and tier counts are reported **per category**, so no image is
+double-counted in one moderation total.
+
+**With track-sports (the contact-sport composition).** The BACKGROUND bank lifts sports.py's
+martial-arts and team-sport prompts **verbatim** so the two tracks share a concept space.
+Documented ruling, measured on both sides: **a boxing match → `sports: match(martial arts)`
+AND `violence: review` (never `violation`)** — the sports track supplies the exculpatory
+content label; the violence track's own review band means "a human should glance", not "this
+is an assault". If sports.py retunes those prompts, this bank must follow (a standing
+sync note sent to that lane).
+
+## 8. Acceptance sketch (the brief's cases, with documented rulings)
+
+| input | expected | measured / ruling |
+|---|---|---|
+| boxing match | none-or-review | **review** (boxing 21% review, 0% violation, 0% alert; §3a). Documented ruling: review + `sports:match` exculpates |
+| depicted fight / assault | violation | fires `violation` (bloodless) — `test_alert_needs_the_severe_bank`; COCO's "badly beating unconscious" ranks #1 (§3b) |
+| bloody injury / gore | violation or alert | `alert` when the SEVERE bank leads and beats CONTEXT (§4); else `violation` |
+| halloween zombie / SFX makeup | documented | **review** — the CONTEXT arbiter demotes it from alert (Joker/skull makeup measured at review, §3c; alert 3→0, §4) |
+| protest crowd (peaceful) | none | **0% violation, 7.3% review** (§3a) — peaceful assembly is in the BACKGROUND bank |
+
+## 9. Verification status (honest)
+
+- ✅ False-positive behaviour on 5,000 COCO + 3,058 Unsplash confusables — measured, first-party, reproducible (`scripts/eval_violence.py`, `research/eval-violence.json`).
+- ✅ **Contact-sport required negative** — measured: 0% alert, 0.38% violation on 262 imgs; boxing/martial-arts 0% violation (§3a).
+- ✅ Score distribution does **not** saturate — measured: 0.10% of COCO above p=0.9 (§5).
+- ✅ CONTEXT arbiter earns its keep — measured ablation (§4).
+- ✅ 15 tests green (`tests/test_violence.py`), incl. the alert-boundary, the arbitration-demotes-never-drops invariant, the config-driven-policy law, and the moderation.json non-drift check.
+- ✅ Composition with sports/safety specified and boundary-tested (§7).
+- ❌ **True-positive recall — NOT verified here.** Weak caption-proxy only (§3b); published metrics cited, not reproduced (§5).
+- ❌ **τ not fitted on labelled ground truth** — `calibrated: false`, `enforcement_ready: false`. It is an FP budget.
+- ⚠️ **Residual FP class: intimate/embracing poses** fire the "throat-grab" concept (§3c) — the class most worth re-checking if the operator supplies labels.
+- ⚠️ **Latency not separately measured** — the track is a matmul on the embedding the index already computed, so it inherits the index's timing; no dedicated forward. (The machine is oversubscribed under the swarm; a clean latency row is deferred to an idle re-measure, per ORACLE's bench-honesty rule.)
+
+**Next, in order:** (1) if the operator supplies a *labelled, lawfully-held* in-house sample
+on the target host, fit τ there and only then consider flipping `enforcement_ready`; (2)
+distil a teacher head for the fights slice (jaranohaal) if the pose-confusion FP proves
+costly — logged as the T2 darwin item; (3) the gore gap has no permissive teacher — it needs a
+hand-labelled holdout before any recall claim.
+
+## 10. Integration notes for b-engine / b-daemon
+
+`imgtag.moderation.load_violence_head(profile)` follows the `load_heads` contract.
+- `load_violence_head(profile) -> ViolenceHead | None` — **None** when the backend model is
+  absent; a missing track is not loaded, never a silent zero.
+- `ViolenceHead.wants_images = False` — answers from the embedding, never re-decodes.
+- `ViolenceHead.score(embeddings, images, ids) -> list[dict]`, one per record:
+  `{"category": "violence", "p": float, "tier": "alert"|"violation"|"review"|"none",
+    "why": <concept>, "group": <subcategory>, "model_id", "calibrated": False,
+    "enforcement_ready": False}`. `probs(embeddings) -> (p[], tier[])` for b-daemon's
+  `track_scores()`.
+- The `violence` key of `src/imgtag/data/moderation.json` (v2 schema, conductor-owned file,
+  this key owned by track-violence) carries `alert`/`violation`/`review`/`negatives` prompt
+  sets, `policy_neighbours` (= the CONTEXT bank, published for annotation, **never**
+  subtracted — `test_moderation_json_violence_track_matches_this_module` asserts the two
+  banks stay disjoint), `platt`, the three τ, `tier_margin`, and `calibration: "fp-budget"`.
+  `search.py` gates only on `calibration == "fitted"`, so this track — correctly — can never
+  gate until ground truth exists.
