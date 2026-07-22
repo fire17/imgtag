@@ -75,7 +75,12 @@ search time changes by ~0% (tier filters read sidecars, not models).
 `uv run imgtag bench tracks` measures: (a) marginal index-time per embedding-track
 (must be ≤0.5% each, ≤5% at 100 simulated tracks); (b) total dedicated-model FLOPs share
 (≤30% of encoder); (c) sidecar alignment integrity (row i of every track column = row i
-of the shard); (d) tier-derivation determinism (same scores + same spec = same tiers).
+of the shard); (d) tier-derivation determinism (same scores + same spec = same tiers);
+(e) **READER PARITY (2026-07-22, the sports lesson): a track is not done until its
+numbers are verified through the SERVING path** — head-vs-reader flag counts on a probe
+slice must agree within fp noise. Two scorers, one contract; τ lives in the reader's
+score space (margin), never a private one (the prob-space τ gated the reader to 0/1856
+while the head fired 137 — invisible until a sibling lane measured the reader).
 
 > 2026-07-22: constituted. Current tracks: nudity (dedicated head — distillation owed,
 > D11) · weapons · drugs (refit in progress) · safety · sports — all others
