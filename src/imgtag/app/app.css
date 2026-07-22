@@ -373,6 +373,8 @@ tr:hover td { background: var(--surface); }
 .tracks { margin-top: var(--sp-2); border-top: 1px solid var(--line); padding-top: var(--sp-3); }
 .tracks__head { display: flex; align-items: baseline; gap: var(--sp-2); margin-bottom: var(--sp-2); }
 .tracks h3 { font: 600 var(--t-sm)/1 var(--font); margin: 0; color: var(--ink); }
+.spin { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--line); border-top-color: var(--accent); animation: spin 0.7s linear infinite; flex: none; }
+@keyframes spin { to { transform: rotate(360deg); } }
 .trk {
   display: grid; grid-template-columns: 1fr 64px 34px; grid-template-rows: auto auto;
   gap: 1px var(--sp-2); align-items: center;

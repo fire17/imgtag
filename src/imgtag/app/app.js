@@ -567,9 +567,13 @@ let detailSeq = 0;   // guards the async track fetch against a fast image-switch
 // not warm shows "score pending", never a fake 0.
 function trackPanel(tracks, { partial } = {}) {
   const panel = el('div', { className: 'tracks' });
+  // partial = the full set is still loading. The FIRST open per dataset derives scores live
+  // (b-daemon: ~7s cold, then ~8ms cached), so this needs a real in-progress affordance, not
+  // just static text — a 7s wait under a plain label reads as frozen.
   panel.append(el('div', { className: 'tracks__head' },
     el('h3', { textContent: 'Track confidences' }),
-    partial ? el('span', { className: 'sub', textContent: 'from this result — loading the full set…' }) : null));
+    partial ? el('span', { className: 'spin', role: 'progressbar', 'aria-label': 'scoring all tracks' }) : null,
+    partial ? el('span', { className: 'sub', textContent: 'scoring all tracks — first open scores the whole dataset, then it’s instant' }) : null));
   if (!tracks.length) {
     panel.append(el('p', { className: 'sub', textContent: 'No tracks are defined.' }));
     return panel;
