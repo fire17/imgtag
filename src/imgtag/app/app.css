@@ -179,8 +179,8 @@ h2 { font: 600 var(--t-lg)/1.25 var(--font); margin: 0; text-wrap: balance; }
    The photographs are the only saturated thing here; the chrome stays out of their way. */
 .grid { position: relative; }                          /* full scroll-height spacer */
 .grid__win { position: absolute; inset: 0 0 auto 0; }  /* translated render window */
+.tile, .band { position: absolute; margin: 0; padding: 0; }
 .tile {
-  position: absolute; margin: 0; padding: 0;
   display: flex; flex-direction: column;
   background: none; border: 0; cursor: pointer;
   color: inherit; text-align: left; font: inherit;
@@ -208,6 +208,52 @@ h2 { font: 600 var(--t-lg)/1.25 var(--font); margin: 0; text-wrap: balance; }
 .tile__file { color: var(--ink-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 0 0 auto; max-width: 100%; }
 .tile__id { color: var(--ink-mute); flex: none; }   /* full opacity: 5.7:1 on --bg */
 .tile__why { color: var(--ink-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── ALL → SOME → ANY coverage (VISION-ADDENDA 12:12Z) ───────────────────
+   Tier is carried by ink weight and one badge, never by a banner: full-strength
+   ALL, receding SOME, quiet ANY. The photograph is never dimmed — the user still
+   has to judge the image, so the CHROME steps down, not the content. */
+.tile__cov {
+  flex: none; margin-left: auto;
+  padding: 1px 5px; border-radius: 3px;
+  background: var(--surface-2); color: var(--ink); font-weight: 600;
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+}
+.tile__cov + .tile__score { margin-left: 0; }
+.tile__terms { display: flex; gap: 5px; overflow: hidden; white-space: nowrap; }
+.term { color: var(--ink-dim); }
+.term--missed { color: var(--ink-mute); text-decoration: line-through; text-decoration-thickness: 1px; }
+
+.tile[data-tier="all"] .tile__cov { background: var(--accent); color: var(--accent-ink); box-shadow: none; }
+.tile[data-tier="some"] .tile__ds { color: var(--ink-dim); }
+.tile[data-tier="some"] .tile__cov { color: var(--ink-dim); }
+.tile[data-tier="any"] .tile__ds,
+.tile[data-tier="any"] .tile__file { color: var(--ink-mute); }
+.tile[data-tier="any"] .tile__cov { color: var(--ink-mute); }
+.tile[data-tier="any"] .tile__img { box-shadow: inset 0 0 0 1px oklch(1 0 0 / 0.03); }
+/* the ember confidence rail belongs to the ALL tier and to live jobs — nothing else */
+.tile[data-tier="some"] .tile__rail i { background: var(--ink-dim); }
+.tile[data-tier="any"] .tile__rail i { background: var(--ink-mute); }
+/* the band's rule runs across its whole row, not just the label cell */
+.tile--band-row { border-top: 1px solid var(--line); }
+.tile--band-row[data-tier="all"] { border-top-color: var(--accent); }
+
+/* band label: occupies one grid cell so tier changes are unmissable while scrolling
+   without a banner, and without breaking the virtualizer's uniform rows */
+.band {
+  display: flex; flex-direction: column; justify-content: flex-end; gap: 2px;
+  padding: 0 0 calc(var(--sp-2) + 2px);
+  cursor: default; border-top: 1px solid var(--line);
+}
+.band__m { font: 600 var(--t-2xl)/1 var(--mono); font-variant-numeric: tabular-nums; color: var(--ink); }
+.band__label { font: 500 var(--t-sm)/1.3 var(--font); color: var(--ink-dim); text-wrap: balance; }
+.band__sub { font: 400 var(--t-xs)/1 var(--mono); color: var(--ink-mute); }
+.band--all { border-top-color: var(--accent); }
+.band--all .band__m { color: var(--accent); }
+.band--some .band__m { color: var(--ink-dim); }
+.band--any .band__m, .band--any .band__label { color: var(--ink-mute); }
+
+.hint { color: var(--ink-dim); font-size: var(--t-sm); max-width: 70ch; margin: 0 0 var(--sp-4); text-wrap: pretty; }
 .tile:hover .tile__img { box-shadow: inset 0 0 0 1px oklch(1 0 0 / 0.16); }
 .tile[aria-selected="true"] .tile__img { box-shadow: 0 0 0 2px var(--accent); }
 .tile[aria-selected="true"] .tile__ds { color: var(--accent); }

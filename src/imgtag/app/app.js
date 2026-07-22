@@ -56,6 +56,10 @@ const splitPath = (p) => {
   const parent = parts.pop();
   return { dir: parent ? `…/${parent}/` : '', file };
 };
+// ALL → SOME → ANY: the user's own spectrum (VISION-ADDENDA 12:12Z)
+const tierOf = (t) => (t.m >= t.n ? 'all' : t.m <= 1 ? 'any' : 'some');
+const tierLabel = (m, n) => (m >= n ? `all ${n} terms` : m <= 1 ? 'one term only' : `${m} of ${n} terms`);
+
 // "why this matched" — straight from the API payload, never inferred client-side
 const whyText = (why) => {
   if (!why || !why.path) return '';
@@ -94,6 +98,7 @@ const API = {
       tookMs: Number.isFinite(j.tookMs) ? j.tookMs : null,
       rttMs: performance.now() - t0,
       coverage: j.coverage || null,
+      terms: normTerms(j.terms),
       noMatch: j.no_match === true || (j.hits || []).length === 0,
       hits: (j.hits || []).map(normHit),
     };
@@ -126,8 +131,25 @@ function normDataset(d) {
     updated: d.updated ?? d.created ?? null,
   };
 }
+// top-level term echo — accepts a bare array or {parsed|terms, n} until b-daemon pins it
+function normTerms(t) {
+  if (!t) return null;
+  const list = Array.isArray(t) ? t : (t.parsed || t.terms || t.list || []);
+  const n = Number.isFinite(t?.n) ? t.n : list.length;
+  return n > 1 ? { list, n } : null;   // a single term needs no coverage vocabulary
+}
+// per-hit coverage: which of the user's terms this image actually satisfies
+function normHitTerms(t) {
+  if (!t) return null;
+  const matched = t.matched || [];
+  const missed = t.missed || [];
+  const n = Number.isFinite(t.n) ? t.n : matched.length + missed.length;
+  const m = Number.isFinite(t.m) ? t.m : matched.length;
+  return n > 1 ? { matched, missed, m, n } : null;
+}
 function normHit(h) {
   return {
+    terms: normHitTerms(h.terms),
     id: h.image_id ?? h.id ?? '',
     path: h.path ?? '',
     dataset: h.dataset ?? h.dataset_slug ?? '',
@@ -213,16 +235,47 @@ class VirtualGrid {
     this._ro.disconnect();
   }
   setItems(items, total = items.length) {
+    this.groups = null;
     this.items = items; this.total = total;
+    this.clearNodes();
+    this.measure();
+  }
+  /** Tier bands (ALL → SOME → ANY). Each band opens with a label cell and is padded to a
+   *  whole row, so tiers are perceivable while scrolling WITHOUT breaking the uniform-row
+   *  math the virtualizer depends on. Re-laid out whenever the column count changes. */
+  setGroups(groups) {
+    this.groups = groups;
+    this.items = []; this.total = 0;
+    this.clearNodes();
+    this.laidOutFor = -1;
+    this.measure();
+  }
+  clearNodes() {
     for (const [, n] of this.nodes) n.remove();
     this.nodes.clear();
     this.sel = -1;
-    this.measure();
   }
+  layout() {
+    if (!this.groups || this.laidOutFor === this.cols) return;
+    if (this.laidOutFor !== -1) this.clearNodes();   // indices shift when columns change
+    this.laidOutFor = this.cols;
+    const items = [];
+    this.bandRow = new Set();          // indices sharing a row with a band label
+    for (const g of this.groups) {
+      const start = items.length;
+      for (let c = 0; c < this.cols; c++) this.bandRow.add(start + c);
+      items.push({ kind: 'band', ...g });
+      items.push(...g.hits);
+      while (items.length % this.cols !== 0) items.push(null);   // pad: next band starts a row
+    }
+    this.items = items; this.total = items.length;
+  }
+  isImage(i) { const it = this.items[i]; return !!it && it.kind !== 'band'; }
   measure() {
     const w = this.mount.clientWidth;
     if (!w) return;
     this.cols = Math.max(1, Math.floor((w + this.gap) / (this.min + this.gap)));
+    this.layout();
     this.tw = Math.floor((w - this.gap * (this.cols - 1)) / this.cols);
     this.th = this.tw + this.cap;                   // uniform cells ⇒ O(1) row math
     const rows = Math.ceil(this.total / this.cols);
@@ -249,7 +302,10 @@ class VirtualGrid {
       const item = this.items[i];
       if (!item) { (missing ||= []).push(i); continue; }
       let node = this.nodes.get(i);
-      if (!node) { node = this.tile(item, i); this.nodes.set(i, node); this.win.append(node); }
+      if (!node) {
+        node = item.kind === 'band' ? this.band(item) : this.tile(item, i);
+        this.nodes.set(i, node); this.win.append(node);
+      }
       const r = Math.floor(i / this.cols), c = i % this.cols;
       node.style.width = `${this.tw}px`;
       node.style.height = `${this.th}px`;
@@ -257,8 +313,15 @@ class VirtualGrid {
     }
     if (missing && this.onFill) this.onFill(missing[0], missing[missing.length - 1] - missing[0] + 1);
   }
+  band(g) {
+    return el('div', { className: `band band--${g.tier}`, role: 'presentation' },
+      el('div', { className: 'band__m', textContent: `${g.m}/${g.n}` }),
+      el('div', { className: 'band__label', textContent: g.label }),
+      el('div', { className: 'band__sub', textContent: `${nf.format(g.hits.length)} ${g.hits.length === 1 ? 'image' : 'images'}` }));
+  }
   tile(item, i) {
     const t = el('button', { className: 'tile', type: 'button', tabIndex: -1, role: 'option' });
+    if (this.bandRow?.has(i)) t.classList.add('tile--band-row');   // carries the band's rule across
     t.dataset.i = String(i);
     t.setAttribute('aria-selected', String(i === this.sel));
     t.title = `${item.path || item.id}\n${item.dataset} · ${item.id}`;
@@ -287,10 +350,17 @@ class VirtualGrid {
     }
     const cap = el('div', { className: 'tile__cap' });
     const shortId = item.id ? item.id.slice(0, 8) : '';
+    if (item.terms) t.dataset.tier = tierOf(item.terms);   // ALL reads primary, ANY reads weakest
     if (!this.hideDataset) {
       const l1 = el('div', { className: 'tile__l1' },
         el('span', { className: 'tile__ds', textContent: item.dataset || '—' }),
         el('span', { className: 'tile__id', textContent: shortId }));
+      if (item.terms) {
+        l1.append(el('span', {
+          className: 'tile__cov', textContent: `${item.terms.m}/${item.terms.n}`,
+          title: tierLabel(item.terms.m, item.terms.n),
+        }));
+      }
       if (item.score != null) l1.append(el('span', { className: 'tile__score', textContent: item.score.toFixed(3) }));
       cap.append(l1);
     }
@@ -301,14 +371,22 @@ class VirtualGrid {
       dir && !this.hideDataset ? el('span', { className: 'tile__dir', textContent: dir }) : null,
       el('span', { className: 'tile__file', textContent: file || item.id }),
       this.hideDataset ? el('span', { className: 'tile__id', textContent: shortId }) : null));
-    const why = whyText(item.why);
-    if (why) cap.append(el('div', { className: 'tile__why', textContent: why }));
+    if (item.terms) {
+      // the terms themselves ARE the explanation: matched plain, missed struck through
+      const row = el('div', { className: 'tile__terms' });
+      for (const term of item.terms.matched) row.append(el('span', { className: 'term', textContent: term }));
+      for (const term of item.terms.missed) row.append(el('span', { className: 'term term--missed', textContent: term }));
+      cap.append(row);
+    } else {
+      const why = whyText(item.why);
+      if (why) cap.append(el('div', { className: 'tile__why', textContent: why }));
+    }
     t.append(cap);
     t.addEventListener('click', () => { this.select(i); this.onOpen?.(this.items[i]); });
     return t;
   }
   select(i) {
-    if (i < 0 || i >= this.total) return;
+    if (i < 0 || i >= this.total || !this.isImage(i)) return;
     this.nodes.get(this.sel)?.setAttribute('aria-selected', 'false');
     this.sel = i;
     this.nodes.get(i)?.setAttribute('aria-selected', 'true');
@@ -325,8 +403,16 @@ class VirtualGrid {
     this.nodes.get(i)?.setAttribute('aria-selected', 'true');
   }
   move(d) {
-    const next = this.sel < 0 ? 0 : this.sel + d;
-    this.select(Math.max(0, Math.min(this.total - 1, next)));
+    let next = this.sel < 0 ? 0 : this.sel + d;
+    next = Math.max(0, Math.min(this.total - 1, next));
+    // band labels and row padding are not selectable — keep walking the way we were headed
+    const step = d >= 0 ? 1 : -1;
+    while (next >= 0 && next < this.total && !this.isImage(next)) next += step;
+    if (next < 0 || next >= this.total) {          // fell off the end: take the nearest image back
+      next = this.sel < 0 ? 0 : this.sel;
+      while (next >= 0 && next < this.total && !this.isImage(next)) next -= step;
+    }
+    this.select(next);
   }
   current() { return this.items[this.sel] || null; }
 }
@@ -486,11 +572,44 @@ async function viewFleet() {
   paintFleet();
 }
 
+// Group hits into the ALL → SOME → ANY spectrum. Null means "render a plain grid":
+// one term, one tier, or a payload where coverage is not on every hit.
+function groupByCoverage(res) {
+  if (!res.terms || !res.hits.length || res.hits.some((h) => !h.terms)) return null;
+  const byM = new Map();
+  for (const h of res.hits) {
+    const arr = byM.get(h.terms.m) || [];
+    arr.push(h);
+    byM.set(h.terms.m, arr);
+  }
+  const ms = [...byM.keys()].sort((a, b) => b - a);
+  if (ms.length < 2) return null;
+  return ms.map((m) => ({
+    m, n: res.terms.n, tier: tierOf({ m, n: res.terms.n }),
+    label: tierLabel(m, res.terms.n), hits: byM.get(m),
+  }));
+}
+
+// The syntax is taught until it is used, then it gets out of the way for good.
+const SYNTAX_KEY = 'imgtag:multi-term-known';
+const syntaxKnown = () => { try { return !!localStorage.getItem(SYNTAX_KEY); } catch { return false; } };
+const markSyntaxKnown = () => { try { localStorage.setItem(SYNTAX_KEY, '1'); } catch { /* private mode */ } };
+function syntaxHint() {
+  if (syntaxKnown()) return null;
+  return el('p', { className: 'hint' },
+    'Space adds a tag — ', el('code', { className: 'k', textContent: 'red car night' }),
+    ' puts images matching all three first, then two, then one. Quote an exact phrase: ',
+    el('code', { className: 'k', textContent: '"night city"' }), '.');
+}
+
 // (2) search results
 let searchAbort = null, searchSeq = 0;
 async function viewSearch(q, dataset) {
   const seq = ++searchSeq;   // only the newest keystroke may paint (responses can land out of order)
-  $('#q').value = q;
+  // Never clobber what the user is typing: the hash carries a TRIMMED query, so a blind
+  // assignment would delete the trailing space the moment it is typed — which made multi-term
+  // search impossible to type at all. Only sync when the field genuinely disagrees.
+  if (qInput.value.trim() !== q) qInput.value = q;
   S.lastQuery = q;
   const root = el('div', { className: 'view' });
   const pad = el('div', { className: 'pad' });
@@ -521,7 +640,11 @@ async function viewSearch(q, dataset) {
   if (!q) {
     pad.replaceChildren(head, el('div', { className: 'empty' },
       el('h2', { textContent: 'Type to search every indexed image' }),
-      el('p', { textContent: 'Search is semantic, not keyword: “vehicle” finds the cars and the motorcycles too. Results stream from whatever is indexed right now, including datasets still being processed.' })));
+      el('p', { textContent: 'Search is semantic, not keyword: “vehicle” finds the cars and the motorcycles too. Results stream from whatever is indexed right now, including datasets still being processed.' }),
+      el('p', { className: 'hint' },
+        'Space adds a tag — ', el('code', { className: 'k', textContent: 'red car night' }),
+        ' puts images matching all three first, then two, then one. Quote an exact phrase: ',
+        el('code', { className: 'k', textContent: '"night city"' }), '.')));
     paintStatus({ latency: '—', hits: '', coverage: '' });
     return;
   }
@@ -581,8 +704,15 @@ async function viewSearch(q, dataset) {
 
   paintBanner(res);
   paintFilters(res);
+  if (res.terms) markSyntaxKnown();          // used it once — stop teaching it
+  else { const h = syntaxHint(); if (h) filterSlot.append(h); }
+  const allTier = res.terms ? res.hits.filter((h) => h.terms && h.terms.m >= h.terms.n).length : 0;
   $('#resSum').textContent = res.hits.length
-    ? `${n0(res.hits.length)} ${res.hits.length === 1 ? 'hit' : 'hits'}${res.tookMs != null ? ` · ${res.tookMs.toFixed(1)} ms server` : ''}`
+    ? [
+      `${n0(res.hits.length)} ${res.hits.length === 1 ? 'hit' : 'hits'}`,
+      res.terms ? `${n0(allTier)} match all ${res.terms.n} terms` : null,
+      res.tookMs != null ? `${res.tookMs.toFixed(1)} ms server` : null,
+    ].filter(Boolean).join(' · ')
     : '';
 
   if (!res.hits.length) {
@@ -600,8 +730,9 @@ async function viewSearch(q, dataset) {
     gridMount.classList.add('grid');
     grid = new VirtualGrid(root, gridMount, { onOpen: openDetail, cap: 60 }); // 3 caption lines
     ctl.grid = grid;
-    grid.setItems(res.hits);
-    grid.select(0);
+    const groups = groupByCoverage(res);
+    if (groups) grid.setGroups(groups); else grid.setItems(res.hits);
+    grid.move(0);   // land on the first real image, skipping any band label
   }
 
   paintStatus({
@@ -862,7 +993,11 @@ $('#searchForm').addEventListener('submit', (e) => { e.preventDefault(); openSel
 // ── global keyboard ────────────────────────────────────────────────────────
 document.addEventListener('keydown', (e) => {
   if (e.key === '/' && document.activeElement !== qInput) {
-    e.preventDefault(); qInput.focus(); qInput.select(); return;
+    // focus on the NEXT tick: moving focus inside the keydown still lets Chromium deliver
+    // the "/" to the newly focused field
+    e.preventDefault();
+    setTimeout(() => { qInput.focus(); qInput.select(); }, 0);
+    return;
   }
   if (e.key === 'Escape' && dlg.open) { dlg.close(); return; }
   if (dlg.open) return;
