@@ -129,6 +129,78 @@ def cmd_resources(args) -> dict:
             "note": "search-path only (idle daemon proxy); indexing peak is `bench index`"}
 
 
+# ── B1/B2: e2e index throughput (QUIET-WINDOW bench — it is a timed measurement) ─
+CORPUS_PATHS = {
+    "A": "data/coco/val2017",       # CORPUS-A coco5k
+    "B": "data/unsplash-b",         # CORPUS-B photo10k (partial on disk)
+    "quick": "data/quick500/images",
+}
+
+
+def cmd_index(args) -> dict:
+    import os
+    import shutil
+
+    from ..core import doctor, indexer, store
+
+    ok, load = C.load_ok()
+    corpora = [c.strip() for c in args.corpus.split(",") if c.strip()]
+    rows = []
+    for tag in corpora:
+        path = CORPUS_PATHS.get(tag)
+        if not path or not os.path.isdir(os.path.join(C.ROOT, path)):
+            rows.append({"corpus": tag, "error": f"path missing: {path}"})
+            continue
+        abspath = os.path.join(C.ROOT, path)
+        ds = f"benchtmp-{tag.lower()}-{os.getpid()}"
+        prof = doctor.load_profile()
+        if args.full_speed:
+            prof["full_speed"] = True
+        _stderr(f"[bench index] {tag} → {abspath} (dataset {ds}, "
+                f"{'FULL' if args.full_speed else 'POLITE'})")
+        t = time.perf_counter()
+        try:
+            s = indexer.index(abspath, ds, profile=prof, full_speed=args.full_speed,
+                              recursive=True, log=lambda m: None)
+        except Exception as e:  # noqa: BLE001 — a failed corpus is a row, not a crash
+            rows.append({"corpus": tag, "error": f"{type(e).__name__}: {e}"[:200]})
+            continue
+        wall = time.perf_counter() - t
+        row = {"corpus": tag, "path": path, "indexed": s.get("indexed"),
+               "skipped": s.get("skipped"), "failed": s.get("failed"),
+               "seconds": s.get("seconds"), "img_s": s.get("img_s"),
+               "wall_s": round(wall, 1), "model_id": s.get("model_id"),
+               "workers": s.get("workers"), "batch": s.get("batch"),
+               "stages_ms_per_img": s.get("stages_ms_per_img"),
+               "mode": "FULL" if args.full_speed else "POLITE"}
+        if args.headtohead:
+            row["rclip"] = _rclip_index(abspath)
+        rows.append(row)
+        # throwaway dataset — never leave bench state in the user's registry
+        try:
+            shutil.rmtree(store.dataset_dir(ds), ignore_errors=True)
+        except Exception:  # noqa: BLE001
+            pass
+    return {**_header(mode="FULL" if args.full_speed else "POLITE"),
+            "budget": "B1/B2", "loadavg_1min": load,
+            "quiet_gate_ok": ok, "rows": rows,
+            "note": "e2e index throughput; POLITE headline per B1. ADVISORY unless run in "
+                    "a quiet window (load <= cores*0.6). Throwaway datasets deleted after."}
+
+
+def _rclip_index(dirpath: str) -> dict:
+    import shutil
+    import subprocess
+
+    if not shutil.which("rclip"):
+        return {"error": "rclip not installed"}
+    t = time.perf_counter()
+    # rclip builds its index on first run over the dir; time that as its index throughput.
+    r = subprocess.run(["rclip", "-n", "xyzzy-warm-index"], cwd=dirpath,
+                       capture_output=True, text=True, timeout=1800)
+    return {"index_s": round(time.perf_counter() - t, 1), "rc": r.returncode}
+
+
 # ── rclip head-to-head (B1/B17 baseline) ─────────────────────────────────────
 def cmd_headtohead(args) -> dict:
     import shutil
@@ -219,6 +291,12 @@ def main(argv=None) -> int:
     h.add_argument("--dataset", default="cocoval2017")
     h.add_argument("--json", action="store_true")
 
+    ix = sub.add_parser("index", help="B1/B2 e2e index throughput (quiet-window bench)")
+    ix.add_argument("--corpus", default="A", help="comma list of A,B,quick")
+    ix.add_argument("--headtohead", action="store_true", help="also time rclip on the dir")
+    ix.add_argument("--full-speed", action="store_true")
+    ix.add_argument("--json", action="store_true")
+
     c = sub.add_parser("candidates", help="phase-1 candidate matrix")
     c.add_argument("--all", action="store_true")
     c.add_argument("--candidates", default="")
@@ -229,7 +307,7 @@ def main(argv=None) -> int:
         return cmd_candidates(a)
 
     fn = {"search": cmd_search, "resources": cmd_resources, "quality": cmd_quality,
-          "headtohead": cmd_headtohead}[a.bench_cmd]
+          "headtohead": cmd_headtohead, "index": cmd_index}[a.bench_cmd]
     out = fn(a)
     print(json.dumps(out, indent=None if getattr(a, "json", False) else 1))
     return out.get("exit", 0) if isinstance(out, dict) else 0
