@@ -10,3 +10,8 @@ the final system will be running on a linux server without a gpu for the mostpas
 ## 2026-07-22 ~12:12Z — multi-tag search spectrum (verbatim)
 
 in the search i should be able to use space to enter more  tags (show results that have all tags first, then decending for higher n/m found tags number, then finally results from each tag (like any) - does that makes sense - its like a specturm between ALL-SOME-ANY in tag-search - does all of that makes sense ?
+
+## 2026-07-22 ~12:33Z — content moderation tracks + generic metadata (verbatim)
+
+i want to be able to use this one some public sites and to enforce good behavior and following the rules of our sites, we dont want images with nudity, weapons or drugs
+these are very important to indentify correctly - please make sure to create 3 tracks to specialize on each of these in a dedicated way - at the end we should be able to find (and later flag these) by searching, and also when indexing, so on every batch of images processed - i will be able to see something like "Found 10 images with drugs, 7 with weapons, 5 with nudity" alongside the images and metadata (like the filepaths etc, and we want to be able when indexing to also save more generic metadata that can hold account ids dates etc) - or check see these details accross the entire gallery, or by each dataset - does all of that makes sense ?
