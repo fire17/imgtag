@@ -185,6 +185,13 @@ English table, selected rows:
 | `ViT-SO400M-16-SigLIP2-384__webli` | 56.57 | 3854 | **85.99** | best quality published |
 | `ViT-L-14__openai` | 19.91 | 2212 | 72.99 | big *and* worse than B-16-SigLIP2 |
 
+⚠️ **Caveat on the exec-time column (raised by the runtime lane, unresolved):** 5.81 ms for a
+ViT-B/16 image tower implies ~3 TFLOPS f32 on a 7800X3D — at or above its AVX-512 peak — so
+the column may be the **text** tower or a fused figure. Counter-evidence: internal ratios
+track image-tower FLOPs (B/16 5.81 → L/16-256 23.77 = 4.1×, vs ~4.6× FLOPs). immich ships
+**no benchmark script** (repo searched). **Treat as relative-ordering truth; absolute values
+unverified.** Re-derive locally before quoting in a public claim.
+
 Four things fall out of this table, and they set IMGTAG's whole strategy:
 
 1. **The default is nearly the worst model on the list** (69.9% vs 85.99% best; only the yfcc15m/cc12m relics are worse). This is the mechanical explanation for the field complaint *"embeddings seem really poor, and has lots of misses and false positives"* — it is not a mystery, it is a default.
@@ -267,7 +274,7 @@ just pays Postgres, VectorChord and a container to perform it.
 - **It has no semantic search at all, in 2026.** Issue [#1287 "AI: Add a CLIP-powered semantic search"](https://github.com/photoprism/photoprism/issues/1287) opened **2021-05-12** and is **still open** (~5 years). `internal/ai/vision/model_types.go` enumerates exactly `labels | nsfw | face | caption | generate` — no `embedding`. Search is SQL `LIKE` over keywords a CNN or an LLM wrote (`internal/entity/search/photos.go`; no FULLTEXT, no trigram, no vector) — so "dog" matches "dogma".
 - **Models:** NASNet-A Mobile 224 (ImageNet-1k, exactly **1,000 labels**; a 21,843-label file is downloaded and never wired), Yahoo-lineage NSFW, FaceNet 512-d, ONNX SCRFD detector (replaced Pigo 2026-05-24). Runtime **TensorFlow 2.18 C library** (the libtensorflow-1.15 pin finally died 2025-04-25), ~187 MB of models to serve a 1,000-word vocabulary.
 - **Their own CLIP plan is DOA by their own acceptance criteria:** default UForm3-multilingual-base ONNX, but *"embeddings stored, CLIP searches not possible"* on SQLite and MariaDB <11.8, and *"Phase 1: no Go fallback scorer"* — i.e. they blocked a 20 MB matmul behind a database vector extension.
-- **Measured indexing (community, all URL-cited):** ~**2 photos/s** on a 2017 laptop ([disc #2183](https://github.com/photoprism/photoprism/discussions/2183)); **4–5 s/image** on an i3-6100 with local SSD, **~6 s/image** on a Celeron J4025, **~18 s/image** over CIFS ([disc #4638](https://github.com/photoprism/photoprism/discussions/4638)); **50,000 photos in ~24 h ≈ 1.7 s/photo** with 4 workers ([mustafa.net, 2026-03-06](https://mustafa.net/2026/03/06/photoprism-tips-tricks-every-self-hoster-should-know/)); degradation from **0.02 s/image at 1k to ~2 s/image at 1.75M**, unchanged with TensorFlow disabled — i.e. DB/IO-bound, not model-bound ([disc #4771](https://github.com/photoprism/photoprism/discussions/4771)). **Read: ~2–6 s/photo typical ⇒ 10k ≈ 6–17 h.** No official throughput number exists.
+- **Measured indexing (community, all URL-cited):** ~**2 photos/s** on a 2017 laptop ([disc #2183](https://github.com/photoprism/photoprism/discussions/2183)); **4–5 s/image** on an i3-6100 with local SSD, **~6 s/image** on a Celeron J4025, **~18 s/image** over CIFS ([disc #4638](https://github.com/photoprism/photoprism/discussions/4638)); **50,000 photos in ~24 h ≈ 1.7 s/photo** with 4 workers ([mustafa.net, 2026-03-06](https://mustafa.net/2026/03/06/photoprism-tips-tricks-every-self-hoster-should-know/)); a reported degradation from ~0.02 s/image at 1k to ~2 s/image at 1.75M, unchanged with TensorFlow disabled — i.e. DB/IO-bound, not model-bound (⚠️ source link `photoprism/discussions/4771` now 404s — **unverified, re-source before quoting**). **Read: ~2–6 s/photo typical ⇒ 10k ≈ 6–17 h.** No official throughput number exists.
 - **Their captioning path is unusable on CPU:** own comparison table (Ollama 0.7.0, hardware unstated) — Qwen2.5-VL-7B **36.34 s/image**, 3B **24.12 s/image**, Gemma 3 **31.02 s/image** ⇒ 10k images = 67–100 h.
 - **Steal (this is the best idea-mine in the field):** the two-stage thumbnail cascade (original decoded **once**, everything derives from `fit_720`/`fit_1920`); the **3-crop feed** (`tile_224` + `left_224` + `right_224` = free test-time augmentation); the **3×3 "colors" thumbnail** powering `color:`/`mono:`/`chroma:` search at ~0 CPU; the per-hash index mutex; the 0–7 **quality heuristic** with a "Quality Review" triage inbox (zero ML, high perceived intelligence); `rules.yml` threshold/priority rewriting over raw softmax; and **logging the worker count with a reason string** (`4 (sqlite-cap)`, `1 (low-memory)`).
 
@@ -383,9 +390,10 @@ the self-hosted-manager lane (§2.1, §2.6, §2.6.1); the native/HN/vector-index
 cross-check, §2.7.1, §2.7.2, §2.10); the CLIP-tooling lane (§2.4 internals, §2.11 licences,
 §2.12 taggers, §2.13, plus the measured int8 numbers in §3 row 0b); and the Apple-runtime
 sibling lane's prior-art overlap (rclip PR #249, `local-image-search`, immich's lack of any
-macOS acceleration path). **Still running at compile time:** the model/runtime-benchmark
-lane (SigLIP2 vs MobileCLIP2 vs TinyCLIP, ORT vs OpenVINO vs ggml, quantisation quality
-deltas, decode throughput, Matryoshka/binary tricks) — §5.8 says what to do when it lands.
+macOS acceleration path); and the model/runtime-benchmark lane (§2.14–§2.18 — the MobileCLIP
+CPU inversion, immich field throughput + FLOPs span, quantisation evidence, decode routing,
+ANN recall collapse). **All four lanes plus the sibling overlap are merged**; §5.8 lists the
+eight experiments they collectively proved nobody in this field has run.
 **Coverage caveat, stated honestly:** the session-wide WebSearch budget (200 calls) was
 exhausted mid-lane, so late verification leaned on the GitHub REST API, direct source
 reads, and WebFetch. Every claim in this file is sourced; the *breadth* of the last two
@@ -451,6 +459,118 @@ stack. Do not adopt it.
 - **Eagle** (closed source, commercial) — offline "AI Search" plugin with text and reverse-image search. The only number they publish is a GPU comparison: *"overall processing speed can be up to 30–50× faster than CPU-only mode"* ([blog](https://en.eagle.cool/blog/post/eagle-plugin-ai-search)). Model, indexing rate and RAM are **not disclosed** — the proprietary end of the field is even more opaque than the open end.
 - **Hydrus Network** (3,132★) and **digiKam** (8.8.0, 2025-10-19): the brief's assumption of a "Hydrus CLIP addon" **could not be verified** — grepping Hydrus's changelog for `clip|semantic|embedding` returns zero hits; it does perceptual-hash duplicates and DeepDanbooru-style tagging. digiKam ships OpenCV DNN faces and HAAR similarity, **no CLIP**; semantic search is an open request (KDE bug 497938). ("Lykos" turned out to be Stability Matrix, a Stable-Diffusion launcher, not a tagger; no local-CLIP project could be found under "Hyperspace"/"Sharkey".) **Two whole desktop ecosystems have no semantic search at all.**
 
+### 2.14 ⚠️ The MobileCLIP trap — correcting an earlier section of this file
+
+§2.7.1 quotes open-clip-inference-rs putting MobileCLIP2-S2 at 75 ms/img, the best
+quality-per-ms in that table. **On x86 CPU that ranking inverts.** Measured, PyTorch,
+10,000-iteration average, [HF discussion](https://huggingface.co/apple/MobileCLIP-S2-OpenCLIP/discussions/3):
+
+| Model | i7-12700K (CPU) | RTX 3090 |
+|---|---:|---:|
+| MobileCLIP-S2 | **170.62 ms/frame** | 18.91 ms |
+| ViT-B-32-256 (OpenCLIP) | **114.05 ms/frame** | 6.31 ms |
+
+**MobileCLIP-S2 is 1.5× slower than plain ViT-B-32-256 on a desktop CPU.** Apple's own
+reply in that thread: *"We benchmarked our models on the neural engine of the iPhone 12 Pro
+Max using Core ML."* Their famous "1.5 ms" is **iPhone 12 Pro Max, Core ML, batch 1, ANE** —
+not a CPU number, and the architecture (depthwise/grouped convs, FastViT) is tuned for
+exactly that. Worse for us: the MobileCLIP2 paper concedes its DFNDR-2B pretraining
+*"[does] not always achieve state-of-the-art retrieval performance"* because the dataset is
+biased toward ImageNet classification, while *"models trained on DataComp, WebLI, and their
+derivatives may achieve higher retrieval performance."* **IMGTAG is a retrieval product.**
+Verdict: MobileCLIP is a mobile-ANE story. Correct only if we ship an **fp16 CoreML** path.
+
+**And that path is wide open.** rclip's CoreML export uses
+`compute_precision=ct.precision.FLOAT32` — **ANE is fp16-only, so rclip never engages it**,
+yet still hits 180 img/s on an M1 Max. Nobody in this survey has measured an fp16 CoreML
+CLIP export. Largest unclaimed differentiator found.
+
+### 2.15 More immich field throughput — the "ordinary old CPU" reality
+
+| Hardware | Model | Rate | 10k projection |
+|---|---|---:|---:|
+| Ryzen 2600 + P600, 32 GB | `ViT-B-32__laion2b_e16` | **16.7 img/s** (80k in 80 min) | 10 min |
+| same | `ViT-B-16-SigLIP-384__webli` | **4.9 img/s** (80k in 270 min) | 34 min |
+| **Synology DS920+ (Celeron J4125)**, concurrency 4 | `ViT-B-16-SigLIP2__webli` | **~2 img/s**, ~1.45 GB | **83 min** |
+| same | `ViT-SO400M-16-SigLIP2-384__webli` | **~0.17 img/s**, ~7 GB | **16 h** |
+| i5-10500 | `nllb-clip-large-siglip__v1` | 0.40–0.44 img/s | ~7 h |
+
+Sources: immich [disc #11862](https://github.com/immich-app/immich/discussions/11862),
+[disc #17135](https://github.com/immich-app/immich/discussions/17135), [disc #8104](https://github.com/immich-app/immich/discussions/8104).
+**~10× spread from model choice alone on one box** — and `MaxBatchSize` in immich covers
+only `facial_recognition` and `ocr`, never CLIP (dev, 2024-03-21: *"Inputs to the GPU aren't
+batched right now"*). FLOPs frame the whole spread (open_clip `model_profile.csv`):
+ViT-B/32 **8.82 GFLOPs** → ViT-B/16 35.13 → ViT-L/14 162.03 → ViT-H-14-378 **1006.96** =
+**114× span**. Also note SigLIP2's **256,000-token Gemma vocab** (~197M params in the text
+embedding table alone) — that is why its RSS is ~3 GB despite an 86M-param vision tower, and
+it is a real cost for a resident interactive text encoder.
+
+### 2.16 Quantization — the evidence, split into two very different decisions
+
+**Model quantization (risky, and nobody ships it for CLIP image towers):**
+
+| Method | Model | Quality delta | Speed |
+|---|---|---|---|
+| naive `quantize_dynamic` ([arXiv 2605.26415](https://arxiv.org/html/2605.26415v1), 2026-05) | CLIP ViT-B/32 | 63.3% → **58.72%** IN-1k (**−4.6 pp**) | — |
+| DeepSparse sparse-int8 (clip-retrieval) | ViT-B/32 | 72.8% → **71.1%** (−1.7 pp) | **1230 img/s**, 64-core AVX-512 VNNI Xeon, **2.84×** over fp32 |
+| OpenVINO NNCF PTQ | CLIP-B/16 | — | 285→144 MB, **1.64×** |
+| OpenVINO NNCF PTQ | SigLIP | — | 387→201 MB, **1.91×** |
+
+That paper also documents **QIRC** (quantization-induced representation collapse): layer-wise
+noise-to-signal climbing *"from below 10% in shallow blocks to 52% at Layer 11"* — CLIP
+degrades differently from CNNs. ORT's own docs warn *"it is not rare to get worse performance
+on old devices"* — our exact target — and ViT's conv patch-embed is the part that quantizes
+badly ([ORT #12925](https://github.com/microsoft/onnxruntime/issues/12925)). **Ecosystem
+signal: immich's 64 HF model repos are all fp32; Ente quantizes only its text tower.**
+(This tempers §1.3's measured 157.9 img/s int8 result: the *speed* is real and measured here,
+the *recall cost* is not yet measured here — B6/B7 must gate it.)
+
+**Embedding quantization (safe, post-hoc, and unclaimed):** [HF/mixedbread](https://github.com/huggingface/blog/blob/main/embedding-quantization.md)
+— int8 = 4× memory, **~99.3%** performance, 3.66× mean CPU speedup; binary = 32× memory,
+**~96%** *with* rescoring (92.5% without), 24.76× mean speedup. Recipe: binary Hamming top-(k×4)
+→ rescore with f32 query × int8 docs. Matryoshka truncation is similarly cheap where the model
+supports it (jina-clip-v2 1024→256 = *">99% of retrieval quality"*; nomic 768→256 = 98.0%).
+⚠️ Do **not** stack binary with aggressive MRL: 512-bit 90.8% → 256-bit 79.5% → 128-bit 60.3%.
+⚠️ **All of these retention numbers are TEXT embeddings (MTEB/BEIR). No CLIP-image equivalent
+exists — measure it ourselves before relying on it.**
+
+### 2.17 Decode — route by size; the folk wisdom is wrong at small sizes
+
+[ternaus/imread_benchmark](https://github.com/ternaus/imread_benchmark) (run 2026-05-20, 50k
+ImageNet JPEGs ~500×400, single thread, decode only, img/s):
+
+| library | EPYC 9B14 | Xeon Plat 8581C | Neoverse-V2 |
+|---|---:|---:|---:|
+| simplejpeg | **690** | **735** | **662** |
+| opencv | 664 | 721 | 645 |
+| pillow | 537 | 577 | 551 |
+| **pyvips** | **420** | **462** | **413** |
+
+**pyvips is the slowest mainstream option on small images** — per-op pipeline overhead
+dominates. It wins only when the image is large *and* shrink-on-load applies:
+`vipsthumbnail` on a 10,000×10,000 JPEG is **0.317 s** with shrink-on-load versus **4.660 s**
+with `--linear` (which disables it) — **14.7×**, though `--linear` also forces float
+linear-light math, so treat it as an upper bound. On 6000×4000 JPEGs libvips does ~4 ms/img
+threaded vs ImageMagick's ~70 ms. Apple Silicon reference (M4 Max, [arXiv 2501.13131](https://arxiv.org/html/2501.13131v1)):
+OpenCV 1016 img/s, Pillow 775 — and **Pillow-SIMD is dead** (last release 9.5.0.post2, based
+on Pillow 9.5, SSE4/AVX2 x86 only — useless on ARM). **Pillow does not release the GIL during
+decode** ([#2635](https://github.com/python-pillow/Pillow/issues/2635)) → multiprocess, ~3.4×
+at 8 workers, or let libvips thread itself via `VIPS_CONCURRENCY`.
+🔴 **Nobody has ever published a `PIL.Image.draft()` or `tjbench -scale` speedup measurement.**
+§1.2's 1.75× is, as far as this survey found, **the only measured number in existence** for
+that lever. Publish it.
+
+### 2.18 ANN recall collapses earlier than folklore says
+
+[vectorlite benchmark](https://github.com/1yefuwang1/vectorlite/blob/main/README.md)
+(i5-12600KF, WSL, **20,000 vectors**, ef=100): recall **85.7% at 128-d**, **59.5% at 1536-d**.
+Insert cost: brute force **2.73 µs/vec** vs HNSW **820.8 µs/vec (300×)** → a 20k HNSW build is
+~16 s against 0.055 s. At 1M, a serial pgvector HNSW build took **1h27m**
+([Supabase](https://supabase.com/blog/pgvector-fast-builds)). faiss's own guidelines: *"If you
+plan to perform only a few searches (say 1000-10000), the index building time will not be
+amortized"* → use `Flat`. **The escalation ladder, in order: fp32 flat → MRL truncation →
+binary + rescore → HNSW last.**
+
 ## 3. To beat the world — the bar, in numbers
 
 Every entry is a real, sourced number an incumbent has to defend, mapped to a BUDGETS.md row.
@@ -460,9 +580,9 @@ Every entry is a real, sourced number an incumbent has to defend, mapped to a BU
 | **0** | **⚠️ rclip: 180 img/s on an M1 Max** (PR #249, CoreML batch 8; its README's older PyTorch-era figure was 119 img/s) and **1.9 img/s on a 2016 Celeron J3455** (pure CPU). Plus `local-image-search`: **260 img/s on an M4 Max** (MLX, GPU) | rclip [PR #249](https://github.com/yurijmikhalevich/rclip/pull/249) + README (§2.4); §2.7.1 | **B1 (≥30 img/s) is 6× below the incumbent on comparable hardware.** Note both leaders reach those rates via **CoreML/MLX accelerators**, which a strictly CPU-only reading of the vision excludes — so the honest CPU-only bar is lower, and IMGTAG must state which game it is playing. Either way, measure rclip head-to-head before locking B1 (§5) |
 | **0b** | **157.9 img/s measured on an M3 Max, CPU-only** — CLIP-B/32 vision **int8 ONNX, batch 8, 6.33 ms/img** (fp32 batch 8 = 57 img/s; int8 batch 1 = 125 img/s) | sibling lane's direct measurement on this machine (⚠️ taken under load — a *lower* bound) | **This is the most important number in the file: ~158 img/s CPU-only makes B1's ≥30 img/s look timid, and puts "10,000 images in ~63 seconds" within reach on CPU alone.** int8 also cuts the model 352 MB → 89 MB (B9) |
 | 1 | **20 img/s CPU indexing on a 6-core 2014 i7** | photofield-ai README (measured) | The edge floor ⌂ ≥5 img/s is too soft — a 2014 6-core already does 20 |
-| 2 | **~2 img/s per core** (325 img/s ÷ 160 cores, UForm-small ONNX, batch 128) | UForm BENCHMARKS.md | On 16 cores that projects to ~32 img/s for a *small* model — B1's ≥30 img/s is roughly par, so par is not a win. Target **≥60 img/s** with a MobileCLIP/SigLIP2-class model + draft decode |
+| 2 | **~2 img/s per core** (325 img/s ÷ 160 cores, UForm-small ONNX, batch 128) | UForm BENCHMARKS.md | A *scaling sanity check* on row 0b: naive per-core extrapolation gives ~32 img/s on 16 cores, yet the direct int8 measurement here is 157.9 img/s — the difference is precision and batching, which is precisely the lever nobody else pulls. Target **≥150 img/s** on the dev target, ⌂ ≥10 img/s on the edge floor |
 | 3 | **The self-hosted status quo is ~0.2–2 img/s**: immich **1.11 img/s** (N100, CPU-only), immich **0.4 img/s** (i5-10500), PhotoPrism **0.17–0.6 img/s** (2–6 s/photo), Recognize **0.12–0.23 img/s** | §2.1.2, §2.6 | B1's ≥30 img/s is a **15–250× jump over every self-hosted incumbent**. This is the headline claim, and it is defensible because their bottlenecks are structural (batch=1, 2 threads, 1440 px decode, HTTP hop), not physical |
-| 4 | **10k images fully indexed** | vision: "time to process 10,000 images on cpu" | B2 ≤6 min ⇒ ≥28 img/s sustained. At 20 img/s (photofield-ai) the same job takes 8m20s. **Sub-3-minute 10k is a world-first claim if measured and published** |
+| 4 | **10k images fully indexed** — best documented CPU-only comparators: immich ≈2.5 h (N100), PhotoPrism 6–17 h, rclip ≈1.8 h (Celeron J3455), photofield-ai ≈8m20s (i7-5820K) | §2.1.2, §2.4, §2.6, §0 | B2 says ≤6 min. Row 0b's measured 157.9 img/s implies **~63 s of encode** for 10k, so B2 is achievable *if decode keeps up* (§1.2) — **a sub-2-minute, CPU-only, end-to-end 10k index would be the fastest published number in this field by a wide margin** |
 | 5 | **Search latency: nobody publishes one — and the leader's cold search is 60–70 s** | [immich disc #14547](https://github.com/immich-app/immich/discussions/14547); LibrePhotos "first search may take up to a minute" | B3 p50 ≤50 ms / B4 p95 ≤150 ms keystroke→painted. §1.1 proves the scan is 0.47 ms; the *only* ways to lose are text-encode and cold start. **A warm resident text tower turns the category's worst wound into our headline demo** |
 | 6 | **Model size 85.6 MB (4-bit CLIP, clip.cpp)** | clip.cpp README | B9 ≤150 MB is comfortable; aim to *beat 85.6 MB while beating ViT-B/32 quality* |
 | 7 | **Quality: "poor embeddings, misses and false positives" (immich, user)** | HN 44426233 | B5/B6/B7 are the differentiator — the incumbents ship no quality metrics at all |
@@ -470,20 +590,23 @@ Every entry is a real, sourced number an incumbent has to defend, mapped to a BU
 | 9 | **Model inference 2.26 ms (B-32) / 5.81 ms (B-16-SigLIP2) per image on a 7800X3D** | immich docs table | ⇒ inference alone allows >170 img/s single-stream. Anyone indexing at 20 img/s is losing ~90% of the time somewhere else (decode, I/O, HTTP, Python). **That gap is the prize.** |
 | 10 | **~3 GB peak RSS for SigLIP2 at f32** | immich docs table | B8 caps peak at 1.5 GB ⇒ we must land modern-tier quality *inside half the memory immich needs*. No competitor has published a quantised measurement — uncontested ground |
 
-## 4. The ten moves that make IMGTAG objectively better
+## 4. The twelve moves that make IMGTAG objectively better
 
 Ranked by (leverage × how few competitors do it). Each is grounded in a specific finding above.
 
 1. **Publish the benchmark nobody else has.** `imgtag bench {index,search,quality,resources,soak}` producing a hardware-labelled table, plus a public results file. Cost: near zero. Effect: instantly the most credible project in §2. Nobody — not immich, not Lap, not rclip — can currently answer "how many images per second?" (§0).
 2. **Drop the vector database entirely at this scale — the incumbents' own code proves it.** 0.47 ms exact brute force at 10k, 7.4 ms at 100k (§1.1). immich's `targetListCount` sets `lists=1, probes=1` below 128k assets, i.e. it *already* full-scans while paying for Postgres + VectorChord + a container; LibrePhotos uses faiss `IndexFlatIP` (exact); PhotoPrism blocked its entire CLIP feature behind a MariaDB 11.8 vector type for what is a 20 MB matmul. Shipping brute force removes a dependency class, removes recall loss, removes index-rebuild-on-model-change, and *shrinks* the code. Add ANN only above a measured crossover (~500k) — and publish that crossover.
 3. **Optimise the text tower, not the index.** Since scan is ~1% of B3, latency is text-encode + cold start. Concrete: a resident daemon with the text encoder warm; an LRU cache of query embeddings; a quantized/distilled text tower; a ≤2 s cold start (B13). No surveyed competitor treats query-side latency as the primary metric: rclip pays a full Python start per invocation, photofield-ai pays an HTTP multipart round-trip, and **immich actively unloads its model after 300 s idle (`model_ttl`)** — so the first search of the day is the slowest one, by design. Keeping the *text* tower resident costs a few hundred MB and buys the whole B3/B4 budget.
-4. **Ship the good model *by default*.** Two concrete, measured candidates the field has left on the table: **`ViT-B-32__laion2b-s34b-b79k`** — by immich's own bench it costs **+0.03 ms** over their default and returns **+7.7 recall points** (77.62 vs 69.90), i.e. a *free* upgrade nobody took; and — **for research/benchmark use only, see §2.11** — MobileCLIP2-S2 via `ort` at **75 ms/img, 77.2% ImageNet zero-shot** (open-clip-rs). ⚠️ **MobileCLIP weights are Apple `apple-amlr`, research-only**, so the ship-safe modern pick is **SigLIP2-B/32-256 int8 ONNX** (Apache-2.0, vision **95.9 MB**, immich-measured sibling 3.31 ms / 82.28 recall). Above them sits `ViT-B-16-SigLIP2` at 5.81 ms / 84.86%. Note that `ViT-L-14__openai` (19.91 ms) scores *worse* (72.99) than `ViT-B-32` laion2b at 2.29 ms — **bigger is not better here**, which is exactly the kind of claim the candidate bench must verify rather than inherit. Meanwhile rclip, Lap, photofield-ai and immich all default to **CLIP ViT-B/32 openai (2021)** — 69.9% recall by immich's own measurement — while a SigLIP2-B/16 at **84.86%** costs **+3.55 ms/image** (§2.1.1). Ente (MobileCLIP) and PixFinder (SigLIP2) are the only ones on a modern tier, and neither publishes numbers. Defaulting to the modern tier is a **+15-recall-point, ~35-second-per-10k-images** trade that nobody has taken, and it is exactly what B5's hypernym requirement (`car → vehicle → motorcycle`) needs, since hypernymy lives in the text tower's semantics, not in the search code. (Watch B8: SigLIP2 at f32 is ~3 GB RSS — the quantised/precision path is mandatory, and it is unmeasured territory for everyone.)
+4. **Ship the good model *by default*.** Two concrete, measured candidates the field has left on the table: **`ViT-B-32__laion2b-s34b-b79k`** — by immich's own bench it costs **+0.03 ms** over their default and returns **+7.7 recall points** (77.62 vs 69.90), i.e. a *free* upgrade nobody took; and **`ViT-B-16-SigLIP2__webli`** at 5.81 ms / 84.86%. ⚠️ **Do not pick MobileCLIP for CPU** — see §2.14: it is 1.5× *slower* than ViT-B-32-256 on x86 CPU, and its weights are research-only. Ship-safe modern pick: **SigLIP2-B/32-256 or B/16, int8 ONNX** (Apache-2.0, vision **95.9 MB**). Above them sits `ViT-B-16-SigLIP2` at 5.81 ms / 84.86%. Note that `ViT-L-14__openai` (19.91 ms) scores *worse* (72.99) than `ViT-B-32` laion2b at 2.29 ms — **bigger is not better here**, which is exactly the kind of claim the candidate bench must verify rather than inherit. Meanwhile rclip, Lap, photofield-ai and immich all default to **CLIP ViT-B/32 openai (2021)** — 69.9% recall by immich's own measurement — while a SigLIP2-B/16 at **84.86%** costs **+3.55 ms/image** (§2.1.1). Ente (MobileCLIP) and PixFinder (SigLIP2) are the only ones on a modern tier, and neither publishes numbers. Defaulting to the modern tier is a **+15-recall-point, ~35-second-per-10k-images** trade that nobody has taken, and it is exactly what B5's hypernym requirement (`car → vehicle → motorcycle`) needs, since hypernymy lives in the text tower's semantics, not in the search code. (Watch B8: SigLIP2 at f32 is ~3 GB RSS — the quantised/precision path is mandatory, and it is unmeasured territory for everyone.)
 5. **Make decode the engine, not the glue — this is where the race is actually won.** immich's own table says inference is **2.26–5.81 ms/img**; our §1.2 measurement says full-res JPEG decode is **163–287 ms/img** single-threaded on worst-case files. Preprocessing outweighs the model by 1–2 orders of magnitude, and *every* project in §2 treats it as plumbing. Concretely: DCT-scaled `draft()` decode (1.75× measured), EXIF-thumbnail-first decoding, libvips/`fast_image_resize` SIMD resamplers, rclip's 16-worker lookahead pipeline, and never decoding a 12 MP frame to produce a 224×224 tensor. A project that indexes at 20 img/s while its model needs 5 ms is spending ~90% of its time not doing ML — that waste is our headroom.
 6. **Ship correctness as a product feature — the anti-false-positive layer.** The loudest field complaint is quality ("lots of misses and false positives"), and *no competitor returns a calibrated score or ever says "no match"*: they all return top-K unconditionally. A calibrated absent-category threshold (B7 ≤2%) plus published precision/recall on COCO ground truth (B6) is a claim literally no one else in §2 can make.
 7. **Operational transparency as a feature (live progress + search-during-index).** The vision demands img/s, ETA, and searchable-while-indexing (B10/B11). immich gets partial-results-while-indexing for free from its per-asset writes but exposes no rate/ETA worth the name; the desktop apps show a spinner. An event-driven progress stream (≤1 s stale, ETA ±20%, zero spin-polling) is both a UX differentiator and the honest proof that the engine has no leaks (B12).
 8. **Own the agent-native niche — it has exactly one, tiny incumbent.** Every project in §2 is a GUI or a human CLI, with one exception: `Eventual-Inc/local-image-search` (9★, macOS-only, MLX/GPU-only, **no licence file**, MCP server). The vision demands "a globally available skill so agents will be able to … tag, get info about datasets, manage them, and run searches." A cross-platform, CPU-only, licensed, dataset-scoped machine API (results carrying dataset id + path/id, exactly as the vision spells out) beats that incumbent on every axis except raw M4-GPU throughput. **This is the single least-contested lane in the entire survey.**
 
 9. **Take the whole-pipeline win the incumbents left on the table.** immich's structural losses are enumerable and each is ours to invert: batch=1 → **batched inference**; `inter_op=1/intra_op=2` → **all-core ORT**; decoding a 1440 px preview to make a 224 px tensor → **decode at target scale**; HTTP-multipart hop between containers → **in-process**; f32-only → **int8/fp16**; 6 GB RAM floor → **B8's 1.5 GB**. Their own bench (2.26 ms/img) versus their own field rate (~1.11 img/s on an N100) says roughly **99.8% of wall-clock is not the model**. That is not a tuning opportunity, it is a different architecture — and it is the single most defensible reason IMGTAG can claim a 15–250× jump without a faster chip.
+
+11. **Batch the encoder — the leader does not.** immich's `MaxBatchSize` covers only faces and OCR; CLIP runs one image per `session.run`. Measured here: int8 batch 1 → batch 8 = 125 → **158 img/s**; fp32 batch 1 → 8 = 8.9 → **57 img/s (6.4×)**. CLIP-Finder2 uses batch 512 on ANE; rclip's CoreML export is fixed batch 8. Batching plus an async decode→encode pipeline is the cheapest large multiplier available, and it is unexploited by the 108k-star incumbent.
+12. **Quantize the *embeddings*, not (yet) the model.** Model int8 costs 1.7–4.6 pp of accuracy depending on method, and ORT warns it can be *slower* on old devices — our target. Embedding int8 keeps ~99.3% and binary+rescore ~96%, at 3.7×/24.8× measured speedups, needs no re-embedding if f32 is stored, and is reversible. Store f32 at full dim; derive int8/binary tiers on top. (⚠️ those retention numbers are text-embedding measurements — verify on CLIP image vectors as part of B6/B7.)
 
 **Steal list (attributed, ranked by value-per-effort):**
 `tag_embeddings.npy` precomputed zero-shot label cache (LibrePhotos) · two-stage thumbnail
@@ -514,7 +637,16 @@ add/delete on launch (CLIP-Finder2) · semantic ∪ keyword fusion (LibrePhotos)
 5. **Add two budgets the field has taught us to want:** a *cold-search* budget (immich: 60–70 s after idle) and an *indexing-politeness* budget (low OS priority; HN's "fans go crazy").
 6. **Add a licence gate to the candidate bench (§2.11).** MobileCLIP/MobileCLIP2 weights are Apple research-only and jina-clip-v2 is CC-BY-NC — both would look like winners on a pure speed/quality bench and both are unshippable. The candidate table needs a **licence column**, and any non-shippable model must be labelled "reference only".
 7. **Beat rclip's 15-second search on day one.** `sorted()` over the whole corpus instead of `np.argpartition`, plus re-materialising every vector from SQLite per invocation (§2.4). Our B3/B4 budgets already imply the fix; the point is that the *demo* — "80,000 images searched in under a millisecond of scan while the incumbent takes 15 seconds" — writes itself.
-8. **Re-check when the last lane lands.** The model/runtime-benchmark lane (SigLIP2 / MobileCLIP2 / TinyCLIP × ORT / OpenVINO / ggml, quantisation quality deltas, decode throughput, Matryoshka + binary tricks) was still running at compile time. Anything it surfaces belongs in §2.9, and §3/§4 should be re-read against its numbers before the candidate bench is finalised.
+8. **Run the 8 experiments nobody in this field has run.** Every one is cheap, and each closes a gap where *no measured number exists anywhere* — meaning whoever measures it first owns the claim:
+   1. `PIL.Image.draft()` / `tjbench -scale` speedup table (**literally unpublished; §1.2 is the only measurement found**) — ~30 min.
+   2. **fp16 CoreML CLIP export on M-series** (rclip ships fp32 → never touches the ANE) — the single largest unclaimed differentiator.
+   3. Re-derive immich's exec-time column locally (image tower vs text tower, §2.1.1) before quoting it publicly.
+   4. ORT CoreML EP vs CPU EP on the same ONNX — no such CLIP measurement exists.
+   5. MLX CLIP img/s on any M-chip — none published, from anyone.
+   6. NEON int8-vs-f32 dot product (all published int8 SIMD wins are AVX-512 VNNI; `simsimd` measures it in minutes).
+   7. CLIP recall@k vs input resolution (224/160/128/112) — decides whether the EXIF-thumbnail fast path is safe.
+   8. Recall@10 of int8/binary/MRL-truncated **CLIP image** vectors vs f32 — every published retention number is text-only.
+9. **Also unmeasured and worth owning:** HEIC decode cost on Apple Silicon (ImageIO vs libheif vs vips — Apple libraries are mostly HEIC since iOS 11), decode throughput on M1/M2/M3 (only M4 Max is published), and whether ImageIO reaches the `AppleJPEGDriver` hardware JPEG block at all.
 9. **The one thing not to lose:** every headline number in this file is either quoted from a source with its hardware, or measured here and labelled. Keep it that way — the strategy in §4 move 1 (be the project that publishes numbers) only works if our own numbers are beyond reproach.
 
 ---
@@ -562,7 +694,14 @@ candle 20,702 · transformers.js 16,206 · open_clip 14,012 · libvips 11,508 ·
 openvino 10,561 · sqlite-vec 7,919 · hnswlib 5,288 · marqo 5,018 · usearch 4,228 · tract 3,002 ·
 VectorChord 1,747 · apple/ml-mobileclip 1,593 · pgvecto.rs 2,179 (**abandoned 2025-02-26**).
 
-**Link check:** all URLs cited above returned HTTP 200 on 2026-07-22 (`curl -L -o /dev/null -w %{http_code}`).
+**Link check:** every GitHub, docs and blog URL cited in this file was fetched on
+2026-07-22 with `curl -L -o /dev/null -w %{http_code}` and returned **200**, with two
+noted exceptions: `photoprism/discussions/4771` returns **404** (the citing lane's number
+for it — "0.02 s/image at 1k → ~2 s/image at 1.75M" — is therefore **flagged unverified**
+and should not be quoted without re-sourcing), and `news.ycombinator.com` item pages
+rate-limited (**429**) on bulk checking while individual fetches succeeded; two HN quotes
+were additionally re-verified verbatim through the Algolia item API
+(comments 41555976 and 44429236 — both matched exactly).
 
 ## Appendix B — reproducing §1
 

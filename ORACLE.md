@@ -59,6 +59,21 @@ highest-bar protocol — verbatim vision, budgets as tests, honest verification,
 - **ADR-8 Idea reuse: concepts from AGPL tools, code only from MIT/Apache.** (UNKNOWNS I9.)
 - **ADR-9 CPU-only is law** (VISION verbatim: "using only the cpu"). Accel lanes (CoreML)
   are future opt-in flags, never required, never the benchmarked claim.
+- **ADR-10 Primary deploy profile = shared Linux x86 server, 8GB, no GPU, co-tenants
+  sacred** (user constraint 2026-07-22, VISION-ADDENDA.md verbatim). Consequences:
+  (a) optimize for x86 AVX2 baseline — never assume AVX512/VNNI, never assume Apple
+  silicon; M3 Max numbers are PROXY, labeled as such, until the bench runs on the real
+  server; (b) politeness-first defaults: nice ≥10 + ionice, workers ≤ cores/2, bounded
+  queues, `--full-speed` opt-in (B15 is a hard budget with a co-workload probe test);
+  (c) memory ceiling is structural: streaming decode, bounded buffers, small-model bias
+  (PE-Core-S16/T16, SigLIP-v1, UForm gain rank vs SigLIP2's fat text tower; B8 tightened
+  to ≤1.0GB indexing / ≤1.5GB total under load); (d) **first-run autotune**: `imgtag
+  doctor` runs a ~30s micro-bench on the actual deploy machine (fp32 vs int8, thread
+  count, batch size — int8 winners differ per ISA) and stores the recipe in the machine
+  profile; "generic and ready" means the engine adapts itself, not that we guessed;
+  (e) quant decisions are PER-ARCH — NEON results never transfer to AVX2 (clip.cpp
+  anomaly was x86; DeepSparse win was AVX512-VNNI; measure on target). Revisit if: the
+  user later asks for Mac-local optimization (add profile, change no defaults).
 
 ## 3. Dead ends (do not rediscover)
 
@@ -169,6 +184,9 @@ exceeds its timebox; (f) you catch yourself guessing a number you could measure.
   content provenance (verifiable claims + URLs), not sender labels.
 - 2026-07-22 10:20 · rclip README's 119 img/s conflicts with its own PR #249 (~180 img/s
   CoreML) — README is stale, PR is measured. Lesson: PRs > READMEs for numbers.
+- 2026-07-22 10:45 · User constraint mid-mission: primary deploy = shared Linux x86 8GB
+  no-GPU server, co-tenants must not slow. → ADR-10, B8/B15 tightened, Wave A briefs
+  amended by broadcast. Lesson: the harbor moved; the map moved with it same-pass.
 
 ---
 
