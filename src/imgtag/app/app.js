@@ -102,6 +102,9 @@ const API = {
       calibration: j.calibration || null,   // "fitted" | "unfitted" — gates every confidence word
       servedBy: j.served_by || null,        // "tag-table" | "warm-tower" | "cold-load"
       towerLoadMs: Number.isFinite(j.text_tower_load_ms) ? j.text_tower_load_ms : null,
+      // deliberately surfaced, not swallowed: the engine collapses duplicate ids but reports
+      // how many it collapsed, so an indexer writing repeats stays visible downstream
+      collapsedDuplicates: Number.isFinite(j.collapsed_duplicates) ? j.collapsed_duplicates : null,
       noMatch: j.no_match === true || (j.hits || []).length === 0,
       hits: (j.hits || []).map(normHit),
     };
@@ -197,6 +200,7 @@ function normHit(h) {
     score: Number.isFinite(h.score) ? h.score : null,
     p: Number.isFinite(h.p) ? h.p : null,
     exists: h.exists !== false,
+    paths: Array.isArray(h.paths) && h.paths.length > 1 ? h.paths : null,  // same bytes, many files
     why: h.why || null,
     w: h.w ?? null, h: h.h ?? null,
   };
@@ -532,6 +536,10 @@ function openDetail(item) {
   if (item.why) {
     side.append(kv('why it matched', item.why.tag ? `${item.why.path}: ${item.why.tag}` : String(item.why.path || '—')));
   }
+  if (item.paths) {
+    side.append(kv(`also on disk at ${item.paths.length - 1} other path${item.paths.length > 2 ? 's' : ''}`,
+      item.paths.slice(1).join('\n')));
+  }
   if (item.exists === false) side.append(kv('status', 'indexed, but the file is no longer on disk'));
   const close = el('button', { className: 'detail__close', textContent: 'Close  ·  Esc', type: 'button' });
   close.addEventListener('click', () => dlg.close());
@@ -795,6 +803,15 @@ async function viewSearch(q, dataset) {
         running.length ? el('span', { className: 'chip chip--live', style: 'margin-left:auto', textContent: `● ${running.reduce((a, j) => a + j.imgS, 0).toFixed(1)} img/s` }) : null,
       ));
     }
+    if (r.collapsedDuplicates) {
+      // the engine folded repeats into one image each — say so rather than let the count
+      // silently disagree with k
+      bannerSlot.append(el('p', { className: 'hint hint--caveat' },
+        el('b', { textContent: n0(r.collapsedDuplicates) }),
+        ' duplicate rows were collapsed into single images. Identity is the file’s content '
+        + 'hash, so the same bytes indexed more than once are one result — the count is '
+        + 'shown because repeated rows mean something upstream wrote them twice.'));
+    }
     const covPct = cov ? pct(cov.indexed, cov.total) : 100;
     const covBar = $('#qCov');
     covBar.hidden = !cov || covPct >= 99.999;
@@ -966,8 +983,14 @@ async function viewDataset(slug) {
   paintStatus({ latency: '', hits: '', coverage: '' });
 }
 
-// (5) moderation — ADR-14. Two sources, never one number; two tiers, never merged.
+// (5) moderation — ADR-14. Two sources, never one number; tiers never merged.
+// Categories and tiers are read from the payload, never hard-coded: the safety track
+// (people lying down + injury/destruction escalation, VISION-ADDENDA 13:20Z) adds both a
+// new category and an `alert` tier, and this view must render them the day they ship.
 const CATS = ['nudity', 'weapons', 'drugs'];
+const TIER_ORDER = ['alert', 'violation', 'review'];   // most severe first
+const tierRank = (t) => { const i = TIER_ORDER.indexOf(t); return i === -1 ? 99 : i; };
+const TIER_LABEL = { alert: 'alert', violation: 'violation', review: 'needs review' };
 async function viewModeration() {
   const root = el('div', { className: 'view' });
   const pad = el('div', { className: 'pad' });
@@ -985,6 +1008,10 @@ async function viewModeration() {
     const labels = m.datasets?.[0]?.labels || {};
     // the per-category calibration map is authoritative; track pages read it from here
     if (m.calibration && typeof m.calibration === 'object') S.modCalibration = m.calibration;
+    if (m.totals) S.modCounts = m.totals;      // also tells track pages which tiers exist
+    // whatever tiers the engine reports, most severe first — not a fixed pair
+    const tiers = [...new Set(Object.values(m.totals || {}).flatMap((t) => Object.keys(t)))]
+      .sort((a, b) => tierRank(a) - tierRank(b));
     const cats = Object.keys(m.totals || {}).length ? Object.keys(m.totals) : CATS;
     $('#modSum').textContent = `${n0(m.indexed)} images scanned across ${m.datasets?.length || 0} datasets`;
 
@@ -1024,8 +1051,7 @@ async function viewModeration() {
       const calib = typeof m.calibration === 'string' ? m.calibration : (m.calibration || {})[cat];
       tb.append(el('tr', null,
         el('td', null, el('a', { href: `#/track/${encodeURIComponent(cat)}`, textContent: labels[cat] || cat, style: 'color:inherit' })),
-        cell(cat, 'violation', t.violation),
-        cell(cat, 'review', t.review),
+        ...tiers.map((tier) => cell(cat, tier, t[tier])),
         el('td', null,
           el('span', {
             className: `chip ${ready ? '' : 'chip--warn'}`,
@@ -1038,21 +1064,19 @@ async function viewModeration() {
       el('table', { style: 'margin-top:12px' },
         el('thead', null, el('tr', null,
           el('th', { textContent: 'category' }),
-          el('th', { className: 'n', textContent: 'violation' }),
-          el('th', { className: 'n', textContent: 'needs review' }),
+          ...tiers.map((tier) => el('th', { className: 'n', textContent: TIER_LABEL[tier] || tier })),
           el('th', { textContent: '' }))),
         tb));
 
     const dtb = el('tbody');
     for (const d of m.datasets || []) {
       for (const cat of cats) {
-        const c = (d.counts || {})[cat] || { violation: 0, review: 0 };
-        if (!c.violation && !c.review) continue;
+        const c = (d.counts || {})[cat] || {};
+        if (!tiers.some((tier) => c[tier])) continue;
         dtb.append(el('tr', null,
           el('td', null, el('a', { href: `#/d/${encodeURIComponent(d.dataset)}`, textContent: d.dataset, style: 'color:inherit' })),
           el('td', { textContent: labels[cat] || cat }),
-          el('td', { className: 'n', textContent: n0(c.violation) }),
-          el('td', { className: 'n', textContent: n0(c.review) }),
+          ...tiers.map((tier) => el('td', { className: 'n', textContent: n0(c[tier] || 0) })),
           el('td', { className: 'n', textContent: n0(d.indexed) })));
       }
     }
@@ -1061,8 +1085,7 @@ async function viewModeration() {
         el('table', { style: 'margin-top:12px' },
           el('thead', null, el('tr', null,
             el('th', { textContent: 'dataset' }), el('th', { textContent: 'category' }),
-            el('th', { className: 'n', textContent: 'violation' }),
-            el('th', { className: 'n', textContent: 'needs review' }),
+            ...tiers.map((tier) => el('th', { className: 'n', textContent: TIER_LABEL[tier] || tier })),
             el('th', { className: 'n', textContent: 'scanned' }))),
           dtb));
     }
@@ -1085,7 +1108,12 @@ async function viewTrack(category, tier) {
     el('h1', { textContent: category }),
     el('span', { className: 'sub', id: 'trackSum', textContent: 'loading…' })));
   const chips = el('div', { className: 'filters' });
-  for (const [t, label] of [['', 'violations first, then review'], ['violation', 'violation only'], ['review', 'needs review only']]) {
+  // tiers come from the last moderation scan when we have it, so a new tier (alert) appears
+  // here the moment the engine reports it — nothing about this list is hard-coded
+  const known = Object.keys((S.modCounts || {})[category] || {}).sort((a, b) => tierRank(a) - tierRank(b));
+  const tierChoices = [['', 'most severe first'], ...(known.length ? known : ['violation', 'review'])
+    .map((t) => [t, `${TIER_LABEL[t] || t} only`])];
+  for (const [t, label] of tierChoices) {
     const b = el('button', { type: 'button', textContent: label });
     b.setAttribute('aria-pressed', String((tier || '') === t));
     b.addEventListener('click', () => go(`#/track/${encodeURIComponent(category)}${t ? `?tier=${t}` : ''}`));
