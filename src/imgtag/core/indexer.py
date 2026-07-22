@@ -939,7 +939,10 @@ def track_recount(dataset: str, home: Path | None = None) -> dict:
     counts: dict[str, dict] = {}
     for cat, d in flags.items():
         for tier in d["tiers"]:
-            if tier in ("unknown", "none"):
+            # "pending" (single-col unfitted, deferred to the reader), "none" and "unknown"
+            # are non-firing markers — never counted, so a deferred track reads 0 stored,
+            # not a phantom bucket
+            if tier in ("unknown", "none", "pending"):
                 continue
             counts.setdefault(tier, {})
             counts[tier][cat] = counts[tier].get(cat, 0) + 1

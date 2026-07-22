@@ -347,3 +347,55 @@ def test_platt_matches_tags_platt_apply():
     from imgtag.core.tags import platt_apply
     ab, xs = [103.018, -5.6314], np.array([0.0, 0.03, 0.06, 0.1], np.float32)
     np.testing.assert_allclose(store._platt(xs, ab), np.asarray(platt_apply(xs, ab), np.float64), atol=1e-9)
+
+
+def test_derive_routing_pending_vs_band_vs_arbitrated():
+    """dataset_flags routes a stored column to the right derivation (b-daemon's split):
+    UNFITTED single-margin -> pending (never τ-banded, stops the OOD over-fire); a
+    calibrated-p or calibration==fitted margin -> band; margin_arbitrated -> arbitrate."""
+    import numpy as np
+
+    col1 = np.array([0.9, 0.05], np.float32)
+    # unfitted margin (scorer=margin, calibration != fitted) -> pending
+    assert store._derive_for_track(col1, {"scorer": "margin", "calibration": "fp-budget",
+                                          "tau_violation": 0.01}) == ["pending", "pending"]
+    # a calibrated probability with an absolute tau (weapons: no "margin" scorer) -> band
+    assert store._derive_for_track(col1, {"tau_violation": 0.5}) == ["violation", "none"]
+    # calibration == "fitted" margin (sports) -> band, not pending
+    assert store._derive_for_track(col1, {"scorer": "margin", "calibration": "fitted",
+                                          "tau_violation": 0.5}) == ["violation", "none"]
+    # arbitrated -> the two-margin branch
+    two = np.array([[0.30, 0.0], [-0.3, -0.3]], np.float32)
+    assert store._derive_for_track(two, {"scorer": "margin_arbitrated", "platt": [-10.0, 0.0],
+                                         "tau": 0.5, "tau_review": 0.5, "tier_margin": 0.1}) == ["violation", "none"]
+
+
+def test_fitted_sha_guard_drops_wrong_model():
+    """b-daemon's SHA-GUARD mirrored: a fitted file declaring a model_sha that != the
+    dataset's is ignored, so a base-model fit can't contaminate a same-base variant."""
+    import json as _json
+
+    import pytest
+
+    home = None  # unused
+    del home
+    import tempfile
+    from pathlib import Path
+    d = Path(tempfile.mkdtemp()) / "moderation"
+    d.mkdir(parents=True)
+    (d / "wp-m.json").write_text(_json.dumps({"tau_violation": 0.5, "model_sha": "RIGHT"}))
+    import unittest.mock as m
+    with m.patch.object(store, "_DATA", d.parent):
+        assert store._fitted_guarded("wp", "m", "RIGHT")["tau_violation"] == 0.5   # match -> kept
+        assert store._fitted_guarded("wp", "m", "WRONG") == {}                     # mismatch -> dropped
+        assert store._fitted_guarded("wp", "m", None)["tau_violation"] == 0.5      # no dataset sha -> kept
+    pytest  # noqa
+
+
+def test_tier_margin_none_coalesces_to_nested():
+    import numpy as np
+    # top-level tier_margin: null must fall through to arbitrated_storage.tier_margin
+    spec = {"scorer": "margin_arbitrated", "platt": [-10.0, 0.0], "tau": 0.5, "tau_review": 0.5,
+            "tier_margin": None, "arbitrated_storage": {"tier_margin": 0.1}}
+    # margin 0.30 vs margin_review 0.25: needs tier_margin 0.1 to demote (0.30 < 0.35)
+    assert store.derive_tiers(np.array([[0.30, 0.25]], np.float32), spec) == ["review"]

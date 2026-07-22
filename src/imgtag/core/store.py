@@ -176,7 +176,19 @@ def _moderation_json_cfg(category: str) -> dict:
         return {}
 
 
-def resolve_track_cfg(category: str, model_id: str, spec: dict | None = None) -> dict:
+def _fitted_guarded(category: str, model_id: str, model_sha: str | None) -> dict:
+    """`fitted_tau` with b-daemon's SHA-GUARD (search.py): a fitted file is keyed by
+    model_id (filename), but the base-model fallback could apply an fp32 fit to a same-base
+    int8 dataset. If the file declares a `model_sha`, it must match the dataset's or the
+    file is ignored — no wrong-model contamination."""
+    f = fitted_tau(category, model_id)
+    if f.get("model_sha") and model_sha and f["model_sha"] != model_sha:
+        return {}
+    return f
+
+
+def resolve_track_cfg(category: str, model_id: str, spec: dict | None = None,
+                      model_sha: str | None = None) -> dict:
     """Effective tier config, FITTED-FILE-WINS precedence:
 
         moderation.json (disk base) < caller spec < fitted(base_model) < fitted(model_id)
@@ -185,10 +197,11 @@ def resolve_track_cfg(category: str, model_id: str, spec: dict | None = None) ->
     intentional spec gets it, not the disk default — b-daemon's general-consumer fix), and
     the per-model fitted file wins over everything, which is why a τ refit is free (T1) and
     why store-side and b-daemon's reader resolve τ identically: both read the SAME
-    `fitted_tau`. `model_id` is the index manifest's model_id (the reader's own input)."""
+    `fitted_tau`, both apply the same SHA-guard. `model_id`/`model_sha` are the index
+    manifest's (the reader's own inputs)."""
     base = model_id.rsplit("-", 1)[0] if model_id else ""
     return {**_moderation_json_cfg(category), **(spec or {}),
-            **fitted_tau(category, base), **fitted_tau(category, model_id)}
+            **_fitted_guarded(category, base, model_sha), **_fitted_guarded(category, model_id, model_sha)}
 
 
 def dataset_flags(dataset: str, home: Path | None = None, snap=None) -> dict:
@@ -202,13 +215,37 @@ def dataset_flags(dataset: str, home: Path | None = None, snap=None) -> dict:
     snap = snap or open_snapshot(dataset, home)
     recorded = ((snap.manifest.get("tracks_spec") or {}).get("tiers")) or {}
     model_id = snap.manifest.get("model_id", "")
+    model_sha = snap.manifest.get("model_sha")
     out = {}
     for cat, col in snap.tracks.items():
         if col is None:
             continue
-        cfg = resolve_track_cfg(cat, model_id, recorded.get(cat, {}))
-        out[cat] = {"scores": col, "tiers": derive_tiers(col, cfg)}
+        cfg = resolve_track_cfg(cat, model_id, recorded.get(cat, {}), model_sha)
+        out[cat] = {"scores": col, "tiers": _derive_for_track(col, cfg), "cfg_calibration": cfg.get("calibration")}
     return out
+
+
+def _derive_for_track(col, cfg: dict) -> list[str]:
+    """Route a stored column to the RIGHT derivation, so store-side never τ-bands a value
+    the reader derives differently (the OOD split-brain b-daemon flagged). Three cases,
+    matching b-daemon's reader (trusted == calibration=="fitted"):
+
+    - `margin_arbitrated` two-margin track -> the arbitration branch.
+    - UNFITTED single-margin track (scorer=="margin" AND calibration != "fitted") ->
+      "pending": store-side does NOT band a raw margin against τ (that mass-fires the OOD
+      tail, weaponprobe -> 160 nudity). Its real tiers come from the reader's live per-tier
+      z-score derivation (current-scan). When the head emits per-tier margin columns, this
+      becomes the shared `derive_unfitted` path and store-side stops deferring.
+    - otherwise (a calibrated probability with an absolute τ — weapons; or a
+      calibration=="fitted" margin — sports) -> band τ.
+    """
+    s = np.asarray(col, np.float32)
+    if cfg.get("scorer") == "margin_arbitrated" or cfg.get("col_roles") == ["margin", "margin_review"]:
+        return derive_tiers(s, cfg)  # arbitrated branch lives inside derive_tiers
+    if cfg.get("scorer") == "margin" and cfg.get("calibration") != "fitted":
+        n = s.shape[0] if s.ndim else 1
+        return ["pending"] * n  # fail-open: fires nothing; the reader's current-scan is authoritative
+    return derive_tiers(s, cfg)
 
 
 def _platt(x, ab) -> np.ndarray:
@@ -235,7 +272,9 @@ def _derive_arbitrated(scores: np.ndarray, spec: dict) -> list[str]:
     tau = float(spec.get("tau", 0.0))
     tau_r = float(spec.get("tau_review", tau))
     arb = spec.get("arbitrated_storage") or {}
-    tier_margin = float(spec.get("tier_margin", arb.get("tier_margin", 0.0)))
+    # None-coalesce (not a keyword default): a top-level `tier_margin: null` must not zero
+    # the separation test — fall through to the nested value, then 0.0.
+    tier_margin = float(spec.get("tier_margin") or arb.get("tier_margin") or 0.0)
     platt = spec.get("platt")
     p_m, p_mr = _platt(margin, platt), _platt(margin_review, platt)
     out = []
