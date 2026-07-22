@@ -2,9 +2,12 @@
 
 OWNER: b-engine. "Generic and ready" means the engine adapts itself to the host, not
 that we guessed: `imgtag doctor` micro-benches precision × intra_op × batch on the real
-machine (~30s) and writes ~/.imgtag/profile.json. Until it has run, precision is fp32
-(ADR-10e: int8 is enabled only by a measured win on THIS host — on pre-VNNI AVX2 it is
-routinely a slowdown).
+machine (~30s) and writes ~/.imgtag/profile.json.
+
+Precision is fp32 — before AND after tuning. RULING 2026-07-22 (B24 two-tier gate):
+v1 ships fp32 vision everywhere; doctor measures the int8 speed-up and reports it as an
+offer (`int8_offer`), but only `--allow-int8` / `--precision int8` enables it, and only
+after B24 tier-2 passes on that arch.
 """
 
 from __future__ import annotations
@@ -141,12 +144,14 @@ def save_profile(prof: dict, home: Path | None = None) -> Path:
     return p
 
 
-def autotune(backend_name: str = None, timebox_s: float = 45.0, n_images: int = 8, log=print) -> dict:
+def autotune(backend_name: str = None, timebox_s: float = 45.0, n_images: int = 8, log=print,
+             allow_int8: bool = False) -> dict:
     """~30s micro-bench of precision × intra_op × batch on THIS machine (ADR-10d).
 
-    Geometry stays `central` (one ORT session fed by decode workers) — the per-worker-
-    session geometry costs SESSION_RSS_MB per worker and does not fit B8 on the 8GB
-    target; it remains a bench-swept axis, not a doctor knob.
+    Also picks the pipeline geometry: `central` (one session fed by decode workers) vs
+    `worker` (a session per decode worker, memory permitting), projecting the latter from
+    the measured intra_op=1 row × the memory-derived worker count. `bench index
+    --geometry` settles it for real; doctor only has to pick a sane default in ~30s.
     """
     from .models import DEFAULT_BACKEND, ModelBackend, registry
 
@@ -183,10 +188,14 @@ def autotune(backend_name: str = None, timebox_s: float = 45.0, n_images: int = 
             break
     if not rows:
         raise RuntimeError(f"no runnable configuration for backend {name!r}")
-    best = max(rows, key=lambda r: r["img_s"])
     fp32_best = max((r for r in rows if r["precision"] == "fp32"), key=lambda r: r["img_s"], default=None)
-    if fp32_best and best["precision"] == "int8" and best["img_s"] < fp32_best["img_s"] * 1.05:
-        best = fp32_best  # int8 must EARN it on this host (ADR-10e)
+    int8_best = max((r for r in rows if r["precision"] == "int8"), key=lambda r: r["img_s"], default=None)
+    # RULING 2026-07-22 (B24 two-tier gate): v1 ships fp32 vision EVERYWHERE. int8 is an
+    # opt-in speed lane that must first pass B24 tier-2 on this arch — doctor measures it
+    # and reports the offer, but never enables it on its own.
+    best = fp32_best or int8_best
+    if allow_int8 and int8_best and (not fp32_best or int8_best["img_s"] > fp32_best["img_s"] * 1.05):
+        best = int8_best
     # geometry: central (one session at the best intra_op) vs worker (W sessions at
     # intra_op=1). Projected from the measured intra=1 row of the winning precision —
     # derived from measurement, not guessed; `bench index --geometry` settles it.
@@ -206,6 +215,11 @@ def autotune(backend_name: str = None, timebox_s: float = 45.0, n_images: int = 
                              "worker_processes": w_workers, "basis": "measured intra_op=1 row x workers"},
         worker_intra_op=1,
         sweep=rows,
+        int8_offer=(
+            {"img_s": int8_best["img_s"], "speedup_vs_fp32": round(int8_best["img_s"] / fp32_best["img_s"], 2),
+             "intra_op": int8_best["intra_op"], "batch": int8_best["batch"],
+             "status": "opt-in only until it passes B24 tier-2 on this arch (--allow-int8 / --precision int8)"}
+            if int8_best and fp32_best else None),
         tuned_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         tune_seconds=round(time.time() - t0, 1),
         loadavg=[round(x, 2) for x in os.getloadavg()],

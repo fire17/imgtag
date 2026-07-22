@@ -251,7 +251,7 @@ def cmd_doctor(args) -> int:
         prof = load_profile()
     else:
         _err(f"autotuning on {cores} usable cores ({src}) — ~30s ...")
-        prof = autotune(args.model, log=_err if not args.json else (lambda m: None))
+        prof = autotune(args.model, log=_err if not args.json else (lambda m: None), allow_int8=args.allow_int8)
         save_profile(prof)
     _out(args, prof,
          f"cores={prof['cores']} ({prof['cores_source']}) workers={prof['workers']} "
@@ -320,6 +320,8 @@ def build_parser() -> argparse.ArgumentParser:
     d.add_argument("--show", action="store_true", help="print the stored profile, do not re-tune")
     d.add_argument("--model")
     d.add_argument("--fetch", metavar="BACKEND", help="download a backend's artifacts")
+    d.add_argument("--allow-int8", action="store_true",
+                   help="let the tune select int8 vision (B24: opt-in speed lane, v1 default is fp32)")
     d.set_defaults(fn=cmd_doctor)
 
     j = sub.add_parser("job", help="job status", parents=[common])
