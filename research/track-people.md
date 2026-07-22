@@ -13,6 +13,17 @@
 
 ---
 
+> **Checkpoint 2026-07-22 ~14:30Z.** Track COMPLETE and committed (`6342eae`): module +
+> shipped cascade + 16 tests (green) + 3 bench scripts + fetch script + this doc. All
+> numbers below are measured first-party on COCO val2017 and verified end-to-end through
+> the real CLI. Open items are coordination-only (not blocking): b-engine to register a
+> non-counting `match` tier (14:16Z-sanctioned) so per-image category chips can flag;
+> b-daemon to derive the four labels from the raw count sidecars at read. Darwin item
+> D-people-1 (distil a person-count head to lift one-person past 0.561) is logged, not owed.
+> Latency re-measure on the 🐧 target still pending (FLOPs is the trustworthy budget number).
+
+---
+
 ## 0. TL;DR
 
 - Counting is **provably not in a single global embedding** (measured §2): presence is
