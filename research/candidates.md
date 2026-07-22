@@ -388,6 +388,15 @@ Artifacts: `vision_fp32_mb` 351.8MB · `vision_int8_mb` 96.0MB · `text_fp32_mb`
 
 <!-- HANDWRITTEN -->
 
+> **CHECKPOINT 2026-07-22 ~17:55 (b-bench).** Phase 1 contention-immune work COMPLETE +
+> committed: candidate matrix (7 arms incl. MC2 ceiling), B24 two-tier, CAL-SET Platt fit
+> INSTALLED + verified live end-to-end by b-daemon (model_sha 8c080c43… matched first try,
+> honest no_match confirmed). BUDGETS B6 (N_pos≥25 floor) + B9 (≤200MB fp32-vision floor)
+> edited per conductor rulings. **PERF STILL ADVISORY** — the authoritative quiet-window
+> throughput pass has NOT been run (see the honesty note below the table). The WINNER verdict
+> is unaffected: it rests on per-worker RSS (contention-immune) + quality (contention-immune),
+> not on img/s. Karpathy-split B17 + fp16-weights RSS/speed bench = next pass.
+
 ## WINNER — the default backend recommendation (b-bench, phase 1)
 
 > Everything above this marker is auto-generated each run; everything below is the human
