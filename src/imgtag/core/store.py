@@ -75,6 +75,30 @@ def _fsync_dir(d: Path) -> None:
         os.close(fd)
 
 
+def writer_lock_free(dataset: str, home: Path | None = None) -> bool:
+    """True when NO writer holds this dataset — the kernel's answer, not a heuristic.
+
+    ADR-6 makes the flock the sole authority on liveness: a job status file frozen at
+    "queued" by a killed process is a corpse, and anything that trusts it (delete, info,
+    recovery) inherits a lie. Acquiring the lock for an instant is the only honest test.
+    """
+    p = dataset_dir(dataset, home) / ".writer.lock"
+    if not p.exists():
+        return True
+    try:
+        fd = os.open(p, os.O_RDWR)
+    except OSError:
+        return True
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        return True
+    except OSError:
+        return False
+    finally:
+        os.close(fd)
+
+
 def read_manifest(dataset: str, home: Path | None = None) -> dict:
     p = dataset_dir(dataset, home) / "manifest.json"
     try:
@@ -184,6 +208,7 @@ class Writer:
     def __init__(self, dataset: str, model, home: Path | None = None, job_id: str | None = None):
         self.dataset = dataset
         self.model = model
+        self.home = home
         self.dir = dataset_dir(dataset, home)
         if job_id and not re.fullmatch(r"[0-9A-Za-z_-]{1,32}", job_id):
             # the id becomes a FILENAME (shard-<id>-0000.f32) — never let a caller's
@@ -207,6 +232,12 @@ class Writer:
         self._acquire()
         self.manifest = self._load_or_init()
         self.recovery = recover(self.dir, self.manifest)  # torn tails + orphans, write-open only
+        # We hold the exclusive lock, so every OTHER queued/running record for this
+        # dataset is a corpse by definition (ADR-6: the flock is the authority).
+        from .progress import reap_stale
+
+        for jid in reap_stale(self.dataset, self.home, keep=self.job_id):
+            self.recovery.append(f"closed stale job record {jid}")
         self._commit()
         self._install_signals()
         self._thread = threading.Thread(target=self._loop, name="imgtag-flusher", daemon=True)

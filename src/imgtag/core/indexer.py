@@ -251,7 +251,8 @@ class _Timeout(Exception):
     pass
 
 
-def _worker(task_q, ready_q, free_q, shm_name, size, squash, resample_name, sem, nice_level, worker_be=None):
+def _worker(task_q, ready_q, free_q, shm_name, size, squash, resample_name, sem, nice_level, worker_be=None,
+            known_ids=frozenset()):
     """geometry=central: decode into a shm slot, the coordinator runs the one session.
     geometry=worker  : this process owns an ORT session and returns the embedding
     (measured 1.7× on CPU — process-level parallelism beats intra-op threading — at the
@@ -304,6 +305,12 @@ def _worker(task_q, ready_q, free_q, shm_name, size, squash, resample_name, sem,
                     except (AttributeError, OSError):
                         pass
                 image_id = xxhash.xxh64(buf).hexdigest()
+                if image_id in known_ids:
+                    # same BYTES already in this dataset: never decode, never embed, never
+                    # append a second row (IA: duplicates collapse to one row; B12: no
+                    # re-embedding of content we already have)
+                    ready_q.put({"duplicate": True, "image_id": image_id, "path": str(p), "pid": os.getpid()})
+                    continue
                 im = Image.open(io.BytesIO(buf))
                 w, h = im.size
                 if heavy:
@@ -425,9 +432,11 @@ def index(
 
     # incremental gate (B12 compute leak): unchanged files are never re-embedded
     known: dict[str, tuple[float, int]] = {}
+    known_ids: frozenset = frozenset()
     try:
         snap = open_snapshot(dataset, home)
         known = {r["path"]: (r.get("mtime", -1), r.get("size", -1)) for r in snap.ids}
+        known_ids = frozenset(r["image_id"] for r in snap.ids)
         del snap
     except Exception:
         pass
@@ -469,7 +478,7 @@ def index(
                 pr = ctx.Process(
                     target=_worker,
                     args=(task_q, ready_q, free_q, shm.name, be.size, be.squash, be.spec["resample"], sem,
-                          0 if full_speed else 10, worker_be),
+                          0 if full_speed else 10, worker_be, known_ids),
                     daemon=True,
                 )
                 pr.start()
@@ -479,6 +488,9 @@ def index(
                 f"{be.model_id}, batch {batch}, intra_op {prof.get('intra_op')}")
 
             received = 0
+            duplicates = 0
+            seen_ids = set(known_ids)   # + everything this job appends, so a folder that
+            # contains the same photo twice still yields exactly one row
             pend_slots: list[int] = []
             pend_embs: list[np.ndarray] = []
             pend_recs: list[dict] = []
@@ -526,11 +538,24 @@ def index(
                     continue
                 t_queue += time.perf_counter() - t
                 received += 1
+                if msg.get("duplicate"):
+                    duplicates += 1
+                    continue
                 if "error" in msg:
                     job.add_failure(msg["path"], msg["error"])
                 else:
                     t_decode += msg.get("decode_ms", 0.0)
                     t_infer += msg.get("infer_ms", 0.0) / 1000.0
+                    # dedup BEFORE the batch buffers: two workers can carry the same
+                    # content concurrently, and appending its embedding first would leave
+                    # embs and recs different lengths
+                    if msg["image_id"] in seen_ids:
+                        duplicates += 1
+                        if msg.get("slot") is not None:
+                            free_q.put(msg["slot"])
+                        job.update(w.count, inflight=received - w.count)
+                        continue
+                    seen_ids.add(msg["image_id"])
                     if msg.get("emb") is not None:
                         pend_embs.append(np.frombuffer(msg["emb"], np.float32))
                     else:
@@ -562,6 +587,7 @@ def index(
                 "indexed": n - prior,
                 "count": n,
                 "skipped": skipped,
+                "duplicates": duplicates,
                 "failed": job.state["failed"],
                 "total_files": len(files),
                 "seconds": round(wall, 2),

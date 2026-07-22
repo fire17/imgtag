@@ -48,6 +48,35 @@ def test_append_flush_and_snapshot(tmp_path):
     np.testing.assert_allclose(np.asarray(snap.emb), e, rtol=0, atol=0)
 
 
+def test_reap_stale_uses_the_flock_not_the_status_file(tmp_path):
+    """ADR-6: a job frozen at 'running' by a killed process is a corpse the moment its
+    writer lock is free — liveness is the kernel's answer, never the status file."""
+    from imgtag.core.progress import Job, is_corpse, reap_stale
+
+    Job("ghost1", "ds", 0, home=tmp_path, state="running").start()          # never held a lock
+    Job("ghost2", "ds", 0, home=tmp_path, state="queued", pid=2 ** 31 - 1)  # dead pid
+    with _w(tmp_path) as w:                                                  # a REAL live writer
+        # while a writer holds the lock, nothing for this dataset is reaped
+        assert reap_stale("ds", home=tmp_path, keep=w.job_id) == []
+    # lock released -> both ghosts are provably dead
+    closed = set(reap_stale("ds", home=tmp_path))
+    assert {"ghost1", "ghost2"} <= closed
+    from imgtag.core.progress import read_job
+    assert read_job("ghost1", tmp_path)["state"] == "failed"
+
+
+def test_queued_job_within_grace_is_not_reaped(tmp_path):
+    """A queued job whose recorded pid is alive is loading a model, not dead."""
+    import os
+
+    from imgtag.core.progress import Job, is_corpse
+
+    j = Job("starting", "ds", 0, home=tmp_path, state="queued", pid=os.getpid()).state
+    assert is_corpse(j, lock_free=True) is False   # our own pid is alive
+    j["pid"] = 2 ** 31 - 1
+    assert is_corpse(j, lock_free=True) is True     # dead pid
+
+
 def test_two_writer_exclusion(tmp_path):
     with _w(tmp_path):
         with pytest.raises(store.LockedError):

@@ -61,6 +61,88 @@ def clear_abort(job_id: str, home: Path | None = None) -> None:
     abort_path(job_id, home).unlink(missing_ok=True)
 
 
+def mark_stale(job_id: str, home: Path | None = None, reason: str = "stale: writer lock free") -> bool:
+    """Close a job record whose writer is provably gone. Returns True if it changed."""
+    p = jobs_dir(home) / f"{job_id}.json"
+    try:
+        j = json.loads(p.read_bytes())
+    except (OSError, ValueError):
+        return False
+    if j.get("state") not in ("queued", "running"):
+        return False
+    j.update(state="failed", error=reason, inflight=0, in_flight=0, updated=time.time())
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(json.dumps(j))
+    os.replace(tmp, p)
+    return True
+
+
+STARTUP_GRACE_S = 45.0  # a queued job may legitimately spend this long loading a model
+                        # before it ever reaches the Writer and takes the lock
+
+
+def _pid_alive(pid) -> bool:
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except (OSError, TypeError, ValueError):
+        return False
+
+
+def is_corpse(job: dict, lock_free: bool, grace_s: float = STARTUP_GRACE_S) -> bool:
+    """Is this 'live' record actually dead? Kernel truth first, clock last.
+
+    RUNNING means a Writer exists, and a Writer holds the flock — so a free lock proves
+    the record is a corpse (ADR-6: the flock is the authority, never the status file).
+    QUEUED is different: the job has not reached its Writer yet, so a free lock proves
+    nothing during the startup window. There we ask the kernel about the recorded pid,
+    and only fall back to the clock when no pid was recorded.
+    """
+    if job.get("state") not in ("queued", "running"):
+        return False
+    if not lock_free:
+        return False
+    if job.get("state") == "running":
+        return True
+    if job.get("pid") is not None:
+        return not _pid_alive(job["pid"])
+    return (time.time() - float(job.get("updated") or job.get("started") or 0)) > grace_s
+
+
+def reap_stale(dataset: str, home: Path | None = None, keep: str | None = None) -> list[str]:
+    """Close every record for this dataset that is provably dead. Returns the ids closed."""
+    from .store import writer_lock_free
+
+    free = writer_lock_free(dataset, home)
+    if not free:
+        return []
+    out = []
+    for j in list_jobs(home, limit=200):
+        if j.get("dataset") != dataset or j.get("job_id") == keep:
+            continue
+        if is_corpse(j, free) and mark_stale(j["job_id"], home):
+            out.append(j["job_id"])
+    return out
+
+
+def annotate_stale(jobs: list[dict], home: Path | None = None, older_than_s: float = 60.0) -> list[dict]:
+    """Flag records that CLAIM to be live but whose dataset lock is free and which have
+    not been touched recently — display truth, so `info` never shows a ghost as running."""
+    from .store import writer_lock_free
+
+    free: dict[str, bool] = {}
+    for j in jobs:
+        if j.get("state") in ("queued", "running"):
+            ds = j.get("dataset")
+            if ds not in free:
+                free[ds] = writer_lock_free(ds, home)
+            if is_corpse(j, free[ds], grace_s=older_than_s):
+                j["stale"] = True
+                j["stale_reason"] = ("writer lock free and its process is gone"
+                                     if j.get("pid") else "writer lock free and record is stale")
+    return jobs
+
+
 class Job:
     """One index job's status file. Cheap: writes are throttled and event-driven
     (B10(d): the emitter must cost <=1% of run wall time — no polling thread)."""

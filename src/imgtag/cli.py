@@ -56,7 +56,7 @@ def cmd_index(args) -> int:
         from .core.progress import Job
 
         job_id = uuid.uuid4().hex[:8]
-        Job(job_id, ds, 0, root=str(Path(args.path).expanduser()), state="queued")
+        job = Job(job_id, ds, 0, root=str(Path(args.path).expanduser()), state="queued")
         argv = [sys.executable, "-m", "imgtag.cli", "index", str(args.path), "--dataset", ds,
                 "--wait", "--job-id", job_id]
         for flag, v in (("--model", args.model), ("--geometry", args.geometry), ("--workers", args.workers),
@@ -72,8 +72,10 @@ def cmd_index(args) -> int:
             argv.append("--full-speed")
         if args.no_recursive:
             argv.append("--no-recursive")
-        subprocess.Popen(argv, start_new_session=True, stdin=subprocess.DEVNULL,
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        child = subprocess.Popen(argv, start_new_session=True, stdin=subprocess.DEVNULL,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        job.state["pid"] = child.pid      # liveness becomes a kernel question, not a clock
+        job._write(force=True)
         obj = {"job_id": job_id, "dataset": ds, "path": str(Path(args.path).expanduser()),
                "status": "queued", "state": "queued", "queued": True,
                "tookMs": round((time.time() - t) * 1000, 1)}
@@ -198,7 +200,9 @@ def cmd_info(args) -> int:
         return 0
     if args.dataset:
         man = store.read_manifest(args.dataset)
-        jobs = [j for j in list_jobs() if j.get("dataset") == args.dataset][:5]
+        from .core.progress import annotate_stale
+
+        jobs = annotate_stale([j for j in list_jobs() if j.get("dataset") == args.dataset][:5])
         obj = {"dataset": args.dataset, "manifest": man, "jobs": jobs, "daemon": _daemon_state(),
                "datasets": [{"dataset": args.dataset, "count": man["count"], "model_id": man["model_id"],
                              "model_sha": man["model_sha"], "dim": man["dim"],
@@ -214,7 +218,9 @@ def cmd_info(args) -> int:
         ds.append({"dataset": name, "count": m["count"], "model_id": m["model_id"],
                    "model_sha": m["model_sha"], "dim": m["dim"],
                    "updated": m.get("updated"), "bytes": sum(s["emb_bytes"] + s["ids_bytes"] for s in m["shards"])})
-    obj = {"datasets": ds, "jobs": list_jobs(limit=10), "home": str(store.imgtag_home()),
+    from .core.progress import annotate_stale
+
+    obj = {"datasets": ds, "jobs": annotate_stale(list_jobs(limit=10)), "home": str(store.imgtag_home()),
            "daemon": _daemon_state(), "profile": load_profile(), "backends": _backend_names(),
            "tookMs": round((time.perf_counter() - t0) * 1000, 2)}
     _out(args, obj, "\n".join(f"{d['dataset']:24s} {d['count']:>7} imgs  {d['model_id']}" for d in ds) or "no datasets")
@@ -311,6 +317,13 @@ def cmd_manage(args) -> int:
         # A delete racing an index job must be UNAMBIGUOUS: refuse with the documented
         # dataset-locked code rather than delete bytes a live (or queued) writer is about
         # to recreate — that would silently undo the user's delete and leave orphans.
+        from .core.progress import reap_stale, request_abort
+
+        # LIVENESS = THE FLOCK, never a status file (ADR-6). A record frozen at "queued"
+        # by a killed process must not be able to block a delete forever, which is exactly
+        # what trusting the record did.
+        for jid in reap_stale(args.dataset, home):
+            _err(f"closed stale job record {jid} (writer lock is free — its process is gone)")
         live = [j for j in list_jobs()
                 if j.get("dataset") == args.dataset and j.get("state") in ("queued", "running")]
         if live and not args.force:
@@ -320,8 +333,6 @@ def cmd_manage(args) -> int:
                 f"to finish, or `manage delete {args.dataset} --force` to abort it and delete"
             )
         if live:  # --force: abort first, THEN delete, so no writer can resurrect the dataset
-            from .core.progress import request_abort
-
             for j in live:
                 request_abort(j["job_id"])
             deadline = time.time() + 20
@@ -330,6 +341,10 @@ def cmd_manage(args) -> int:
                          and j.get("state") in ("queued", "running")]
                 if not still:
                     break
+                # a job that never took the lock (or died holding nothing) is a corpse:
+                # re-test reality each round instead of waiting out the full timeout
+                if reap_stale(args.dataset, home):
+                    continue
                 time.sleep(0.1)
             else:
                 raise store.LockedError(
@@ -433,7 +448,10 @@ def cmd_search(args) -> int:
     the same question. `--no-daemon` chooses the transport, never the semantics.
     """
     t0 = time.perf_counter()
-    if not store.list_datasets():  # nothing indexed yet is an honest empty answer
+    if args.dataset:
+        store.read_manifest(args.dataset)   # a NAMED unknown dataset is exit 4, always —
+        # "nothing is indexed" may not swallow "that dataset does not exist"
+    if not args.dataset and not store.list_datasets():  # nothing indexed is an honest empty answer
         _out(args, {"query": args.query, "tookMs": round((time.perf_counter() - t0) * 1000, 2),
                     "coverage": {"indexed": 0, "total": 0}, "hits": [], "no_match": True},
              "no datasets indexed")
