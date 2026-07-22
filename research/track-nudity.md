@@ -227,6 +227,35 @@ the price of an instrument that can actually answer the question**.
 
 ---
 
+## 6b. The 100-track scaling invariant (VISION-ADDENDA 13:26Z) — where this track stands
+
+> Verbatim: *"for each track … i want a confidence score for each track for every image …
+> even if we have 100 tracks, the times for indexing and inferencing should remain
+> relatively the same so this system can continue to scale."*
+
+**Confidence for every image: satisfied.** Every record this head returns carries a `p`,
+including `content_free` and `unreadable` records — nothing is silently absent.
+
+**Scaling invariant: this track is the deliberate, bounded exception, and that is a design
+fact the conductor needs, not a defect to hide.** The invariant holds *by construction* for
+tracks that ride the shared embedding: the image is embedded **once**, and each such track
+adds one `[N,D]·[D,k]` matmul (~0 — weapons and drugs are exactly this). 100 embedding-head
+tracks ≈ the cost of 1. **Nudity cannot be one of them**, for two measured reasons:
+(§4) the CLIP embedding provably does not separate nudity from swimwear/skin, and (EVAL DATA
+LAW) a *trained* embedding head — the weapons approach — cannot be fitted or validated here
+because no positive corpus may be fetched. So nudity pays one dedicated forward
+(~4.5 GFLOPs, ~¼ of the index model).
+
+The invariant therefore reads, honestly: **`t_index ≈ t_embed + Σ_tracks t_track`, where
+embedding-head tracks contribute ~0 and dedicated-model tracks each contribute a bounded
+constant.** 100 tracks stay flat *only if* almost all of them are embedding heads. The
+architectural rule this implies (conductor's to enforce): **a track earns a dedicated model
+only when the shared embedding provably cannot carry its signal** — nudity clears that bar;
+most future tracks will not, and should be linear probes on the one embedding. If a
+future host is fast enough that even a handful of dedicated heads blow the budget, the
+escape hatch is a shared multi-head backbone (one small ViT, N linear classifier heads) —
+noted here so it is not rediscovered.
+
 ## 7. Integration notes for b-engine
 
 `imgtag.moderation.load_heads(profile)` already finds this track. Contract as implemented:
