@@ -575,10 +575,21 @@ class Searcher:
         cats = t.get("categories") or {}
         mod = {k: v for k, v in (t.get("counts") or {}).items() if cats[k]["moderation"]}
         content = {k: v for k, v in (t.get("counts") or {}).items() if not cats[k]["moderation"]}
+        # the ONLY "total alerts" rollup: image ids with ANY alert-tier flag, deduped, so
+        # an image that is alert in two categories is counted ONCE (lead ruling). Cheap: a
+        # boolean OR of the alert masks, no per-image loop.
+        alert_ids = []
+        alert_mask = None
+        for k, c in cats.items():
+            if c["moderation"] and "alert" in c["is"]:
+                alert_mask = c["is"]["alert"] if alert_mask is None else (alert_mask | c["is"]["alert"])
+        if alert_mask is not None:
+            alert_ids = [snap.ids[i]["image_id"] for i in np.nonzero(alert_mask)[0]]
         out = {
             "dataset": dataset, "indexed": t["n"],
             # moderation counts NEVER include a content track's `match` tier
             "counts": mod, "content_counts": content,
+            "alert_images": alert_ids, "alert_total": len(alert_ids),
             "labels": t.get("labels", {}), "threshold": t.get("floor"),
             "source": "current-scan",  # live: today's detectors over today's embeddings
             # per-category, and false until per-TIER tau is fitted (ADR-14 item 3)

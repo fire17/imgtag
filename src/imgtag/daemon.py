@@ -441,7 +441,11 @@ class Handler(BaseHTTPRequestHandler):
                         t = totals.setdefault(cat, {})
                         for tier, v in c.items():
                             t[tier] = t.get(tier, 0) + v
+                # cross-DATASET alert rollup, deduped by image id — the one place a
+                # "total alerts" number may exist, so nothing can double-count (lead ruling)
+                alert_ids = sorted({iid for r in per for iid in r.get("alert_images", [])})
                 self.json({"datasets": per, "totals": totals,
+                           "alert_images": alert_ids, "alert_total": len(alert_ids),
                            "indexed": sum(r["indexed"] for r in per),
                            # "stored" = flagged at indexing (survives a threshold change);
                            # "current-scan" = today's detectors over today's embeddings

@@ -436,3 +436,24 @@ def test_moderation_source_stored(live):
     assert r["datasets"][0]["indexed"] == 30  # no stored flags on this fixture -> empty counts
     st, r2 = get(live, "/api/moderation?dataset=d1")
     assert r2["source"] == "current-scan"  # default is unchanged and explicitly labelled
+
+
+def test_alert_images_is_the_only_deduped_alert_rollup(live, monkeypatch):
+    """Lead ruling: any 'total alerts' number dedupes by image_id, so an image flagged
+    alert in two categories counts once."""
+    import imgtag.core.search as CS
+    spec = {"version": 2, "categories": {
+        "safety":   {"label": "s", "alert": ["cat"], "review": ["dog"], "negatives": ["sky"]},
+        "violence": {"label": "v", "alert": ["cat"], "violation": ["car"], "negatives": ["sky"]}}}
+    monkeypatch.setattr(CS, "tracks", lambda: spec)
+    live_daemon = D.Handler.daemon
+    live_daemon.searcher._tracks.clear()
+    st, r = get(live, "/api/moderation?dataset=d1")
+    assert st == 200
+    d = r["datasets"][0]
+    # the same "cat" rows are alert in BOTH safety and violence...
+    assert d["counts"]["safety"]["alert"] > 0 and d["counts"]["violence"]["alert"] > 0
+    # ...but alert_total counts each image once, so it is <= the summed per-category alerts
+    summed = d["counts"]["safety"]["alert"] + d["counts"]["violence"]["alert"]
+    assert d["alert_total"] <= summed and d["alert_total"] == len(set(d["alert_images"]))
+    assert r["alert_total"] == len(set(r["alert_images"]))  # cross-dataset also deduped
