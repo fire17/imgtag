@@ -13,6 +13,13 @@
 | CORPUS-D | poison | `data/poison/` | ~120 hostile | **170 / 18 classes** ✅ | 28MB | every class probe-verified hostile |
 | CAL-SET | cocotrain2k | `data/coco-train2k/` | ~2,000 train2017 | **2,000/2,000** ✅ | 341M | n=200 ok, 80/80 cats |
 
+**b-bench index f1d3a1ca decode-timeouts (2FxgoQ0qcW4.jpg, 2GAvdXQ6Xp8.jpg) — WRITTEN OFF as
+NOT corpus defects.** Post-window decode check (17:14): both decode cleanly and fast —
+`OK RGB (3200,5689) 184ms` and `OK RGB (3200,2133) 42ms`. The timeouts were transient index-side
+(decode-timeout threshold tripped under concurrent 3-way fetch + index load), not truncated/corrupt
+files. No re-fetch; both remain valid members of CORPUS-B. If b-bench still times out on them,
+raise its per-file decode timeout rather than re-fetching.
+
 Gaps closed by idempotent re-run (17:09): CAL 1966→2000, B 9934→9998. The **2 remaining B files
 are unrecoverable** — their `photo_image_url` in `photos.tsv000` is malformed (e.g.
 `images.unsplash.com_TheBeach.jpg`, no scheme/path → `curl (6) could not resolve host`); dead at

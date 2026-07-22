@@ -157,6 +157,7 @@ def load_moderation_hook(spec=None, profile: dict | None = None, log=lambda m: N
     detect.heads = heads
     detect.specs = {c: track_tier_spec(c, h) for c, h in heads.items()}
     detect.scorer_meta = {c: track_scorer_meta(c, h) for c, h in heads.items()}
+    detect.col_roles = {c: getattr(h, "col_roles", None) for c, h in heads.items()}
     return detect
 
 
@@ -238,10 +239,18 @@ def _apply_moderation(hook, embs, recs, images, counts: dict, log, warned=None, 
     computed here are only for the job summary, never the durable answer.
     """
     n = len(recs)
-    # a dense NaN column per KNOWN category up front: every image gets a slot in every
-    # track, so the sidecars stay row-aligned even in a batch where a track never fires
-    known = list(getattr(hook, "specs", {}) or getattr(hook, "heads", {}) or [])
-    columns: dict[str, np.ndarray] = {c: np.full(n, np.float32("nan"), np.float32) for c in known}
+    roles = getattr(hook, "col_roles", {}) or {}
+
+    def _col(cat: str) -> np.ndarray:
+        """A dense NaN column for `cat` — [n] single-value, [n,C] for a multi-role track
+        (people-counting). Created on first sight so alignment can never drift."""
+        cr = roles.get(cat)
+        if cat not in columns:
+            columns[cat] = (np.full((n, len(cr)), np.float32("nan"), np.float32)
+                            if cr and len(cr) > 1 else np.full(n, np.float32("nan"), np.float32))
+        return columns[cat]
+
+    columns: dict[str, np.ndarray] = {}
     try:
         wants = getattr(hook, "wants_images", False)
         imgs = images if (images is not None or not wants) else None
@@ -257,8 +266,13 @@ def _apply_moderation(hook, embs, recs, images, counts: dict, log, warned=None, 
             cat = f.get("category")
             if not cat:
                 continue
-            col = columns.setdefault(cat, np.full(n, np.float32("nan"), np.float32))
-            col[i] = float(f.get("p", float("nan")))
+            col = _col(cat)
+            if col.ndim == 2:  # multi-role: fill the row in the head's col_roles order
+                cv = f.get("cols") or {}
+                for j, role in enumerate(roles[cat]):
+                    col[i, j] = float(cv.get(role, float("nan")))
+            else:
+                col[i] = float(f.get("p", (f.get("cols") or {}).get(roles.get(cat, ["p"])[0], float("nan"))))
             # ADR-14/15: tier is the carrier. Legacy {flagged: bool} maps to violation so
             # an older track still counts for something instead of vanishing silently.
             tier = f.get("tier")
@@ -577,8 +591,10 @@ def index(
 
     with Writer(dataset, be, home=home, job_id=job_id) as w:
         if hook is not None:
+            _cr = getattr(hook, "col_roles", {}) or {}
             for c in getattr(hook, "specs", {}):
-                w._track_specs[c] = {**(hook.specs.get(c) or {}), **(getattr(hook, "scorer_meta", {}).get(c) or {})}
+                w._track_specs[c] = {**(hook.specs.get(c) or {}), **(getattr(hook, "scorer_meta", {}).get(c) or {}),
+                                     **({"col_roles": _cr[c]} if _cr.get(c) else {})}
         job = Job(
             w.job_id,
             dataset,

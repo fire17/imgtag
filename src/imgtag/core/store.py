@@ -537,6 +537,9 @@ class Writer:
         """Append one track column, padding any gap so row alignment can never drift."""
         t = self.manifest.setdefault("tracks", {}).setdefault(
             category, {"name": f"{category}.f32", "rows": 0, "cols": int(col.shape[1]), "bytes": 0})
+        _cr = (self._track_specs.get(category) or {}).get("col_roles")
+        if _cr:
+            t["col_roles"] = list(_cr)
         d = self.dir / TRACKS_DIR
         d.mkdir(exist_ok=True)
         gap = base - t["rows"]
@@ -577,7 +580,8 @@ def write_track_meta(datadir: Path, category: str, rec: dict, spec: dict | None 
         "category": category,
         "rows": rec["rows"],
         "cols": rec.get("cols", 1),
-        "col_roles": rec.get("col_roles") or (["p"] if rec.get("cols", 1) == 1 else None),
+        "col_roles": (spec or {}).get("col_roles") or rec.get("col_roles")
+        or (["p"] if rec.get("cols", 1) == 1 else None),
         "bytes": rec["bytes"],
         "dtype": "float32",
         "scorer": (spec or {}).get("scorer") or (spec or {}).get("model_id"),

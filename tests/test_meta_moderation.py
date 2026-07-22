@@ -317,3 +317,53 @@ def test_content_tier_head_does_not_crash_and_routes_correctly(tmp_path, imgs):
     # the user's summary line is enforcement-only — a content tier can't crowd it
     line = moderation_summary(store.read_manifest("ds", home)["moderation"]["counts"])
     assert "people" not in line and "1 images with weapons" in line
+
+
+# ---------------------------------------------------------------- multi-column tracks (people-counting)
+
+
+def people_counting_detector(embs, recs, images=None):
+    """A [N,4] counting track (track-people's shape): one multi-role record per image plus
+    a derived 'match' chip when >=1 person. col_roles order is the on-disk order."""
+    out = []
+    for i, r in enumerate(recs):
+        n_p = float(i % 3)   # 0,1,2,0,1,2,...
+        rec = [{"category": "people",
+                "cols": {"n_persons": n_p, "n_faces": max(0.0, n_p - 1),
+                         "n_persons_conf": 0.9, "n_faces_conf": 0.8},
+                "tier": "none"}]
+        if n_p >= 1:  # per-image chip -> content bucket, separate single-value category
+            rec.append({"category": "one-person" if n_p == 1 else "multi-person", "p": 1.0, "tier": "match"})
+        out.append(rec)
+    return out
+
+
+people_counting_detector.col_roles = {"people": ["n_persons", "n_faces", "n_persons_conf", "n_faces_conf"]}
+people_counting_detector.specs = {"people": {"scorer": "cascade", "col_roles":
+                                             ["n_persons", "n_faces", "n_persons_conf", "n_faces_conf"]}}
+
+
+@needs_model
+def test_multi_column_people_track_stores_N_by_4(tmp_path, imgs):
+    home = tmp_path / "home"
+    s = index(imgs, "ds", profile=PROFILE, home=home, workers=2,
+              moderation=f"{__name__}:people_counting_detector")
+    assert s["moderation_active"]
+    snap = store.open_snapshot("ds", home)
+
+    people = np.asarray(snap.tracks["people"])
+    assert people.shape == (4, 4), people.shape           # [N, C] dense, row-aligned
+    # row i, col 0 (n_persons) == i % 3 — proves column order + alignment
+    np.testing.assert_allclose(people[:, 0], [i % 3 for i in range(4)], atol=1e-6)
+    np.testing.assert_allclose(people[:, 2], 0.9, atol=1e-6)  # n_persons_conf
+
+    meta = store.read_track_meta("ds", "people", home)
+    assert meta["cols"] == 4
+    assert meta["col_roles"] == ["n_persons", "n_faces", "n_persons_conf", "n_faces_conf"]
+
+    # the derived chips (match tier) land in the content bucket, never enforcement
+    assert "match" not in s["moderation"]
+    assert s["content"]["match"]["one-person"] == 1     # i=1
+    assert s["content"]["match"]["multi-person"] == 1   # i=2
+    # and no vestigial all-NaN bare column now that pre-seeding is gone (ask #2)
+    assert set(snap.tracks) == {"people", "one-person", "multi-person"}
