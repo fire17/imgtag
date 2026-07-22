@@ -140,6 +140,20 @@ highest-bar protocol — verbatim vision, budgets as tests, honest verification,
   path fits the memory ceiling (PE-Core-T16/S16, SigLIP-v1's 111MB int8 text tower, UForm).
   The bench reports a quality-per-MB-of-RSS column and the default is chosen on the TARGET
   profile, not the dev box (BUDGETS precedence law: B8 hard, B17 maximized subject to it).
+- **ADR-4b DEFAULT MODEL DECIDED (conductor, 2026-07-22 13:47Z, from the completed
+  CORPUS-A quality matrix — contention-immune numbers).** Quality table (B6 mean / B5
+  p100 / B17 R@10 / B7 leak@unfitted): siglip2-base .925/.937/77.5/.2 · siglip-v1
+  .893/.917/80.5/.2 · pecore-s16 .893/.927/77.2/.3 · pecore-t16 .841/.908/70.9/.47 ·
+  openclip control .775/.832/65.2/.6. Every candidate clears B17's +5-over-control.
+  Under the B8 PRECEDENCE law (hard memory cap on the 8GB target), eligible defaults are
+  pecore-s16 (850MB proj) and pecore-t16 (459MB); s16 dominates t16 on every quality
+  axis. **DEFAULT = pecore-s16-384 (fp32 vision + int8 text).** Doctor MAY select
+  siglip2-base-224 as a quality step-up on roomy machines (its .925 B6 is best-in-matrix
+  but B8-INELIGIBLE on the target); pecore-t16 remains the edge-floor option. Caveats
+  honestly attached: B6-min/B5-min-child/B7 clauses are red across ALL candidates at
+  unfitted τ — the CAL-SET fit (pending) + per-tag calibration are expected to lift
+  them; budget-lock happens only after the fit re-run. Revisit if the fitted re-run
+  reorders the eligible set.
 - **ADR-5 Resident daemon + warm text tower.** Anti-pattern proven: immich unloads models
   after 300s → 60–70s cold search. LRU query cache, tag table precomputed. CLI talks to the
   daemon when present, else in-process (still ≤2s cold, B13).
