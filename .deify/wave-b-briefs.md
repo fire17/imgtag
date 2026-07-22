@@ -49,3 +49,49 @@ skill/               b-skill    source of ~/.claude/skills/imgtag (installed by 
 2. b-bench phase 1 (candidate matrix standalone on spike/runtime scripts) — parallel with 1
 3. l-logistics (haiku): rclip install (`uv tool install rclip`), model zoo fetch per models.py list, checksums → reports blockers, never improvises
 4. b-daemon + b-app + b-skill after b-engine's store/models land (contracts above let them start on their own files immediately — integration at the end)
+
+## Search response schema — ONE shape (b-daemon owns; HTTP and CLI --json are identical)
+
+Authoritative as of 2026-07-22 (b-daemon, agreed with b-app in-channel; b-app conformed in
+62abd8b). `GET /api/search` and `imgtag --json search` return the SAME object, byte for byte
+(B20) — the CLI's daemon path proxies this exact payload.
+
+```jsonc
+{
+  "query": "car person",
+  "tookMs": 1.32,
+  "text_tower": "skipped|warm|loaded",     // resident-set state (ADR-5 revised)
+  "text_tower_load_ms": 0.0,               // one-time model load INSIDE tookMs, labeled
+  "served_by": "tag-table|warm-tower|cold-load",
+  "calibration": "fitted|unfitted",        // "fitted" only with a CAL-SET fit on disk
+  "coverage": {"indexed": 50, "total": 50},
+  "datasets": ["quick50"],
+  "terms": ["car", "person"],              // ABSENT when n<2; quoted spans = ONE element
+  "no_match": false,                       // FAIL-OPEN: unfitted => never true unless 0 rows
+  "hits": [{
+    "image_id": "…", "path": "…", "dataset": "…", "dataset_slug": "…",   // B18: never null
+    "score": 0.2535, "p": 0.531, "w": 640, "h": 426,
+    "why": {
+      "path": "tag|text", "tag": "car", "match": "exact|hypernym|near|tag-list",
+      "tier": "calibrated|uncalibrated", "p_tag": 0.53, "p_text": 0.0, "z": 0.0,
+      "terms": {                            // ABSENT when n<2
+        "matched": ["car"], "missed": ["person"], "m": 1, "n": 2, "mean_p": 0.531,
+        "via": {"animal": ["cat","dog"]}    // optional: hypernym a USER word matched through
+      },
+      "tags_matched": 1, "tags_total": 2, "spectrum": "all|some|any"   // legacy aliases
+    },
+    "flags": {"drugs": 0.96},              // optional: moderation tracks that fired
+    "meta": {"account_id": "acct-7"}       // optional: index-time metadata, verbatim
+  }]
+}
+```
+
+**Ordering is guaranteed**: `m DESC -> mean_p DESC -> p DESC -> image_id`. Coverage tiers
+therefore arrive CONTIGUOUS (no client-side regrouping) and a result list is byte-identical
+across runs and thread counts (B18e).
+
+**Laws encoded here**: (a) FAIL-OPEN — an unfitted threshold never vetoes; `calibration`
+tells the caller whether any p may be trusted. (b) Named-tag queries are served from the tag
+table with `served_by: "tag-table"` and no text tower (ADR-5 revised resident set).
+(c) `terms`/`why.terms` are absent, never null, for single-term queries. (d) Moderation
+payloads always carry `enforcement_ready: false` until per-track tau is fitted.
