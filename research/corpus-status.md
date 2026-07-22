@@ -4,6 +4,25 @@
 > Everything lands under `data/` (gitignored — verified: `git check-ignore data/…` hits).
 > **Unsplash images are LOCAL RESEARCH ONLY — never redistributed, never committed.**
 
+## ✅ CHECKPOINT 2026-07-22 17:10 — ALL FOUR CORPORA COMPLETE
+
+| Tag | Name | Location | Target | Final | Size | Sample verify |
+|---|---|---|---|---|---|---|
+| CORPUS-B | photo10k | `data/unsplash-b/` | 10,000 @ w=3200 | **9,998/10,000** ✅ | 18GB | n=200 ok, w=3200, MP 4.9–18.2 |
+| CORPUS-B12 | fullres300 | `data/unsplash-fullres/` | 300 native ≥12MP | **300/300** ✅ | 1.1GB | n=300 ok, **MP 12.0–74.6, all ≥3000px** |
+| CORPUS-D | poison | `data/poison/` | ~120 hostile | **170 / 18 classes** ✅ | 28MB | every class probe-verified hostile |
+| CAL-SET | cocotrain2k | `data/coco-train2k/` | ~2,000 train2017 | **2,000/2,000** ✅ | 341M | n=200 ok, 80/80 cats |
+
+Gaps closed by idempotent re-run (17:09): CAL 1966→2000, B 9934→9998. The **2 remaining B files
+are unrecoverable** — their `photo_image_url` in `photos.tsv000` is malformed (e.g.
+`images.unsplash.com_TheBeach.jpg`, no scheme/path → `curl (6) could not resolve host`); dead at
+source, not a fetch bug. 9,998/10,000 = 99.98%, accepted. Disk at checkpoint: 46GB free (b-bench
+index job is consuming disk concurrently; still above the 25GB guard).
+
+---
+
+### Original launch table (2026-07-22 14:05)
+
 | Tag | Name | Location | Target | Status @14:05 | Size (proj.) | ETA |
 |---|---|---|---|---|---|---|
 | CORPUS-B | photo10k | `data/unsplash-b/` | 10,000 @ w=3200 | 🟡 fetching, 1,935 | 3.5GB now → **~18GB** | ~14:57 |

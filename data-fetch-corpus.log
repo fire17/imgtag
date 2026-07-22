@@ -60,3 +60,269 @@ curl: (52) Empty reply from server
 curl: (56) Recv failure: Connection reset by peer
 curl: (56) Recv failure: Connection reset by peer
 curl: (56) Recv failure: Connection reset by peer
+curl: (52) Empty reply from server
+curl: (52) Empty reply from server
+curl: (52) Empty reply from server
+curl: (6) Could not resolve host: images.cocodataset.org
+curl: (6) Could not resolve host: images.cocodataset.org
+curl: (6) Couldcurl: (6) Could no not resolve host: images.cocodataset.org
+t resolve host: images.cocodataset.org
+curl: (6) Could not resolve host: images.cocodataset.org
+curl: (6) Could not resolve host: images.cocodataset.org
+curl: (6) Could not resolve host: images.cocodataset.org
+curl: (6) Could not resolve host: images.cocodataset.org
+curl: (28) Operation timed out after 180000 milliseconds with 0 bytes received
+curl: (6) Could not resolve host: images.cocodataset.org
+curl: (6) Could not resolve host: images.cocodataset.org
+curl: (6) Could not resolve host: images.cocodataset.org
+curl: (6) Could not resolve host: images.cocodataset.org
+curl: (6) Could not resolve host: images.cocodataset.org
+curl: (6) Could not resolve host: images.cocodataset.org
+curl: (6) Could not resolve host: images.cocodataset.org
+curl: (6) Could not resolve host: images.cocodataset.org
+curl: (6) Could not resolve host: images.cocodataset.org
+curl: (6) Could not resolve host: images.cocodataset.org
+curl: (6) Could not resolve host: images.cocodataset.org
+curl: (6) Could not resolve host: images.cocodataset.org
+curl: (6) Could not resolve host: images.cocodataset.org
+curl: (6) Could not resolve host: images.cocodataset.org
+curl: (6) Could not resolve host: images.cocodataset.org
+curl: (6) Could not resolve host: images.cocodataset.org
+curl: (6) Could not resolve host: images.cocodataset.org
+curl: (6) Could not resolve host: images.cocodataset.org
+curl: (6) Could not resolve host: images.cocodataset.org
+curl: (6) Could not resolve host: images.cocodataset.org
+curl: (6) Could not resolve host: images.cocodataset.org
+curl: (6) Could not resolve host: images.cocodataset.org
+curl: (6) Could not resolve host: images.cocodataset.org
+curl: (6) Could not resolve host: images.cocodataset.org
+curl: (35) LibreSSL SSL_connect: SSL_ERROR_SYSCALL in connection to images.unsplash.com:443 
+[2026-07-22T14:21:23] CAL-SET done: 1966/2000 images, 376M
+[2026-07-22T14:21:23] CAL-SET done: 1966/2000 images, 376M
+CORPUS-B12 verified+kept: 300/300
+CORPUS-B12 verified+kept: 300/300
+[2026-07-22T14:29:08] CORPUS-B12 done: 300 images, 1.2G
+[2026-07-22T14:29:08] CORPUS-B12 done: 300 images, 1.2G
+curl: (6) Could not resolve host: images.unsplash.company
+curl: (6) Could not resolve host: images.unsplash.company
+curl: (6) Could not resolve host: images.unsplash.company
+curl: (6) Could not resolve host: images.unsplash.company
+curl: (28) Operation timed out after 300005 milliseconds with 597998 out of 657777 bytes received
+curl: (35) LcurlibreSSL : (S3S5) LibL_connect: SSL_ERROR_SYSCALL in connection reSSL SSL_connect: SSL_Eto images.unsplash.com:443 
+RROR_SYSCALL in connection to images.unsplash.com:443 
+curl: (35) LibreSSL SSL_connect: SSL_ERROR_SYSCALL in connection to images.unsplash.com:443 
+curl: (35) LibreSSL SSL_connect: SSL_ERROR_SYSCALL in connection to images.unsplash.com:443 
+curl: (35) LibreSSL SSL_connect: SSL_ERROR_SYSCALL in connection to images.unsplash.com:443 
+curl: (35) LibreSSL SSL_connect: SSL_ERROR_SYSCALL in connection to images.unsplash.com:443 
+curl: (35) LibreSSL SSL_connect: SSL_ERROR_SYSCALL in connection to images.unsplash.com:443 
+curl: (6) Recv failure: Operation timed out
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (35) Recv failure: No route to host
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (35) Recv failure: No route to host
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (35) Recv failure: No route to host
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (35) Recv failure: No route to host
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curcurl: (35) Recv faillure: No rcurl: (35) Recv : (35)failur oute to host
+Re: No route to hecv failure: No route to osthost
+
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl:curl: (6) Could not resolve  (6) Choould not resolve host: images.unsplst: imagesash.com
+.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+cuccurl: (6rl: (6) Cou) Could not resolvld ne hosot resourlve hostt: i: iml: mageages.unsplas.unsh.com
+splash.com
+(6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6cu) Couldrl: not re (solve host: images.unsplash.com
+6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (6) Could not resolve host: images.unsplash.com
+curl: (56) Recv failure: No route to host
+curl: (56) Recv failure: No route to host
+curl: (56) Recv failure: No route to host
+curl: (35) Recv failure: No route to host
+curl: (6) Could not resolve host: images.unsplash.com_TheBeach.jpg
+curl: (6) Could not resolve host: images.unsplash.com_TheBeach.jpg
+curl: (6) Could not resolve host: images.unsplash.com_TheBeach.jpg
+curl: (6) Could not resolve host: images.unsplash.com_TheBeach.jpg
+[2026-07-22T15:24:24] CORPUS-B done: 9934/10000 images,  19G
+[2026-07-22T15:24:24] CORPUS-B done: 9934/10000 images,  19G
+[2026-07-22T17:09:31] CAL-SET start: 2000 urls (N=0) out=/Users/magic/Creations/ImgTag/data/coco-train2k
+[2026-07-22T17:09:35] CAL-SET done: 2000/2000 images, 341M
+[2026-07-22T17:09:35] CORPUS-B start: N=10000 out=/Users/magic/Creations/ImgTag/data/unsplash-b par=12
+[2026-07-22T17:10:04] CORPUS-B done: 9998/10000 images,  18G
