@@ -223,11 +223,13 @@ def test_arbitrated_storage_contract_present():
     assert a["scorer"] == "margin_arbitrated" and a["tier_margin"] == D.TIER_MARGIN
 
 
-def test_head_emits_both_arbitration_margins_but_stays_single_col_until_flip():
-    """The head carries the arbitration inputs now; storage stays single-col until b-engine's
-    derive_tiers honours them (col_roles is the switch, still None)."""
+def test_head_emits_both_arbitration_margins_multicol_flipped():
+    """FLIPPED (b-engine's margin_arbitrated derive is in): the head stores two margins so
+    derive_tiers reproduces the tobacco-vs-drug arbitration store-side. Spec agrees."""
     h = D.DrugsHead(D.DrugsScorer.build(FakeBackend()), "sha")
-    assert h.col_roles is None
+    assert h.col_roles == ["margin", "margin_review"]
+    assert D.track_spec()["col_roles"] == ["margin", "margin_review"]
+    assert D.track_spec()["scorer"] == "margin_arbitrated"
     emb = _unit(np.random.default_rng(3).normal(size=(4, FakeBackend.dim)))
     for f in h.score(emb):
         assert set(f["cols"]) == {"margin", "margin_review"}
