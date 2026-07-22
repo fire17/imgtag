@@ -309,12 +309,14 @@ highest-bar protocol — verbatim vision, budgets as tests, honest verification,
 
 ## 3. Dead ends (do not rediscover)
 
-- **fp16 ONNX on the ORT CPU EP — dead across the board** (measured 2026-07-22, clean
-  method): CPU EP has no native fp16 kernels — casts to fp32 and pays for it (no native
-  fp16 kernels — the slower-than-fp32 samples were contended and are downgraded to
-  expected-unproven; the LOADER BUG is timing-independent and stands); official SigLIP2 fp16 export additionally FAILS TO LOAD
-  at ORT_ENABLE_ALL (SimplifiedLayerNormFusion bug; loads at ENABLE_EXTENDED). fp16 is a
-  GPU/ANE format. Do not spend bench slots on it.
+- **fp16 as a COMPUTE format on ORT CPU EP — dead** (no native fp16 kernels; casts to
+  fp32; speed samples contended→unproven but the mechanism is documented). **DISTINCT and
+  ALIVE: fp16 as WEIGHT STORAGE** — measured bit-equivalent to fp32 for retrieval (cos
+  0.9999986 mean, min 0.9999968; recall identical on all 14 classes) at HALF the disk
+  (186MB vs 372MB SigLIP2 vision). Pending: RSS-resident probe + quiet-window speed (if
+  ORT converts weights once at session init, RSS may NOT halve — measure, never assume).
+  Loader law: SigLIP2 official fp16 export needs graph_optimization_level=ENABLE_EXTENDED
+  (ENABLE_ALL crashes, SimplifiedLayerNormFusion bug, ORT 1.27 — one deterministic line).
 - **Batch>1 for CLIP-class vision on CPU** — batch=1/2 streaming is the DEFAULT, justified
   by the contention-immune half of the evidence: batching ~doubles peak RSS on both measured
   families (pecore int8 b1 188MB → b8 412MB) for no demonstrated throughput gain. The
