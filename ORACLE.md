@@ -94,10 +94,14 @@ highest-bar protocol — verbatim vision, budgets as tests, honest verification,
   Winner chosen by bench on: index img/s, search ms, precision@10, hypernym recall, FP
   rate, RSS, disk. Revisit if: FG-CLIP2/OpenVision v1 export cheaply and beat the set.
   **Measured refinements (runtime lane, 2026-07-22, research/runtime.md — first-party):**
-  quantization recipe = SELF-quantized dynamic weight-only int8, MatMul-only,
-  `MatMulConstBOnly`, QUInt8, per-tensor (measured 113 vs 40 img/s fp32, ranking
-  agreement 0.96 — beats off-the-shelf HF int8 on speed AND accuracy; static/calibrated
-  quant = the one untested axis, gets a bench slot). **FIDELITY GATE (CI): cos ≥0.98 AND
+  quantization status (re-ruled 2026-07-22): the weight-only recipe was REFUTED as a
+  general fix — on PE-Core vision every int8 variant swept (weight-only per-tensor/
+  per-channel, QInt8/QUInt8, full-graph) fails B24 tier-1-default at n=200; the earlier
+  0.96 agreement was an n=24 pool artifact (pool-size law: agreement falls with n — B24
+  now fixes n=200). **v1 ships fp32 vision everywhere**; int8 remains a per-arch opt-in
+  candidate under B24's two-tier gate (openclip-B/32 int8 measurably costs nothing at
+  n=200 quality — the gate now distinguishes harmless from harmful instead of banning by
+  proxy metric). Static/calibrated quant remains unexplored on the TARGET arch only. **FIDELITY GATE (CI): cos ≥0.98 AND
   top-1 NN ranking agreement ≥0.90 vs fp32** — ranking agreement is the metric that
   matters, mean cosine hides rank flips (per-channel scored 0.83 agreement at cos 0.955).
   ☠️ BLACKLIST — **downloaded int8 VISION towers fail fidelity as a CLASS (2 for 2 measured):**
@@ -306,6 +310,10 @@ highest-bar protocol — verbatim vision, budgets as tests, honest verification,
     `CPUWeight=`, `Nice=10`; no root, no system-wide install, restart-on-crash, survives a
     reboot. `imgtag status` reports daemon pid, version, socket, uptime, loaded models + shas,
     warm/cold, tree-RSS — B13/B8 are measured through it.
+
+- **Playbook addition:** exporting openai-CLIP/SigLIP-v1 towers via torch.onnx needs
+  `torch.backends.mha.set_fastpath_enabled(False)` first, else export fails (bench lane,
+  2026-07-22).
 
 ## 3. Dead ends (do not rediscover)
 
