@@ -188,6 +188,20 @@ def preprocess_image(im: Image.Image, size: int, squash: bool = True, resample=I
     return np.asarray(im.crop((l, t, l + size, t + size)), np.uint8)
 
 
+def _embed_output(sess) -> str:
+    """The pooled embedding, not the token grid: HF exports put ``last_hidden_state``
+    first, so taking output[0] silently hands back [n, tokens, D] (SigLIP2: [n,196,768])."""
+    outs = sess.get_outputs()
+    for want in ("image_embeds", "text_embeds", "pooler_output", "sentence_embedding", "embeddings"):
+        for o in outs:
+            if o.name == want:
+                return o.name
+    for o in outs:  # otherwise the first 2-D output
+        if len(o.shape) == 2:
+            return o.name
+    return outs[0].name
+
+
 def _l2(a: np.ndarray) -> np.ndarray:
     a = np.asarray(a, np.float32)
     n = np.linalg.norm(a, axis=-1, keepdims=True)
@@ -225,7 +239,11 @@ class ModelBackend:
             self._vs = _session(path, profile.get("intra_op", 2))
             i = self._vs.get_inputs()[0]
             self._vin = i.name
+            self._vout = _embed_output(self._vs)
             self._fixed_batch = i.shape[0] if isinstance(i.shape[0], int) else None
+            got = next(o.shape[-1] for o in self._vs.get_outputs() if o.name == self._vout)
+            if isinstance(got, int) and got != self.dim:  # the graph wins over the config
+                self.dim = got
         self._ts = None
         self._tok = None
 
@@ -245,9 +263,9 @@ class ModelBackend:
             B = self._fixed_batch
             pad = (-n) % B
             x = np.concatenate([x, np.repeat(x[-1:], pad, 0)]) if pad else x
-            outs = [self._vs.run(None, {self._vin: x[i : i + B]})[0] for i in range(0, len(x), B)]
+            outs = [self._vs.run([self._vout], {self._vin: x[i : i + B]})[0] for i in range(0, len(x), B)]
             return _l2(np.concatenate(outs)[:n])
-        return _l2(self._vs.run(None, {self._vin: x})[0])
+        return _l2(self._vs.run([self._vout], {self._vin: x})[0])
 
     def _text_session(self):
         if self._ts is None:
@@ -261,6 +279,7 @@ class ModelBackend:
                 raise ModelUnavailableError(f"{self.name}: text artifact {fname!r} not found")
             self._ts = _session(path, self.profile.get("text_intra_op", 2))
             self._tin = self._ts.get_inputs()[0].name
+            self._tout = _embed_output(self._ts)
             self._tok = _tokenizer(self.spec)
         return self._ts
 
@@ -268,7 +287,7 @@ class ModelBackend:
         """list[str] -> f32 [n,D], L2-NORMALIZED. Lazy-loads the text tower."""
         s = self._text_session()
         ids = self._tok.encode(list(texts))
-        return _l2(s.run(None, {self._tin: ids})[0])
+        return _l2(s.run([self._tout], {self._tin: ids})[0])
 
     def release_text(self) -> None:
         """Drop the text tower (ADR-5 --text-ttl on the 8GB profile)."""

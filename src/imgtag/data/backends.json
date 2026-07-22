@@ -5,13 +5,27 @@
     "size": 384,
     "ctx": 32,
     "tokenizer": "clip-bpe",
-    "mean": [0.5, 0.5, 0.5],
-    "std": [0.5, 0.5, 0.5],
+    "mean": [
+      0.5,
+      0.5,
+      0.5
+    ],
+    "std": [
+      0.5,
+      0.5,
+      0.5
+    ],
     "resample": "BILINEAR",
     "resize_mode": "squash",
     "source": "timm/PE-Core-S-16-384 open_clip_config.json (self-exported, spike-pecore.md)",
-    "vision": {"fp32": "pecore-s16-384-vision.onnx", "int8": "pecore-s16-384-vision-int8.onnx"},
-    "text": {"fp32": "pecore-s16-384-text.onnx", "int8": "pecore-s16-384-text-int8.onnx"},
+    "vision": {
+      "fp32": "pecore-s16-384-vision.onnx",
+      "int8": "pecore-s16-384-vision-int8.onnx"
+    },
+    "text": {
+      "fp32": "pecore-s16-384-text.onnx",
+      "int8": "pecore-s16-384-text-int8.onnx"
+    },
     "text_precision": "int8"
   },
   "pecore-t16-384": {
@@ -19,26 +33,50 @@
     "size": 384,
     "ctx": 32,
     "tokenizer": "clip-bpe",
-    "mean": [0.5, 0.5, 0.5],
-    "std": [0.5, 0.5, 0.5],
+    "mean": [
+      0.5,
+      0.5,
+      0.5
+    ],
+    "std": [
+      0.5,
+      0.5,
+      0.5
+    ],
     "resample": "BILINEAR",
     "resize_mode": "squash",
     "source": "timm/PE-Core-T-16-384 open_clip_config.json (export via scripts/export_pecore.py)",
-    "vision": {"fp32": "pecore-t16-384-vision.onnx", "int8": "pecore-t16-384-vision-int8.onnx"},
-    "text": {"fp32": "pecore-t16-384-text.onnx", "int8": "pecore-t16-384-text-int8.onnx"},
+    "vision": {
+      "fp32": "pecore-t16-384-vision.onnx",
+      "int8": "pecore-t16-384-vision-int8.onnx"
+    },
+    "text": {
+      "fp32": "pecore-t16-384-text.onnx",
+      "int8": "pecore-t16-384-text-int8.onnx"
+    },
     "text_precision": "int8"
   },
   "pecore-b16-224": {
-    "dim": 512,
+    "dim": 1024,
     "size": 224,
     "ctx": 32,
     "tokenizer": "clip-bpe",
-    "mean": [0.5, 0.5, 0.5],
-    "std": [0.5, 0.5, 0.5],
+    "mean": [
+      0.5,
+      0.5,
+      0.5
+    ],
+    "std": [
+      0.5,
+      0.5,
+      0.5
+    ],
     "resample": "BILINEAR",
     "resize_mode": "squash",
-    "source": "onnx-community/PE-Core-B16-224-ONNX (vision only; FIXED batch=2 export)",
-    "vision": {"int8": "pecore-b16-224-vision-int8.onnx"},
+    "source": "onnx-community/PE-Core-B16-224-ONNX (vision only; FIXED batch=2 export) \u2014 measured output dim 1024 (config said 512; the graph wins)",
+    "vision": {
+      "int8": "pecore-b16-224-vision-int8.onnx"
+    },
     "text": {},
     "text_precision": "int8"
   },
@@ -47,14 +85,28 @@
     "size": 224,
     "ctx": 64,
     "tokenizer": "gemma-unigram",
-    "mean": [0.5, 0.5, 0.5],
-    "std": [0.5, 0.5, 0.5],
+    "mean": [
+      0.5,
+      0.5,
+      0.5
+    ],
+    "std": [
+      0.5,
+      0.5,
+      0.5
+    ],
     "resample": "BILINEAR",
     "resize_mode": "squash",
     "source": "models/siglip2-base/preprocessor_config.json (resample=2 == BILINEAR, measured 2026-07-22)",
     "subdir": "siglip2-base",
-    "vision": {"fp32": "vision_model.onnx", "fp16": "vision_model_fp16.onnx", "int8": "vision_model_int8.onnx"},
-    "text": {"int8": "text_model_int8.onnx"},
+    "vision": {
+      "fp32": "vision_model.onnx",
+      "fp16": "vision_model_fp16.onnx",
+      "int8": "vision_model_int8.onnx"
+    },
+    "text": {
+      "int8": "text_model_int8.onnx"
+    },
     "text_precision": "int8"
   },
   "openclip-vitb32": {
@@ -62,14 +114,28 @@
     "size": 224,
     "ctx": 77,
     "tokenizer": "clip-bpe",
-    "mean": [0.48145466, 0.4578275, 0.40821073],
-    "std": [0.26862954, 0.26130258, 0.27577711],
+    "mean": [
+      0.48145466,
+      0.4578275,
+      0.40821073
+    ],
+    "std": [
+      0.26862954,
+      0.26130258,
+      0.27577711
+    ],
     "resample": "BICUBIC",
     "resize_mode": "shortest-crop",
     "source": "Xenova/clip-vit-base-patch32 (B17 control, MIT)",
     "subdir": "openclip-vitb32",
-    "vision": {"fp32": "vision_model.onnx", "int8": "vision_model_int8.onnx"},
-    "text": {"fp32": "text_model.onnx", "int8": "text_model_int8.onnx"},
+    "vision": {
+      "fp32": "vision_model.onnx",
+      "int8": "vision_model_int8.onnx"
+    },
+    "text": {
+      "fp32": "text_model.onnx",
+      "int8": "text_model_int8.onnx"
+    },
     "text_precision": "int8",
     "urls": {
       "vision_model.onnx": "https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/main/onnx/vision_model.onnx",
