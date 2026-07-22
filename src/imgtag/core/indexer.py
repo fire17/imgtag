@@ -932,8 +932,9 @@ def track_recount(dataset: str, home: Path | None = None) -> dict:
     """
     import fcntl
 
-    from .store import dataset_dir, dataset_flags, open_snapshot
+    from .store import dataset_dir, dataset_flags, open_snapshot, repair_track_metadata
 
+    repair_track_metadata(dataset, home)   # regenerate headers + heal cols before deriving
     snap = open_snapshot(dataset, home)
     flags = dataset_flags(dataset, home, snap)
     counts: dict[str, dict] = {}

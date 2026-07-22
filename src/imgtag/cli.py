@@ -509,6 +509,15 @@ def cmd_track(args) -> int:
     from .core.indexer import track_add
 
     t0 = time.perf_counter()
+    if args.action == "repair":
+        from .core.store import repair_track_metadata
+
+        target = args.dataset or args.category
+        names = [target] if target else store.list_datasets()
+        res = [{"dataset": n, "actions": repair_track_metadata(n)} for n in names]
+        _out(args, {"results": res, "tookMs": round((time.perf_counter() - t0) * 1000, 2)},
+             "\n".join(f"{r['dataset']}: {len(r['actions'])} track headers repaired" for r in res))
+        return 0
     if args.action == "recount":
         # ADR-15 T1: re-derive stored counts from the sidecars under CURRENT fitted tau —
         # no re-embed, no re-score. Fixes indexes whose counts were empty at index time.
@@ -664,7 +673,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     tr = sub.add_parser("track", help="add/refresh a track column over an existing index",
                         parents=[common])
-    tr.add_argument("action", choices=["add", "list", "recount"])
+    tr.add_argument("action", choices=["add", "list", "recount", "repair"])
     tr.add_argument("category", nargs="?", help="track name, e.g. weapons")
     tr.add_argument("--dataset", help="one dataset (default: every dataset on disk)")
     tr.set_defaults(fn=cmd_track)

@@ -258,17 +258,16 @@ def test_track_sidecar_header_is_the_read_authority(tmp_path):
         dim = 8
 
     with store.Writer("ds", M(), home=tmp_path) as w:
-        w._track_specs["nudity"] = {"tau_violation": 0.5, "tau_review": 0.2,
-                                    "scorer": "marqo-384", "model_sha": "a" * 64}
+        w._track_specs["nudity"] = {"tau_violation": 0.5, "tau_review": 0.2, "col_roles": ["p"]}
         e, r = _rows(4)
         w.append(e, r, tracks={"nudity": np.array([0.1, 0.9, 0.3, 0.6], np.float32)})
     meta = store.read_track_meta("ds", "nudity", tmp_path)
     assert meta["rows"] == 4 and meta["cols"] == 1 and meta["dtype"] == "float32"
-    assert meta["col_roles"] == ["p"] and meta["scorer"] == "marqo-384"
+    assert meta["col_roles"] == ["p"]
     assert meta["bytes"] == (tmp_path / "datasets/ds/tracks/nudity.f32").stat().st_size
-    # spec_sha is order-independent so both writer and reader hash identically
-    assert meta["spec_sha"] == store.spec_sha({"tau_review": 0.2, "scorer": "marqo-384",
-                                               "tau_violation": 0.5, "model_sha": "a" * 64})
+    # the guard fields a reader refuses on: model_sha (the dataset's) + a reproducible sha
+    assert meta["model_sha"] == "0" * 64
+    assert meta["spec_sha"] == store.spec_sha(store.header_spec("nudity", "fake-8", "0" * 64, ["p"]))
 
 
 def test_fitted_tau_wins_over_recorded_spec(tmp_path, monkeypatch):
@@ -424,3 +423,47 @@ def test_per_tier_margins_go_through_shared_derive_unfitted():
     assert got == ref, "store-side per-tier derive must equal derive_unfitted exactly"
     assert got[0] == "violation" and got[1] == "review"       # it actually fires
     assert got.count("none") == n - 2                          # and nothing else does
+
+
+def test_repair_track_metadata_writes_headers_and_heals_cols(tmp_path):
+    """A dataset written before header-writing landed (no tracks/<cat>.json) blocks
+    b-daemon's read hook. `repair` regenerates headers with model_sha/spec_sha/col_roles
+    and self-heals `cols` from the actual file bytes — metadata only, no re-score."""
+    import numpy as np
+
+    class M:
+        model_id = "pecore-s16-384-fp32"
+        model_sha = "abc" * 21 + "d"
+        dim = 8
+
+    with store.Writer("ds", M(), home=tmp_path) as w:
+        e, r = _rows(3)
+        w.append(e, r, tracks={"weapons": np.array([0.9, 0.1, 0.5], np.float32)})
+
+    d = tmp_path / "datasets" / "ds"
+    # simulate an OLD dataset: delete the header, blank the rec's model_sha/spec_sha, wrong cols
+    (d / "tracks" / "weapons.json").unlink()
+    man = json.loads((d / "manifest.json").read_bytes())
+    man["tracks"]["weapons"].pop("model_sha", None)
+    man["tracks"]["weapons"].pop("spec_sha", None)
+    man["tracks"]["weapons"]["cols"] = 7  # deliberately wrong vs the [3,1] file
+    (d / "manifest.json").write_text(json.dumps(man))
+    assert store.read_track_meta("ds", "weapons", tmp_path) is None
+
+    actions = store.repair_track_metadata("ds", tmp_path)
+    assert actions
+    h = store.read_track_meta("ds", "weapons", tmp_path)
+    assert h is not None
+    assert h["model_sha"] == M.model_sha and h["spec_sha"] and h["cols"] == 1  # healed from bytes
+    man2 = json.loads((d / "manifest.json").read_bytes())
+    assert man2["tracks"]["weapons"]["cols"] == 1  # manifest rec healed too
+    assert man2["tracks"]["weapons"]["model_sha"] == M.model_sha
+
+
+def test_header_spec_is_disk_reproducible(tmp_path, monkeypatch):
+    """Fresh-index and repair headers hash the SAME spec_sha (disk sources only), so
+    b-daemon can trust either — no fresh-vs-repaired split."""
+    a = store.header_spec("weapons", "pecore-s16-384-fp32", "SHA", ["p"])
+    b = store.header_spec("weapons", "pecore-s16-384-fp32", "SHA", ["p"])
+    assert store.spec_sha(a) == store.spec_sha(b)
+    assert a.get("model_id") == "pecore-s16-384-fp32" and a["model_sha"] == "SHA"

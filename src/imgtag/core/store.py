@@ -697,7 +697,12 @@ class Writer:
             os.fsync(f.fileno())        # (a) column durable BEFORE the header names its rows
         t["rows"] = base + n
         t["bytes"] = t["rows"] * t["cols"] * 4
-        write_track_meta(self.dir, category, t, self._track_specs.get(category))
+        # header spec_sha is over DISK sources (header_spec), identical to `track repair`;
+        # the model identity + col_roles ride along
+        hs = header_spec(category, self.model.model_id, self.model.model_sha,
+                         (self._track_specs.get(category) or {}).get("col_roles") or t.get("col_roles"))
+        t["model_sha"], t["spec_sha"] = self.model.model_sha, spec_sha(hs)
+        write_track_meta(self.dir, category, t, hs)
 
     def _commit(self) -> None:
         self.manifest["updated"] = _now()
@@ -749,6 +754,70 @@ def read_track_meta(dataset: str, category: str, home: Path | None = None) -> di
         return json.loads(track_meta_path(dataset, category, home).read_bytes())
     except (OSError, ValueError):
         return None
+
+
+#: the tier-defining fields a header's spec_sha hashes — small, canonical, and REPRODUCIBLE
+#: from disk (moderation.json + fitted files) so b-daemon computes the identical sha and can
+#: trust a matching sidecar. Deliberately excludes bulky fit weights (w/b): platt already
+#: moves the sha on a recalibration, and a reader guards model_sha separately.
+_SPEC_SHA_KEYS = ("scorer", "calibration", "tau", "tau_alert", "tau_violation", "tau_review",
+                  "tier_margin", "platt")
+
+
+def header_spec(category: str, model_id: str, model_sha: str | None, col_roles=None) -> dict:
+    """The canonical spec a sidecar header's `spec_sha` hashes. Resolved from DISK sources
+    only (moderation.json < fitted(base) < fitted(model), sha-guarded) — never a
+    manifest-recorded value — so both the fresh-index write path and `track repair` produce
+    the SAME sha, and b-daemon reproduces it from the same files."""
+    cfg = resolve_track_cfg(category, model_id, None, model_sha)
+    canon = {k: cfg[k] for k in _SPEC_SHA_KEYS if cfg.get(k) is not None}
+    return {**canon, "category": category, "model_id": model_id, "model_sha": model_sha,
+            "col_roles": col_roles or cfg.get("col_roles")}
+
+
+def repair_track_metadata(dataset: str, home: Path | None = None) -> list[str]:
+    """Regenerate `tracks/<cat>.json` headers and self-heal `cols` from the ACTUAL file
+    bytes, for datasets written before header-writing landed (no headers on disk) or whose
+    manifest `cols` drifted from the column shape. Metadata ONLY — no re-score, no shard
+    touched. This is what makes b-daemon's read hook (verify model_sha+spec_sha, else
+    compute live) work on existing datasets: without a header it cannot trust a column."""
+    d = dataset_dir(dataset, home)
+    fd = os.open(d / ".writer.lock", os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        os.close(fd)
+        raise LockedError(f"{dataset} is being written — metadata repair refused") from None
+    try:
+        man = json.loads((d / "manifest.json").read_bytes())
+        model_id, model_sha = man.get("model_id", ""), man.get("model_sha")
+        actions = []
+        for cat, t in (man.get("tracks") or {}).items():
+            f = d / TRACKS_DIR / t["name"]
+            if not f.is_file() or not t.get("rows"):
+                continue
+            actual = f.stat().st_size // (t["rows"] * 4)  # cols implied by the real file
+            if actual >= 1 and actual != t.get("cols"):
+                t["cols"] = int(actual)
+                actions.append(f"{cat}: cols {t.get('cols')}→{actual} (from file bytes)")
+            t["bytes"] = t["rows"] * t["cols"] * 4
+            spec = header_spec(cat, model_id, model_sha, t.get("col_roles"))
+            t["model_sha"], t["spec_sha"] = model_sha, spec_sha(spec)   # also on the manifest rec
+            if not t.get("col_roles") and spec.get("col_roles"):
+                t["col_roles"] = spec["col_roles"]
+            write_track_meta(d, cat, t, spec)
+            if not (d / TRACKS_DIR / f"{cat}.json").exists():
+                actions.append(f"{cat}: header missing (unexpected)")
+            else:
+                actions.append(f"{cat}: header written (model_sha, spec_sha)")
+        tmp = d / "manifest.json.tmp"
+        tmp.write_text(json.dumps(man, indent=1))
+        os.replace(tmp, d / "manifest.json")
+        _fsync_dir(d)
+        return actions
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
 
 
 def recover(d: Path, manifest: dict, log=None) -> list[str]:
