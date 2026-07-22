@@ -162,13 +162,61 @@ Derivation rule is recorded verbatim in `labels.json` `_subcategory_keywords` +
 destruction), so the labels rebuild deterministically from `keywords.json` with no new
 committed script.
 
-**The 57 `alert_tp` images are the headline:** they are person-down-in-danger, the exact
-class COCO val2017 has zero of. They make alert-tier separation measurable for the first
-time. Labels are WEAK (a "first aid" tag can mean a kit, not a victim) — treated as
-directional, spot-checked ≤20/round, never as a precision ground truth.
+**The 57 `alert_tp` images were meant to be the headline** — person-down-in-danger, the
+class COCO has zero of. They turned out to be the finding, but not the one intended.
 
-**Indexing as the `safetyprobe` dataset is HELD** until the conductor's ALL-CLEAR (quiet
-window: no `imgtag index` / bulk embedding while the main index builds — §8 loadavg gate).
+### 5a. MEASURED on the indexed `safetyprobe` (ALL-CLEAR, `scripts/eval_safety_separation.py`)
+
+Indexed 795/797 (2 decode-skips) at pecore-s16-384-fp32, same model_sha as the COCO
+snapshot. Scored with the shipped `SafetyScorer`; per-subcategory medians and tier counts:
+
+| subcategory | n | p_lying (med) | p_danger (med) | alert | review | none |
+|---|---|---|---|---|---|---|
+| `alert_tp` | 57 | 0.0007 | 0.0025 | 3 | 4 | 50 |
+| `person_down` | 118 | 0.0003 | 0.0014 | 2 | 7 | 109 |
+| `sunbathing` | 8 | **0.5155** | 0.0030 | 0 | 6 | 2 |
+| `injury_context` | 72 | 0.0008 | 0.0021 | 2 | 1 | 69 |
+| `danger_context` | 25 | 0.0001 | 0.0030 | 0 | 1 | 24 |
+| `destruction` | 515 | 0.0004 | 0.0019 | 7 | 20 | 488 |
+
+**Separation (alert_tp vs benign-lying, on p_danger — the alert discriminator):** AP
+**0.454**, bootstrap CI95 **[0.349, 0.590]**. Lower bound 0.349 < 0.5 → alert_tp does NOT
+dominate the benign-lying band. Precision-first τ_danger cannot reach even 0.80 precision
+at any recall. **VERDICT: WITHHOLD** (ship rule: AP CI95 lower bound > 0.5).
+
+### 5b. Why — the labels, not the threshold (the real finding, §7f)
+
+The measurement's own diagnostic (4 views, well under the 20/round budget) shows the
+keyword-derived weak labels are **too noisy to be true positives for a pose+context track**:
+
+| viewed image | labeled | actually is |
+|---|---|---|
+| `-81lVsfM4gQ` | person_down | a **kitten** on a sofa (no person) |
+| `-WPdgomuLT4` | person_down | a **laptop flat-lay** on a table (no person) |
+| `0z76nwoF1OI` | alert_tp | a man **walking upright** past a graffiti wall (not down, not danger) |
+| `OwWrA8GhHpk` | sunbathing | a person **upright** photographing the beach (not lying) |
+
+4/4 mislabeled. The reason is structural: keyword pulls work for OBJECT categories (weapons
+"gun" → a gun; drugs "cocaine" → powder) but fail for a POSE ("lying"/"nap"/"sleeping"
+return flat-lays, pets, aesthetic desk shots) and for CONTEXT ("first aid" → a kit,
+"sunbathing" → beach photographers). The `alert_tp` = lying-kw ∩ danger-kw JOIN multiplies
+two noisy labels, so its intersection is often neither. **The probe cannot validate the
+alert tier because it is not a clean TP set** — the separation AP 0.454 is measured against
+garbage labels and neither proves nor disproves the signal.
+
+One real detector limitation did surface honestly: `sunbathing` p_lying 0.52 fired on an
+UPRIGHT beach photographer — **beach-scene leakage** (the prompt "sunbathing lying on the
+beach" matches beach scenes, not just the pose). A candidate BACKGROUND negative for the
+next COCO refit ("a person standing on the beach"), to be measured, not assumed.
+
+**Consequence:** the honest path to a shippable alert tier is NOT a bigger keyword pull —
+it is a small HAND-VERIFIED set (accumulated ≤20/round, or the deployment site's own
+images; AMBIGUITIES #8). Keyword-programmatic labelling (T4) is sufficient for objects and
+insufficient for welfare/pose. The COCO numbers (§3) remain the honest measured baseline;
+the probe round improved our KNOWLEDGE (the label ceiling) without moving the metric.
+
+> Corpus note: the `person_down`/`alert_tp` keyword sets need a person-presence + pose
+> pre-filter before they are TPs. Deferred, not hidden — recorded here and in the ledger.
 
 ---
 
@@ -231,16 +279,26 @@ Unsplash probe is a review-queue threshold, not a page-a-human threshold.
 | deliverable | state |
 |---|---|
 | person-down instrument evaluated (item 1) | ✅ done — embedding-space runtime confirmed correct; keypoints offline-only |
-| `safetyprobe` corpus + `labels.json` (item 3) | ✅ built (797 imgs, 57 alert-TPs, 6 subcategories); indexing HELD for ALL-CLEAR |
-| separation per subcategory (item 4) | ⏳ blocked on (a) ALL-CLEAR embedding, (b) b-daemon's 12-image benign-FP band |
-| fitted τ_alert + τ_review + CI (item 4) | ⏳ same block |
-| spec → `data/moderation.json` (item 2) | ⛔ WITHHELD by design until separation beats the benign-FP band |
-| ledger entry (item 5) | ⏳ lands with the measured round (before/after numbers — never fabricated, improve-track law) |
+| `safetyprobe` corpus + `labels.json` (item 3) | ✅ built (797 imgs, 6 subcats) + INDEXED (795/797, ALL-CLEAR) |
+| separation per subcategory (item 4) | ✅ MEASURED — alert_tp vs benign-lying AP **0.454** CI95 [0.349, 0.590] |
+| fitted τ_alert + τ_review + CI (item 4) | ✅ measured → **not fittable**: precision-first τ_danger can't reach prec 0.80 at any recall; τ_review recall on the probe is 0.12 (label-polluted, see §5b) |
+| spec → `data/moderation.json` (item 2) | ⛔ **WITHHELD (measured verdict)** — separation CI lower bound 0.349 < 0.5, AND the probe labels are not clean TPs (4/4 diagnostic views mislabeled) |
+| ledger entry (item 5) | ✅ round-2 appended (before/after measured; verdict WITHHOLD) |
 
-**Next actions (in order):** (1) receive b-daemon failure analysis → define benign-FP
-band; (2) on ALL-CLEAR → `imgtag index` the probe as `safetyprobe` + run `eval_safety.py`;
-(3) fit + separation test; (4) if it passes, ship spec + ledger entry; if not, report the
-overlap honestly and keep the tier withheld.
+**The round's result, honestly:** the ALL-CLEAR measurement did its job — it produced a
+WITHHOLD verdict backed by data, and revealed the true blocker is **labels, not the
+threshold**. Keyword-programmatic TP labelling (T4) is sufficient for object tracks
+(weapons/drugs) and insufficient for a pose+context welfare track — a bigger keyword pull
+would not help. The metric did not move; the KNOWLEDGE did (the label ceiling is now
+measured and named).
+
+**Next actions (in order):** (1) a person-presence + pose pre-filter on the
+`person_down`/`alert_tp` keyword sets, or a small hand-verified set from the deployment
+site (AMBIGUITIES #8) — the only thing that unblocks a shippable alert tier; (2) a COCO
+refit measuring the beach-scene-leakage negative ("a person standing on the beach")
+surfaced in §5b; (3) hand b-daemon the staged `track_spec()` spec for their unsplash-demo
+spread-vs-saturate run (expected to confirm the same weak signal); (4) ship `categories.
+safety` only when a clean TP set shows separation. Withhold stands.
 
 > 2026-07-22 · track-safety2 · created (predecessor died before reporting). COCO numbers
 > cited from the committed `safety.py` FIT (predecessor's measured run). Probe counts +
@@ -256,5 +314,14 @@ overlap honestly and keep the tier withheld.
 > negatives — and `test_safety.py` (12 unit/contract/acceptance tests, incl. the six-scene
 > sketch). Preserved the successor's WITHHOLD decision and `labels.json` taxonomy verbatim.
 > Coordinated the alert boundary with track-violence (safety.alert = person-down∧danger;
-> violence.alert = gore) and handed b-daemon the final DANGER_WORD regex. Everything ⏳
-> remains blocked on the quiet-window ALL-CLEAR.
+> violence.alert = gore) and handed b-daemon the final DANGER_WORD regex.
+>
+> 2026-07-22 · track-safety · ROUND 2 (ALL-CLEAR): indexed `safetyprobe` (795/797) and
+> ran `scripts/eval_safety_separation.py`. Alert_tp vs benign-lying AP 0.454 CI95
+> [0.349, 0.590] → **WITHHOLD confirmed by measurement** (CI lower < 0.5). The real finding
+> (§5b): the keyword-derived TP labels are too noisy for a pose+context track — 4/4
+> diagnostic views were mislabeled (kitten, laptop, upright walker, upright beach
+> photographer). Also surfaced beach-scene leakage in `sunbathing` p_lying (0.52 on an
+> upright person). Blocker is LABELS not threshold; unblock = person-presence pre-filter
+> or hand-verified deployment images. COCO baseline (§3) stands; spec stays out of
+> moderation.json. Ledger round-2 recorded.

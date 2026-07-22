@@ -1,0 +1,97 @@
+{
+ "dataset": "safetyprobe",
+ "model": "pecore-s16-384-fp32",
+ "n": 795,
+ "per_subcategory": {
+  "alert_tp": {
+   "n": 57,
+   "p_lying_med": 0.0007,
+   "p_danger_med": 0.0025,
+   "alert": 3,
+   "review": 4,
+   "none": 50
+  },
+  "person_down": {
+   "n": 118,
+   "p_lying_med": 0.0003,
+   "p_danger_med": 0.0014,
+   "alert": 2,
+   "review": 7,
+   "none": 109
+  },
+  "sunbathing": {
+   "n": 8,
+   "p_lying_med": 0.5155,
+   "p_danger_med": 0.003,
+   "alert": 0,
+   "review": 6,
+   "none": 2
+  },
+  "injury_context": {
+   "n": 72,
+   "p_lying_med": 0.0008,
+   "p_danger_med": 0.0021,
+   "alert": 2,
+   "review": 1,
+   "none": 69
+  },
+  "danger_context": {
+   "n": 25,
+   "p_lying_med": 0.0001,
+   "p_danger_med": 0.003,
+   "alert": 0,
+   "review": 1,
+   "none": 24
+  },
+  "destruction": {
+   "n": 515,
+   "p_lying_med": 0.0004,
+   "p_danger_med": 0.0019,
+   "alert": 7,
+   "review": 20,
+   "none": 488
+  }
+ },
+ "shipped_tau": {
+  "review": 0.0695,
+  "danger": 0.0076
+ },
+ "separation_alert_vs_benign_lying": {
+  "discriminator": "p_danger",
+  "n_alert": 57,
+  "n_benign_lying": 126,
+  "AP": 0.4544,
+  "AP_CI95": [
+   0.3486,
+   0.5904
+  ],
+  "alert_p_danger_med": 0.0025,
+  "benign_p_danger_med": 0.0016,
+  "recall_at_prec90": 0.0,
+  "tau_danger_at_prec90": Infinity,
+  "recall_at_prec80": 0.0,
+  "tau_danger_at_prec80": Infinity
+ },
+ "separation_lying_vs_nobody": {
+  "discriminator": "p_lying",
+  "n_lying": 183,
+  "n_danger_nobody": 612,
+  "AP": 0.2902,
+  "AP_CI95": [
+   0.2337,
+   0.3496
+  ],
+  "lying_recall_at_shipped_tau_review": 0.1202,
+  "note": "cross-corpus recall check for tau_review; the review-tier FP rate is measured on COCO (scripts/eval_safety.py), not here \u2014 the probe has no clean upright/empty negatives."
+ },
+ "benign_lying_false_alerts": {
+  "n_benign_lying": 126,
+  "reached_alert": 2,
+  "rate": 0.0159
+ },
+ "verdict": {
+  "decision": "WITHHOLD",
+  "rule": "ship the alert tier only if alert_tp dominates benign-lying (AP CI95 lower bound > 0.5 = better than a coin flip on the person-down subset)",
+  "ap_ci95_lower": 0.3486
+ }
+}
