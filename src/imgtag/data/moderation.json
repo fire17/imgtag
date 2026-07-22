@@ -63,6 +63,29 @@
      "a dermatology photo of bare skin"
     ]
    },
+   "violation_subcategories": {
+    "_note": "The VIOLATION branch of the one nudity taxonomy tree (conductor merge ruling 2026-07-22). These are ANATOMY-REGION labels produced by the NudeNet v3 body-part detector (src/imgtag/moderation/nudity_subcat.py, `CLASS_TIER`), run as an EXPLAINER on Marqo-gated images \u2014 they name WHAT drove a violation, they do not gate. Marqo (pixels) is the gate; NudeNet has no statue/mannequin concept (fires ~28% on marble nudes, research \u00a710) so it NEVER gates alone. The REVIEW branch is `review_subcategories` above (clothing-context, margin instrument). Two instruments, two tiers, one tree.",
+    "exposed_genitalia": [
+     "FEMALE_GENITALIA_EXPOSED",
+     "MALE_GENITALIA_EXPOSED"
+    ],
+    "exposed_breast": [
+     "FEMALE_BREAST_EXPOSED"
+    ],
+    "exposed_buttocks_anus": [
+     "BUTTOCKS_EXPOSED",
+     "ANUS_EXPOSED"
+    ],
+    "_covered_revealing_review_tier": [
+     "FEMALE_BREAST_COVERED",
+     "BUTTOCKS_COVERED",
+     "FEMALE_GENITALIA_COVERED",
+     "ANUS_COVERED",
+     "BELLY_EXPOSED",
+     "MALE_BREAST_EXPOSED",
+     "ARMPITS_EXPOSED"
+    ]
+   },
    "negatives": [
     "a landscape photograph",
     "a photograph of food",

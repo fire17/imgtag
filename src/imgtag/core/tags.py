@@ -56,6 +56,25 @@ CURATED = [
 ]
 
 
+# Frequency band per provenance — drives b-daemon's TAG-ADAPTIVE layer-2 (2026-07-22).
+# Layer-2 (τ_eff = max(τ, platt(mean+k·std))) crushes recall on high-prior COMMON tags
+# (person/car) but fixes the FP class on rare/mid tags (car-on-bus 72/87→1/87). So apply
+# it ONLY where `layer2_eligible` is true; leave common-calibrated + LVIS-frequent on
+# layer-1 τ. b-daemon gates on these fields instead of guessing a frequency cut.
+_BAND = {"coco80": "common-calibrated", "lvis-f": "frequent", "lvis-c": "common",
+         "lvis-r": "rare", "openimages600": "open", "curated": "open"}
+
+
+def freq_band(provenance: str) -> str:
+    p = provenance.replace("-syn", "")  # synonyms inherit the parent band
+    return _BAND.get(p, "open")
+
+
+def layer2_eligible(band: str) -> bool:
+    """True = safe for the mean+k·std raise (rare/mid tags); False = layer-1 τ only."""
+    return band in ("common", "rare", "open")
+
+
 def _norm(name: str) -> str:
     n = re.sub(r"[_\-]+", " ", str(name)).strip().lower()
     n = re.sub(r"\s*\(.*?\)\s*", " ", n)  # LVIS disambiguators: "bat (animal)"
@@ -225,10 +244,14 @@ def save(table: TagTable, model_sha: str, root: str | None = None) -> str:
         raise ValueError("tag table has no embeddings — embed before saving")
     emb = np.ascontiguousarray(table.emb, dtype=np.float32)
     emb.tofile(os.path.join(d, "tags.f32"))
+    bands = [freq_band(p) for p in table.provenance]
     meta = {
         "names": table.names, "dim": int(emb.shape[1]), "model_sha": model_sha,
         "prompt_ensemble_sha": table.prompt_ensemble_sha, "tier": table.tier,
         "tau": table.tau, "platt": table.platt,
+        # b-daemon tag-adaptive layer-2 contract: gate the mean+k·std raise on these.
+        "freq_band": bands,
+        "layer2_eligible": [layer2_eligible(b) for b in bands],
         "provenance": {"sources": sorted(set(table.provenance)),
                        "per_tag": table.provenance,
                        "n_calibrated": sum(t == CALIBRATED for t in table.tier),
