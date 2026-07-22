@@ -56,3 +56,32 @@ tell the agent that did the drugs track to keep going (ill add a /goal to it) to
 think about the process of how you give that subagnet to imrpove its own track and create a mini skill in this projects folder (not global, or remind me to make global later, we need to undersand how to make it more generic for other usecases where tracks are a thing), and it would be called to tell the track subagent to improve itself - and that skill in itself should have and run a darwin skill and autoresearch improvement cycle (or several) to improve the way we tell subagents how to improve their own tracks, measureing our success based on the change in rate of improvement of the subagents (inner loop, we are the outerloop observers) - does all of that makes sense?
 
 and i hope this goes without saying - the agents can check (sample selective) images and see them themselves in order for them to conduct tests - but they should never be used for actually doing the process of categorization or whatever the track does - everything has to be programatic and be able to run the same with no agents afterwards - agents shouldnt waste their tokens on verifying images for tracks themselves if that makes sense - make sure that all working subagents are working on improving the system and or at indentifying or improving their tracks and that they are not really wasting tokens
+
+## 2026-07-22 ~13:58Z — weapons + nudity true positives, subcategory depth, ratio thresholds (verbatim)
+
+> "the identifying weapons track needs to be improved, and also the nudity, i dont see true
+> positibes in the datasets and all findings are false positives, we must make sure that both
+> bring these so we can truely test them and like the drug discovery, need to also go deep and
+> and make sure that all handguns firearms - make a list of subitems in each of these
+> categories - so that we can make sure that our monitoring really works at identifying and
+> flagging them at high confidence - and whatever is scored now should - if working correct -
+> be at lower confidence results compared to the true positive results and then we will be
+> able to set the ratio thershould for auto flagging for each track - does all of that makes
+> sense ?"
+
+Derived (💭): per-track TP probe corpora indexed as real datasets (weaponprobe / nudityprobe,
+pattern = drugprobe) · subcategory taxonomies as versioned data · TP-vs-current-FP confidence
+separation per subcategory · fitted per-tier τ = the "ratio threshold for auto flagging".
+Nudity bounded by the EVAL DATA LAW: review-tier TPs local-sourced; violation tier stays
+benchmark-cited, honestly labeled. Dispatched: track-weapons3 + track-nudity3 (opus).
+
+## 2026-07-22 ~14:05Z — per-track progress report + continue (verbatim)
+
+> "please ask each track for their progress and delta and give me a visually pleasing report
+> (rich table with progressbars and etas and current status and next phases and what each
+> track does) - do this now then continue everything else please includeing addressing the
+> tracks i asked for in a way that will result in what i asked previously - make sure you
+> dont miss a thing"
+
+Also this hour (user, live feel-test): "im seeing duplicate results when searching" → fixed
+(cross-dataset collapse in dedupe(), also_in provenance, verified over HTTP).
