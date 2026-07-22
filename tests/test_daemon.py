@@ -231,18 +231,66 @@ def test_search_while_appending_stays_consistent(live):
     assert r["coverage"]["indexed"] == 54
 
 
-def test_text_ttl_releases_the_tower_but_not_the_daemon(live):
-    """ADR-5 (revised): --text-ttl evicts the text tower only; the daemon stays up."""
+def test_idle_ttl_evicts_the_model_but_not_the_daemon(live):
+    """ADR-5 (revised): eviction drops the MODEL; the daemon keeps serving."""
     d = D.Handler.daemon
     released = []
     d.searcher._backend.release_text = lambda: released.append(True)
     d.searcher.last_query = time.time() - 100
-    t = threading.Thread(target=D._text_ttl_watch, args=(d, 1.0), daemon=True)
+    t = threading.Thread(target=D._memory_watch, args=(d, 1.0, 0.0), daemon=True)
     t.start()
-    for _ in range(40):
-        if released:
+    for _ in range(60):
+        if d.evictions:
             break
         time.sleep(0.05)
-    assert released, "text tower was never released"
-    st, _ = get(live, "/api/hello")
-    assert st == 200  # daemon still serving
+    assert released, "model was never released"
+    assert d.evictions and d.evictions[-1]["reason"] == "idle"
+    st, r = get(live, "/api/hello")
+    assert st == 200 and r["text_tower"] == "unloaded"  # daemon still serving, model gone
+
+
+def test_rss_watermark_evicts_the_model(live):
+    """The memory-watermark half of the policy: a crossed watermark evicts, TTL or not."""
+    d = D.Handler.daemon
+    released = []
+    d.searcher._backend.release_text = lambda: released.append(True)
+    d.searcher.text_loaded = True
+    t = threading.Thread(target=D._memory_watch, args=(d, 0.0, 0.001, 0.2), daemon=True)  # 1KB watermark, 0.2s period
+    t.start()
+    for _ in range(60):
+        if d.evictions:
+            break
+        time.sleep(0.1)
+    assert released and d.evictions[-1]["reason"] == "watermark"
+    assert D.rss_mb() > 1.0  # the probe itself works on this platform
+
+
+def test_named_tag_query_never_wakes_the_text_tower(live):
+    """ADR-5 revised: a query that NAMES a tag is served with zero text-encoder work."""
+    import json as _json
+
+    import numpy as _np
+
+    from test_search import DIM
+
+    be = D.Handler.daemon.searcher._backend
+    d = live / "models" / be.model_sha
+    d.mkdir(parents=True, exist_ok=True)
+    _np.stack([be._vec("cat")]).astype(_np.float32).tofile(d / "tags.f32")
+    (d / "tags.json").write_text(_json.dumps({"names": ["cat"], "dim": DIM,
+                                              "model_sha": be.model_sha, "tier": ["calibrated"],
+                                              "tau": [0.5], "platt": [[12.0, -6.0]]}))
+    s = D.Handler.daemon.searcher
+    s._tags.clear()
+    boom = []
+    s._backend.embed_texts = lambda *a, **k: boom.append(a) or (_ for _ in ()).throw(
+        AssertionError("text tower was used for a named-tag query"))
+
+    st, r = get(live, "/api/search?q=cat&dataset=d1&k=5&text=auto")
+    assert st == 200 and r["hits"] and not boom
+    assert r["text_tower"] == "skipped" and r["text_tower_load_ms"] == 0.0
+    assert r["hits"][0]["why"]["path"] == "tag" and r["hits"][0]["score"] > 0
+
+    # text=never + an unnamed query = an honest no-match, still no encoder
+    st, r = get(live, "/api/search?q=some+unnamed+thing&dataset=d1&text=never")
+    assert st == 200 and r["hits"] == [] and r["no_match"] is True and not boom

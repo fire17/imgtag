@@ -148,7 +148,9 @@ class Searcher:
         self._snaps: dict[str, tuple[tuple, object]] = {}
         self._tags: dict[str, TagTable | None] = {}
         self._qvec = lru_cache(maxsize=cache)(self._embed_uncached)
-        self.last_query = 0.0  # for the daemon's --text-ttl eviction (ADR-5, revised)
+        self._own_backend = backend is None  # only drop what we loaded ourselves
+        self.text_loaded = False
+        self.last_query = 0.0  # for the daemon's eviction policy (ADR-5, revised)
 
     # -- resources -------------------------------------------------
     def _manifest_stamp(self, dataset: str) -> tuple:
@@ -199,30 +201,60 @@ class Searcher:
     def _embed_uncached(self, sha: str, query: str) -> np.ndarray:
         return np.ascontiguousarray(self._backend.embed_texts([query])[0], np.float32)
 
-    def embed(self, manifest: dict, query: str) -> np.ndarray:
+    def embed(self, manifest: dict, query: str) -> tuple[np.ndarray, float]:
+        """Query vector + the ms spent loading the text tower (0 when it was already warm).
+
+        The load cost is returned, not hidden: it belongs in ``tookMs`` AND in its own
+        labeled field so a warm-latency budget (B3) never silently absorbs a B13-shaped
+        one-time cost.
+        """
+        t0 = time.perf_counter()
+        cold = self._backend is None or getattr(self._backend, "_ts", None) is None
         self.backend(manifest)  # refuses on mismatch before any work
-        return self._qvec(manifest["model_sha"], query)
+        v = self._qvec(manifest["model_sha"], query)
+        self.text_loaded = True
+        return v, round((time.perf_counter() - t0) * 1000, 2) if cold else 0.0
+
+    def release_text(self) -> bool:
+        """Drop the resident model. ADR-5 (revised): the IDLE resident set is shards +
+        tokenizer + tag table only — no text tower, and no vision session either (the
+        daemon never indexes; that runs in the `imgtag index` subprocess)."""
+        be, self.text_loaded = self._backend, False
+        if be is None:
+            return False
+        be.release_text()
+        if self._own_backend:  # we loaded it -> we may drop it whole (vision session too)
+            self._backend = None
+        self._qvec.cache_clear()
+        return True
 
     # -- tag path --------------------------------------------------
-    def _candidate_tags(self, table: TagTable, query: str, q: np.ndarray) -> list[tuple[int, str]]:
-        """Exact + hypernym-expanded name matches, then the near-tag rule (ADR-3 §3)."""
+    def _name_candidates(self, table: TagTable, query: str) -> list[tuple[int, str]]:
+        """Tags the query NAMES — exact or via the static hypernym table. No embedding
+        involved, so a named-tag query is served with zero text-encoder involvement."""
         out: dict[int, str] = {}
-        compound = is_compound(query)
         # A compound query NEVER inherits a COMPONENT tag's calibration (ADR-3 §3): only the
         # whole query string may name a tag; single-concept queries also match per token.
-        terms = [query.lower().strip()] + ([] if compound else content_tokens(query))
+        terms = [query.lower().strip()] + ([] if is_compound(query) else content_tokens(query))
         for term in terms:
             for name in expand(term):
                 i = table.index.get(name)
                 if i is not None:
                     out.setdefault(i, "exact" if name == term else "hypernym")
-        if not compound:  # …and never borrows one via the near-tag rule either
-            cos = np.asarray(table.emb @ q, np.float32)
-            for i in np.argsort(-cos)[:MAX_TAGS]:
-                if cos[i] < table.theta_syn:
-                    break
-                out.setdefault(int(i), "near")
         return sorted(out.items())[:MAX_TAGS]
+
+    def _near_candidates(self, table: TagTable, query: str, q: np.ndarray) -> list[tuple[int, str]]:
+        """Near-tag rule (ADR-3 §3): inherit a tag's calibration at cos >= theta_syn.
+        Needs the query vector, so it only ever runs when the text path ran anyway."""
+        if is_compound(query):
+            return []
+        cos = np.asarray(table.emb @ q, np.float32)
+        out = []
+        for i in np.argsort(-cos)[:MAX_TAGS]:
+            if cos[i] < table.theta_syn:
+                break
+            out.append((int(i), "near"))
+        return out
 
     def _tag_scores(self, snap, table: TagTable, idx: list[int], manifest: dict):
         T = np.ascontiguousarray(np.asarray(table.emb)[idx].T, np.float32)  # [D, C]
@@ -240,29 +272,49 @@ class Searcher:
             ],
             np.float32,
         )
-        return P, eff
+        return P, eff, cos
 
     # -- the query -------------------------------------------------
-    def search_one(self, query: str, dataset: str, k: int = 50, strict: bool = False) -> dict:
+    def search_one(self, query: str, dataset: str, k: int = 50, strict: bool = False,
+                   text: str = "auto") -> dict:
+        """One dataset. ``text`` selects the encoder policy (ADR-5, revised resident set):
+
+        * ``auto`` (default) — a query that NAMES a tag is served from the tag table alone,
+          never waking the text tower; anything else loads it.
+        * ``never`` — the text tower is never loaded; unnamed queries honestly no-match.
+        * ``always`` — always fuse both paths (what a bench harness wants).
+
+        The choice depends only on (query, tag table, policy), never on cache state, so
+        results stay deterministic across restarts (B18e).
+        """
         snap = self.snapshot(dataset)
         man = snap.manifest
         n = len(snap.ids)
         if n == 0:
-            return {"hits": [], "gated": False, "indexed": 0, "best_p_text": 0.0}
-        q = self.embed(man, query)
-        s = np.asarray(snap.emb @ q, np.float32)  # cosine: both sides are L2-normalized
+            return {"hits": [], "gated": False, "indexed": 0, "best_p_text": 0.0,
+                    "text_tower": "skipped", "load_ms": 0.0}
         table = self.tags(man)
-        a, b = table.text_logistic if table else (TEXT_A, TEXT_B)
-        z = (s - s.mean()) / max(float(s.std()), 1e-6)
-        p_text = _sigmoid(a * z + b)
+        cands = self._name_candidates(table, query) if table is not None else []
+        use_text = text == "always" or (text != "never" and not cands)
+
+        q, load_ms, s, z = None, 0.0, None, np.zeros(n, np.float32)
+        p_text = np.zeros(n, np.float32)
+        if use_text:
+            q, load_ms = self.embed(man, query)
+            s = np.asarray(snap.emb @ q, np.float32)  # cosine: both sides are L2-normalized
+            a, b = table.text_logistic if table else (TEXT_A, TEXT_B)
+            z = (s - s.mean()) / max(float(s.std()), 1e-6)
+            p_text = _sigmoid(a * z + b)
+            if table is not None:
+                cands = sorted(dict(cands + self._near_candidates(table, query, q)).items())[:MAX_TAGS]
 
         p_tag = np.zeros(n, np.float32)
         col = np.full(n, -1, np.int32)  # winning tag column per row, -1 = no tag path
         gated = False  # a CALIBRATED tag cleared its effective tau somewhere
-        cands = self._candidate_tags(table, query, q) if table is not None else []
+        tag_cos = None
         if cands:
             idx = [i for i, _ in cands]
-            P, eff = self._tag_scores(snap, table, idx, man)
+            P, eff, tag_cos = self._tag_scores(snap, table, idx, man)
             col = P.argmax(1).astype(np.int32)
             p_tag = P[np.arange(n), col].astype(np.float32)
             calib = np.asarray([table.calibrated(i) for i in idx])
@@ -287,8 +339,11 @@ class Searcher:
             if p_tag[i] > p_text[i] and col[i] >= 0:
                 ti, how = cands[int(col[i])]
                 why = {"path": "tag", "tag": table.names[ti], "match": how, "tier": table.tier[ti]}
+                # tag-path score is cos(image, tag vector) — there may be no query vector at all
+                score = float(tag_cos[i, int(col[i])])
             else:
                 why = {"path": "text"}
+                score = float(s[i])
             why.update(p_tag=round(float(p_tag[i]), 4), p_text=round(float(p_text[i]), 4), z=round(float(z[i]), 3))
             hits.append(
                 {
@@ -296,31 +351,41 @@ class Searcher:
                     "path": rec["path"],
                     "dataset": rec.get("dataset") or dataset,  # B18: provenance NEVER null
                     "dataset_slug": rec.get("dataset") or dataset,
-                    "score": round(float(s[i]), 6),
+                    "score": round(score, 6),
                     "p": round(float(p[i]), 4),
                     "why": why,
                 }
             )
         hits.sort(key=lambda h: (-h["p"], h["image_id"]))  # B18(e) determinism: ties by id
-        return {"hits": hits[:k], "gated": gated, "indexed": n, "best_p_text": float(p_text.max())}
+        return {"hits": hits[:k], "gated": gated, "indexed": n, "best_p_text": float(p_text.max()),
+                "text_tower": ("loaded" if load_ms else "warm") if use_text else "skipped",
+                "load_ms": load_ms}
 
-    def search(self, query: str, dataset: str | None = None, k: int = 50, strict: bool = False) -> dict:
+    def search(self, query: str, dataset: str | None = None, k: int = 50, strict: bool = False,
+               text: str = "auto") -> dict:
         """Search one dataset, or every dataset on disk when ``dataset`` is None."""
         t0 = time.perf_counter()
         self.last_query = time.time()
         names = [dataset] if dataset else list_datasets(self.home)
         hits: list[dict] = []
-        indexed, gated, best_text = 0, False, 0.0
+        indexed, gated, best_text, load_ms = 0, False, 0.0, 0.0
+        tower = "skipped"
         for name in names:
-            r = self.search_one(query, name, k=k, strict=strict)
+            r = self.search_one(query, name, k=k, strict=strict, text=text)
             hits += r["hits"]
             indexed += r["indexed"]
             gated |= r["gated"]
             best_text = max(best_text, r["best_p_text"])
+            load_ms += r["load_ms"]
+            tower = r["text_tower"] if tower == "skipped" else tower
         hits.sort(key=lambda h: (-h["p"], h["image_id"]))
         return {
             "query": query,
             "tookMs": round((time.perf_counter() - t0) * 1000, 2),
+            # the one-time tower load is INSIDE tookMs and labeled here, so a warm-latency
+            # budget (B3) can exclude it instead of silently absorbing a B13-shaped cost.
+            "text_tower": tower,
+            "text_tower_load_ms": round(load_ms, 2),
             "coverage": {"indexed": indexed, "total": total_expected(names, indexed, self.home)},
             "datasets": names,
             "hits": hits[:k],

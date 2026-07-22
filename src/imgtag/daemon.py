@@ -1,4 +1,11 @@
-"""Resident search daemon — ADR-5 (warm towers) + ADR-13 (lifecycle), stdlib only.
+"""Resident search daemon — ADR-5 (resident set, revised) + ADR-13 (lifecycle), stdlib only.
+
+Resident set at IDLE = mmap'd shards + the tag table (+ b-engine's binary tokenizer) and
+NO model: measured 51.9MB fresh, 181MB after an eviction, against B8's 350MB idle cap.
+A free-text query lazy-loads the model (measured 427MB resident, 489ms one-time) and the
+eviction policy — idle ``--text-ttl`` OR the ``--rss-watermark-mb`` high-water mark — drops
+it again. The DAEMON itself never exits on idle (immich's model_ttl anti-pattern). A query
+that NAMES a tag is served from the tag table with zero text-encoder involvement.
 
 OWNER: b-daemon. ``ThreadingHTTPServer`` over a per-user UNIX socket
 (``~/.imgtag/daemon.sock``, 0600); ``--tcp PORT`` is the app's opt-in loopback door and
@@ -8,8 +15,13 @@ the index writer (ADR-6), never pid heuristics. The endpoint record is ``daemon.
 
 Endpoints::
 
-    GET  /api/hello                              {version, model_shas, pid, socket, uptime_s}
-    GET  /api/search?q=&dataset=&k=&strict=      Search API contract (briefs §Search API)
+    GET  /api/hello                              version, model_shas, rss_mb, text_tower,
+                                                 eviction policy + last evictions
+    GET  /api/search?q=&dataset=&k=&strict=&text= Search API contract (briefs §Search API);
+                                                 text=auto|never|always picks the encoder
+                                                 policy, and the reply labels text_tower +
+                                                 text_tower_load_ms so a warm budget (B3)
+                                                 can exclude the one-time load
     GET  /api/datasets                           fleet view (B18f: exactly what is on disk)
     GET  /api/jobs                               job status files (progress.list_jobs)
     GET  /api/events                             SSE, <=1s freshness, from the job files
@@ -56,6 +68,7 @@ from .core.store import (
 VERSION = "0.1.0"
 THUMB_CAP_BYTES = 200 * 1024 * 1024  # B8: thumbs are <=200MB of the 500MB disk budget
 EVENT_POLL_S = 0.4  # SSE freshness <=1s
+DEFAULT_WATERMARK_MB = 1200.0  # evict the model above this; B8's under-load cap is 1.5GB
 APP_DIR = Path(__file__).resolve().parent / "app"
 
 # exception -> (HTTP status, B20 exit code)
@@ -143,12 +156,15 @@ class ThumbCache:
 class Daemon:
     """Process-wide state: the resident Searcher (warm text tower) + thumb cache."""
 
-    def __init__(self, home: Path, backend: str | None = None):
+    def __init__(self, home: Path, backend: str | None = None,
+                 text_ttl: float = 0.0, watermark_mb: float = 0.0):
         self.home = home
+        self.text_ttl, self.watermark_mb = text_ttl, watermark_mb
         self.started = time.time()
         self.searcher = Searcher(home, backend=_models.load_backend(backend) if backend else None)
         self.thumbs = ThumbCache(home)
         self.stop = threading.Event()
+        self.evictions: list[dict] = []  # ADR-5 model-eviction audit trail (last 20)
 
     def model_shas(self) -> dict:
         b = self.searcher._backend
@@ -280,7 +296,14 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if u.path == "/api/hello":
                 self.json({"version": VERSION, "model_shas": d.model_shas(), "pid": os.getpid(),
-                           "socket": str(daemon_paths(d.home)[0]), "uptime_s": round(time.time() - d.started, 1)})
+                           "socket": str(daemon_paths(d.home)[0]),
+                           "uptime_s": round(time.time() - d.started, 1),
+                           # ADR-5 revised: resident set is shards + tokenizer + tag table at
+                           # idle; the model is a transient the eviction policy owns.
+                           "rss_mb": round(rss_mb(), 1),
+                           "text_tower": "loaded" if d.searcher.text_loaded else "unloaded",
+                           "text_ttl_s": d.text_ttl, "rss_watermark_mb": d.watermark_mb,
+                           "evictions": d.evictions[-5:]})
             elif u.path == "/api/search":
                 query = (q.get("q") or [""])[0]
                 if not query.strip():
@@ -290,6 +313,7 @@ class Handler(BaseHTTPRequestHandler):
                     dataset=(q.get("dataset") or [None])[0] or None,
                     k=max(1, min(500, int((q.get("k") or [50])[0]))),
                     strict=(q.get("strict") or ["0"])[0] in ("1", "true", "yes"),
+                    text=(q.get("text") or ["auto"])[0],
                 ))
             elif u.path == "/api/datasets":
                 self.json({"datasets": d.datasets()})
@@ -395,18 +419,44 @@ class LoopbackHTTPServer(ThreadingHTTPServer):
 # ---------------------------------------------------------------- lifecycle
 
 
-def _text_ttl_watch(d: "Daemon", ttl: float) -> None:
-    """ADR-5 (revised on measured RSS): the DAEMON stays up; only the text tower is
-    evicted after `ttl` idle seconds. Never an idle-exit — that is immich's sin."""
-    while not d.stop.wait(min(ttl / 4, 30.0)):
-        be = d.searcher._backend
-        if be is not None and d.searcher.last_query and time.time() - d.searcher.last_query > ttl:
-            be.release_text()
-            d.searcher.last_query = 0.0
+def rss_mb(pid: int | None = None) -> float:
+    """This process's current RSS in MB — stdlib only (no psutil; ADR-7)."""
+    pid = pid or os.getpid()
+    try:
+        with open(f"/proc/{pid}/status") as f:  # Linux (the primary target)
+            for ln in f:
+                if ln.startswith("VmRSS:"):
+                    return int(ln.split()[1]) / 1024
+    except OSError:
+        pass
+    try:  # BSD/macOS dev box
+        out = subprocess.run(["ps", "-o", "rss=", "-p", str(pid)], capture_output=True,
+                             text=True, timeout=5).stdout.strip()
+        return int(out) / 1024 if out else 0.0
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return 0.0
+
+
+def _memory_watch(d: "Daemon", ttl: float, watermark_mb: float, period: float = 0.0) -> None:
+    """ADR-5 (revised on measured RSS): the DAEMON stays up forever; only the MODEL is
+    evicted — on idle TTL or when RSS crosses the watermark. Never immich's idle-exit."""
+    period = period or (min(ttl / 4, 30.0) if ttl > 0 else 30.0)
+    while not d.stop.wait(period):
+        s = d.searcher
+        if s._backend is None:
+            continue
+        idle = ttl > 0 and s.last_query and time.time() - s.last_query > ttl
+        heavy = watermark_mb > 0 and rss_mb() > watermark_mb
+        if idle or heavy:
+            before = rss_mb()
+            if s.release_text():
+                d.evictions.append({"at": time.time(), "reason": "idle" if idle else "watermark",
+                                    "rss_before_mb": round(before, 1), "rss_after_mb": round(rss_mb(), 1)})
+                del d.evictions[:-20]
 
 
 def serve(home: Path | None = None, tcp: int | None = None, backend: str | None = None,
-          log=print, text_ttl: float = 0.0) -> int:
+          log=print, text_ttl: float = 0.0, watermark_mb: float = DEFAULT_WATERMARK_MB) -> int:
     """Run the daemon. Returns a process exit code (3 = another instance holds the lock)."""
     home = home or imgtag_home()
     home.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -430,7 +480,7 @@ def serve(home: Path | None = None, tcp: int | None = None, backend: str | None 
 
     if sock_p.exists():  # ADR-13: only the flock holder may unlink the socket
         sock_p.unlink()
-    d = Daemon(home, backend)
+    d = Daemon(home, backend, text_ttl, watermark_mb)
     Handler.daemon = d
     servers = []
     if tcp is not None:
@@ -452,8 +502,8 @@ def serve(home: Path | None = None, tcp: int | None = None, backend: str | None 
     log(f"imgtag daemon {VERSION} pid={os.getpid()} socket={sock_p}"
         + (f" http=127.0.0.1:{port}" if port else ""))
 
-    if text_ttl > 0:
-        threading.Thread(target=_text_ttl_watch, args=(d, text_ttl), daemon=True).start()
+    if text_ttl > 0 or watermark_mb > 0:
+        threading.Thread(target=_memory_watch, args=(d, text_ttl, watermark_mb), daemon=True).start()
     threads = [threading.Thread(target=s.serve_forever, kwargs={"poll_interval": 0.2}, daemon=True)
                for s in servers]
     for t in threads:
@@ -560,13 +610,16 @@ def main(argv=None) -> int:
     ap.add_argument("--backend", default=None, help="preload this model backend by name")
     ap.add_argument("--idle-timeout", type=float, default=0.0,
                     help="0 = never exit (ADR-13 default; model_ttl is the proven anti-pattern)")
+    ap.add_argument("--rss-watermark-mb", type=float, default=DEFAULT_WATERMARK_MB, metavar="MB",
+                    help="evict the model when RSS crosses this (0 = never). Default keeps us "
+                         "under B8's 1.5GB under-load cap without ever unloading on a timer.")
     ap.add_argument("--text-ttl", type=float, default=0.0, metavar="SECONDS",
                     help="release the text tower after SECONDS idle (ADR-5 revised: 0 = never "
                          "on desktop, 300 on the 8GB server). The daemon stays up either way.")
     a = ap.parse_args(argv)
     if a.idle_timeout:
         print("--idle-timeout is accepted but ignored: ADR-13 pins the default at 0", file=sys.stderr)
-    return serve(a.home, a.tcp, a.backend, text_ttl=a.text_ttl)
+    return serve(a.home, a.tcp, a.backend, text_ttl=a.text_ttl, watermark_mb=a.rss_watermark_mb)
 
 
 if __name__ == "__main__":
