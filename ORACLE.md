@@ -73,9 +73,15 @@ highest-bar protocol — verbatim vision, budgets as tests, honest verification,
   → `p_tag`, shipped per model_sha; dataset-layer streaming stats (per-tag mean/std/p99
   over THIS corpus, accumulated free during the index matmul, stored in manifest ~96KB)
   → effective τ = max(τ_tag, mean+k·std). (2) **Fusion in probability space ONLY** —
-  never max-pool raw cosine against calibrated probabilities; free-text path calibrated
-  via per-query corpus z-score → global logistic; fuse p = max(p_tag, p_text), record
-  which path won (= the "why this matched" payload). (3) Near-tag rule: query inherits a
+  never max-pool raw cosine against calibrated probabilities. Free-text calibration
+  feature (RE-RULED 2026-07-22 — the original per-query z-score spec was FALSIFIED with
+  data: max-z is bounded by corpus shape, ~3–4 for every query regardless of truth;
+  nonsense out-z-scored real queries, 60% separation vs chance 50): **default feature =
+  raw absolute cosine → logistic (A,B) + τ fit on CAL-SET per model_sha** (77% measured
+  separation); `text_feature` is selectable in tags.json ("cos"|"z"); COMMISSIONED
+  EXPERIMENT: background-prompt margin (score minus max over K generic negative prompts,
+  one cached text batch) — if it beats cos on CAL-SET separation, it becomes the default.
+  Fuse p = max(p_tag, p_text), record which path won (= the "why this matched" payload). (3) Near-tag rule: query inherits a
   tag's calibration only if cos(q, tag) ≥ θ_syn (fit on COCO synonym pairs); compound
   queries NEVER inherit a component tag's threshold — unit test with "my dog wearing a
   santa hat". (4) Manifest records calib_sha + calib_model_sha; tag-path search REFUSES
@@ -521,6 +527,11 @@ label, or to compare a dev-machine number against a target-profile (🐧) budget
   lane complete-via-cross-checks in the gap. Lesson: disk truth led message truth by 20
   minutes — check the file BEFORE pinging, and re-check before declaring a lane missing.
 
+- 2026-07-22 12:25Z · b-daemon falsified ADR-3's z-score free-text calibration with a
+  15-real-vs-15-nonsense probe (nonsense max-z median 4.16 > real 3.81) and shipped the
+  fix behind a selector without touching the ADR — escalation contract §7(b) honored
+  again. Also: idle daemon measured 51.9MB; named-tag search 0.2–1.8ms with the text
+  tower never loaded — the tag-table-first resident-set law is paying exactly as designed.
 - 2026-07-22 11:48Z · 784MB of model weights found COMMITTED (conductor's own `git add
   -A` at bc1f70f swept freshly-downloaded files before the subdir gitignore existed;
   caught by spike-siglip2's hygiene check). Untracked same hour; small json/config files
