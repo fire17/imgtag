@@ -144,8 +144,8 @@ BORDERLINE_PROMPTS: dict[str, list[str]] = {
 #: to the true positives, so ``max(background)`` rises on the images we want to keep and
 #: the margin collapses. Measured on COCO val2017 (research/track-sports.md §3.2):
 #: AP 0.9321 → 0.9037 and recall-at-precision-0.80 0.947 → 0.889 when they are added.
-#: The FP classes they were meant to kill (stadium concert, crowd) are already at a
-#: 0.000–0.05 match rate without them.
+#: The FP classes they were meant to kill (stadium concert, crowd) already sit at a low
+#: ≤0.11 weak-label match rate without them (corpus-dependent; research/track-sports.md §6).
 NEGATIVE_PROMPTS = [
     "a photo of a person",
     "a portrait of a person",

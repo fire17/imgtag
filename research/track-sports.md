@@ -1,6 +1,8 @@
 # track-sports — the sports CONTENT track
 
-> Owner: track-sports2. Instrument: prompt ensemble over the index embedding (TRACKS.md
+> Owner: track-sports2 · verified & finalized 2026-07-22 by track-sports3 (COCO/LVIS numbers
+> reproduced to the digit over existing embeddings; weak-label §6 re-measured on the grown
+> corpus). Instrument: prompt ensemble over the index embedding (TRACKS.md
 > T2 rung 1 — the only unconditionally-allowed instrument). Not moderation: the answer is
 > a content label, tier `match`|`none` (ADR-14, `match` added 13:23Z), routed to the
 > `content` bucket, never summed into moderation totals. Ships as `src/imgtag/moderation/
@@ -34,7 +36,8 @@
   Lifts the positive count to **953 / 5000**. Used as a fairer denominator, never as a
   negative.
 - **Weak (NON-exhaustive, labeled weak).** Unsplash Lite photographer/AI keyword rows over
-  the indexed `unsplashb` snapshot (n≈2540 after the keyword join). Keywords are suggestions,
+  the indexed `unsplashb` snapshot (n≈9926; was ≈2540 at first fit — b-corpus grew it, so the
+  §6 weak-label rates were re-measured 2026-07-22 by track-sports3). Keywords are suggestions,
   not exhaustive labels — read as a cross-domain sanity check and a probe for the
   activity-only classes COCO cannot score, NEVER as precision/recall.
 
@@ -105,19 +108,24 @@ different scales). Match-rate on keyword slices of `unsplashb`:
 
 | slice | generic only | generic + borderline (SHIPPED) |
 |---|---|---|
-| sport-keyword (weak +) | 0.391 | 0.346 |
-| concert / festival / music | 0.000 | 0.000 |
-| crowd (no sport kw) | 0.091 | 0.045 |
-| **hiking** (borderline, OUT) | 0.216 | **0.000** |
-| food | 0.061 | 0.039 |
-| architecture | 0.063 | 0.059 |
+| sport-keyword (weak +) | 0.407 | 0.301 |
+| concert / festival / music | 0.070 | 0.056 |
+| crowd (no sport kw) | 0.108 | 0.090 |
+| **hiking** (borderline, OUT) | 0.209 | **0.034** |
+| food | 0.037 | 0.036 |
+| architecture | 0.088 | 0.066 |
 
-The shipped bank drives **hiking 0.216 → 0.000** while barely moving true sport (0.391 →
-0.346). That is the whole reason it beats generic-only despite a lower COCO AP. `concert`
-and `crowd` (the "stadium hosting a non-game" FP class the user's acceptance sketch names)
-are already ≈0 without any hard negative — the generic bank handles them.
+> Re-measured 2026-07-22 (track-sports3) on the grown `unsplashb` (n≈9926, was ≈2540). The
+> COCO/LVIS exhaustive-GT numbers above reproduced to the digit; only these weak-label rates
+> shifted with the corpus — direction and ranking unchanged.
 
-Weak-label sport recall is only ~0.35: keyword slices are noisy (a photo tagged "sport" may
+The shipped bank drives **hiking 0.209 → 0.034** (≈6× suppression) while barely moving true
+sport (0.407 → 0.301). That is the whole reason it beats generic-only despite a lower COCO
+AP. `concert` and `crowd` (the "stadium hosting a non-game" FP class the user's acceptance
+sketch names) sit at **0.056 / 0.090** in-bank (0.070 / 0.108 generic) — low without any
+scene hard-negative, the generic bank already handles them.
+
+Weak-label sport recall is only ~0.30: keyword slices are noisy (a photo tagged "sport" may
 be a shoe, a gym interior, an abstract) and this track is equipment/scene-biased. Read it as
 a floor, not the recall — the exhaustive COCO recall (0.947) is the real one.
 
@@ -125,14 +133,15 @@ a floor, not the recall — the exhaustive COCO recall (0.947) is the real one.
 
 7 borderline "sports" — **chess, hiking, fishing, darts/pool, esports, yoga, dance** — read
 as sport to some sites and leisure to others. Default **OUT**: their prompts are folded into
-`negatives`, which actively suppresses them (measured: hiking 0.000 in-bank). To count them
+`negatives`, which actively suppresses them (measured: hiking 0.034 in-bank, ≈6× below
+generic-only's 0.209). To count them
 as sport, remove them from `negatives` (or call `SportsHead.build(borderline=True)`) and
 re-score the ONE sidecar column — no re-embedding of images (TRACKS.md T3). This is a data
 edit, not a code change.
 
 **User-acceptance sketch, graded:** soccer match → `match(soccer)` ✅ · tennis-racket
 closeup → `match(tennis)` ✅ (COCO tennis racket recall 0.970) · stadium concert → `none` ✅
-(Unsplash concert 0.000) · gym selfie → `match(gym)` — activity-only, COCO can't measure,
+(Unsplash concert 0.056 in-bank) · gym selfie → `match(gym)` — activity-only, COCO can't measure,
 weak-label plausible · chess/hiking → `none` by the documented default, one flag to flip.
 
 ## 8. Known blind spots — stated plainly
@@ -148,8 +157,10 @@ weak-label plausible · chess/hiking → `none` by the documented default, one f
   boxing shots; a few matches even argmax to "surfing" on n<5). COCO has ≈no boxing to
   measure. **Consequence for the violence track:** sports cannot yet be relied on as the
   exculpatory "this is a bout, not an assault" label — the compose-claim is not measured-
-  strong on the sports side. Flagged to track-violence; strengthening martial-arts prompts
-  is an open item.
+  strong on the sports side. Confirmed 2026-07-22 (track-sports3): the COCO TP label
+  distribution shows **0** martial-arts / 0 boxing matches — COCO annotates ~no combat sport,
+  so this bound is weak-label-only. Flagged to track-violence2; strengthening
+  martial-arts/boxing prompts + a combat-sports TP probe corpus is the open item.
 - **Equestrian / motorsport / kite dominate the false positives** (§ FP anatomy: 70
   motorsport, 43 kite, 29 equestrian FPs at τ). These ARE arguably sport (horse racing,
   motorsport) — the "FP" is partly a COCO-taxonomy artifact (COCO's `sports` supercategory
@@ -190,3 +201,43 @@ Provenance: COCO val2017 instances + LVIS v1 val (val2017 subset) + Unsplash Lit
 all already in `data/`. Backend PE-Core-S16-384 fp32 (model_sha 8c080c43…). Honest status:
 COCO/LVIS numbers are first-party exhaustive-GT measurements; Unsplash numbers are weak-label
 and labeled as such; activity-only and contact-sports recall are under-measured and flagged.
+
+## 11. Ledger (dated, append-only)
+
+- **2026-07-22 · track-sports2 · v1 shipped + owner-consolidated.** Built the measured
+  scorer (embedding-space prompt ensemble, generic-only background, precision-first τ),
+  measured on CORPUS-A (COCO val2017 exhaustive GT): AP 0.9321, held-out prec 0.801 /
+  rec 0.947 @ τ 0.1809, non-saturated p-spread. Committed sports.py + fitted head +
+  tests (17, green) + this doc + `scripts/_sports_explore.py` at 45c10f6.
+- **2026-07-22 · spec approved (b-daemon).** `categories.sports` entry authored per
+  b-daemon's amendments: `match` sole positive key, `match_labels` parallel array,
+  `content_track:true`, borderline folded into `negatives`, τ in the per-model fitted
+  file (not the spec). WRITTEN in the `data/moderation.json` working tree; the shared-file
+  commit is sequenced by the lead (index-race safety, rule 7). b-daemon's reader is live
+  (bd33cde); offered to score the fitted file vs unsplash-demo + cocoval2017 to confirm
+  the p-spread off-COCO before the `fitted` label is blessed in prod — PENDING.
+- **2026-07-22 · contact-sports boundary synced (track-violence, fe74302).** Their
+  negatives bank PINS this track's `martial arts` prompt strings verbatim → sync-on-retune
+  contract: any rename/retune of that group pings track-violence BEFORE it lands. Measured
+  weak-label contact-sports recall handed over (boxing 0.102, martial-arts 0.146 — LOW;
+  under-measured, cite WITH the weak label). The compose-claim (boxing → sports:match as
+  the exculpatory label) is NOT measured-strong on the sports side; open item.
+- **2026-07-22 · verified (track-sports3, folded in).** COCO/LVIS exhaustive-GT numbers
+  reproduced to the digit over existing embeddings; §6 weak-label rates re-measured on the
+  grown `unsplashb` (n≈9926) — direction/ranking unchanged; the corpus-dependent phrasing
+  in sports.py's background-bank comment tightened. Lane consolidated to a single owner
+  (track-sports2) after the auth-outage false-death; successor stopped, its edits adopted.
+
+## Open items (darwin backlog)
+
+1. **Activity-only recall is under-measured** — swimming/running/gym/martial-arts have no
+   COCO object to score against; only weakly probed via Unsplash keywords. A distilled
+   activity head (offline teacher → embedding MLP) is the TRACKS.md T2-rung-2 path if a
+   site needs strong activity recall.
+2. **Contact-sports recall is weak** (§8) — strengthen `martial arts` prompts and re-measure
+   on a real (indexed) contact-sports slice; coordinate the retune with track-violence.
+3. **equestrian / motorsport are scored as FPs by the COCO taxonomy** but are arguably sport
+   — a user ruling that they ARE sport would raise measured precision from 0.783 (LVIS) to
+   ~0.80+. Configurable via the label set.
+4. **Confirm `calibration:"fitted"` off-COCO** — awaiting b-daemon's unsplash-demo p-spread
+   check; demote to unfitted if it saturates there.
