@@ -305,8 +305,11 @@ under-measured" blind spot — its prompts are equipment/scene-biased and weak-k
 photos are mostly gym/portrait, not ring shots. So **sports:match is NOT a reliable
 "this is a bout, not an assault" guarantee today.** The honest statement: the negatives-bank
 subtraction is the working mechanism; the cross-track composition is a promising but
-unproven bonus, pending sports' targeted prompt round (which needs the `vslices` dataset
-this lane indexed for it).
+unproven bonus, pending sports' targeted prompt round (which needs the `vslices` dataset —
+currently **984/1856 rows, job 74192702 PARTIAL/failed**: it was launched `--full-speed`
+inside an active quiet window and rightly killed by the conductor mid-run, an ADR-11
+polite-mode violation on my part; the remaining ~872 rows resume free via content-hash skip
+in **polite mode** after the conductor's ALL-CLEAR).
 
 ## 8. Acceptance sketch (the brief's cases, with documented rulings)
 
