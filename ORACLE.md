@@ -335,6 +335,15 @@ highest-bar protocol — verbatim vision, budgets as tests, honest verification,
   re-grade under policy: bikini/toy-rifle/vape flags were CORRECT at review tier; the
   mannequin is the true FP class to eliminate.
 
+- **ADR-15 The track scaling law (user directive 13:26Z — TRACKS.md is the constitution).**
+  Every track scores EVERY image (dense f32 sidecar per track per dataset; raw scores
+  stored, tiers/labels DERIVED at read from versioned specs). Instrument hierarchy:
+  embedding-matvec (default, unconditionally allowed) > distilled embedding-MLP head
+  (mandated fate of every dedicated model — teacher offline, MLP in the hot path) >
+  dedicated per-image model (budgeted exception: Σ dedicated FLOPs ≤30% of encoder, B25;
+  distillation logged as owed). Track upgrades re-score ONE sidecar column (ms), never
+  re-embed. At 100 tracks indexing/inference stay ~flat — bench-enforced (bench tracks).
+
 ## 3. Dead ends (do not rediscover)
 
 - **fp16 as a COMPUTE format on ORT CPU EP — dead** (no native fp16 kernels; casts to
