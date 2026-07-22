@@ -60,6 +60,12 @@ CATEGORY = "drugs"
 TEMPLATES = ("a photo of {}.", "a close-up photo of {}.", "{}")
 
 # ── positive bank: drug-context concepts, grouped so `why` can name the subcategory ──
+# improve-track round 1 (2026-07-22) added 8 candidates, each A/B-gated on TP-vs-FP
+# SEPARATION over 15k real photos (scripts/ab_drug_subcats.py): promoted ONLY prompts that
+# raised AUROC AND did not lift the negative FP band. 5 over-generic candidates were
+# REJECTED for lifting the FP band (snorting-straw +0.0073, heroin-spoon +0.0019, etc.).
+# NOTE (honest coverage gap): only cannabis + smoking_apparatus have any labelled TP; the
+# other subcategories carry prompts as production coverage for kinds we CANNOT measure.
 CONCEPTS: dict[str, list[str]] = {
     "cannabis": [
         "marijuana buds",
@@ -69,6 +75,8 @@ CONCEPTS: dict[str, list[str]] = {
         "a grinder full of ground marijuana",
         "a person smoking a marijuana joint",
         "a rolled joint and rolling papers",
+        "a cannabis vape cartridge and battery",       # +round1 (dFP99 -0.0005)
+        "a dab rig for smoking cannabis concentrate",   # +round1 (dFP99 -0.0004)
     ],
     "smoking_apparatus": [
         "a glass bong for smoking marijuana",
@@ -77,6 +85,7 @@ CONCEPTS: dict[str, list[str]] = {
         "a crack pipe",
         "a meth pipe with smoke",
         "aluminium foil with burnt drug residue",
+        "a bong with murky bong water",                 # +round1 (dFP99 -0.0002)
     ],
     "powder": [
         "lines of white powder cocaine on a mirror with a rolled banknote",
@@ -90,6 +99,8 @@ CONCEPTS: dict[str, list[str]] = {
         "loose pills scattered on a table next to a plastic baggie",
         "recreational drug pills in a plastic bag",
         "sheets of LSD blotter tabs",
+        "a pile of ecstasy pills with stamped logos",   # +round1 (dFP99 -0.0004)
+        "loose pills and a plastic baggie on a nightclub table",  # +round1 (dFP99 -0.0008)
     ],
     "injection": [
         "a syringe with a spoon and a lighter for heroin",
@@ -99,10 +110,15 @@ CONCEPTS: dict[str, list[str]] = {
     "psychedelics": [
         "dried psilocybin magic mushrooms",
         "a bag of dried magic mushrooms",
+        "a sheet of LSD blotter paper with printed squares",  # +round1 (dFP99 -0.0002)
     ],
     "paraphernalia": [
         "drug paraphernalia laid out on a table",
         "illegal drugs and drug equipment",
+        "small ziplock baggies of drugs and a digital scale",  # +round1 (dFP99 -0.0011)
+    ],
+    "staging": [
+        "bags of drugs displayed on a table for dealing",  # +round1 NEW subcat (dFP99 -0.0001)
     ],
 }
 
@@ -219,9 +235,9 @@ POLICY_NEIGHBOURS: list[str] = [
 # scripts/eval_drugs.py, never by hand). p = sigmoid(A * margin + B).
 #   VIOLATION tier — fitted on 18 hand-verified drug images vs COCO val2017 negatives.
 #   REVIEW tier    — fitted on the 26-image LVIS tobacco/medicine slice (human labels).
-PLATT_A, PLATT_B = 98.2058, -5.4524   # REFIT v2 (scripts/eval_drugs.py --write) rewrites
-TAU = 0.0100              # violation bar
-TAU_REVIEW = 0.0083       # review bar — INVARIANT: always < TAU (a band BELOW violation)
+PLATT_A, PLATT_B = 103.0180, -5.6314   # REFIT v2 (scripts/eval_drugs.py --write) rewrites
+TAU = 0.0198              # violation bar
+TAU_REVIEW = 0.0071       # review bar — INVARIANT: always < TAU (a band BELOW violation)
 TIER_MARGIN = 0.01        # violation must beat the tobacco bank by this (see score())
 N_POSITIVES = 17          # labelled drug images behind the fit (see FIT / labels.json)
 
@@ -232,22 +248,27 @@ N_POSITIVES = 17          # labelled drug images behind the fit (see FIT / label
 # corpus does to the margin. Raising the cap requires more labels, not a code change.
 P_MAX = (N_POSITIVES + 1) / (N_POSITIVES + 2)
 FIT = {
-    "version": "v2 (2026-07-22) — refit after b-daemon/b-app reported 4 measured defects",
+    "version": "improve-track round 1 (2026-07-22) — subcategory deepening + "
+    "confidence-correctness; on top of the v2 4-defect refit",
     "model": "pecore-s16-384-fp32",
     "feature": "margin = max(positive concepts) - max(background concepts)",
     "corpus": "15,010 real-photo negatives (COCO val2017 + Unsplash demo + Unsplash-b, "
-    "deduped by photo id) — ~2x b-app's 7,790, the corpus that saturated v1.",
-    "violation": "AP 0.472 · recall .882 at 1% FP · fitted on 17 hand-verified drug "
-    "images. At the shipped tau: 88% drug recall as violation, 94% surfaced (viol+review), "
-    "1.06% of negatives flagged violation — matches the fit's own FP prediction.",
-    "p_distribution": "SPREAD, not saturated: 0 negatives at p>=0.9, 1 in [0.7,0.9] "
-    "(the b-app '218 at p=0.99' bug is structurally gone — evidence cap P_MAX + gentle "
-    "ridge slope). Full histogram in research/eval-drugs.json.",
-    "review_band": "tau_review 0.0083 < tau 0.0100 — a band BELOW violation (fixes "
-    "b-daemon defect #1). Tobacco/vape routed here by the arbitration; vape acceptance PASS.",
-    "defect_3_leaf": "the raspberry/bramble-leaf p=0.92 FP had TWO causes, both fixed: "
-    "(a) it was MISLABELLED as a cannabis positive in my ground truth — removed after a "
-    "full-res re-audit of all 18; (b) serrated/compound-leaf negatives added.",
+    "deduped by photo id) vs 17 hand-verified drug images.",
+    "confidence": "AUROC 0.998 (TP-vs-FP, threshold-free, the headline metric); separation "
+    "margin 0.27 (TP-median p 0.28 vs FP-p99 0.010); ECE 0.0005 / Brier 0.0007 on the "
+    "labelled support (noisy, read as direction). Shipped tau FP rate 0.51%, Wilson-95 "
+    "CI [0.41%, 0.63%].",
+    "operating": "at tau=0.0198: drug recall .941 as violation, 0.44% of negatives flagged "
+    "violation (66/15010) + 0.67% review, 0 tobacco wrongly a violation. Round 1 vs v2: "
+    "AUROC 0.9968->0.9979, violation FP 1.06%->0.44%, drug recall .88->.94.",
+    "subcategory_round": "8 candidate prompts promoted (A/B-gated: raised AUROC AND did "
+    "not lift the FP band); 5 over-generic candidates REJECTED (snorting-straw dFP99 "
+    "+0.0073, heroin-spoon +0.0019, scale+cash +0.0012). New 'staging' subcategory. Only "
+    "cannabis + smoking_apparatus have labelled TP; the rest are unmeasured coverage.",
+    "p_distribution": "SPREAD, not saturated: 0 negatives at p>=0.9 (evidence cap P_MAX "
+    "+ ridge slope); the b-app '218 at p=0.99' bug is structurally gone.",
+    "review_band": "tau_review < tau — a band BELOW violation (b-daemon defect #1). "
+    "Tobacco/vape routed here by the arbitration; vape acceptance PASS.",
     "caveat": "17 drug positives — a wide-CI estimate, not a benchmark. Recall on "
     "cocaine/heroin/meth imagery specifically is UNMEASURED (no labelled image exists in "
     "any corpus we may use). Tobacco review-tier recall stays weak (small-object ceiling).",

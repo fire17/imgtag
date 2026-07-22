@@ -270,13 +270,15 @@ def test_prebuilt_view_matches_reopen_bit_for_bit(tmp_path):
 
 def content_and_unknown_detector(embs, recs, images=None):
     """Emits a CONTENT tier (match) and an UNKNOWN tier — neither may crash the index nor
-    inflate the enforcement counts (the sports.py 'match' KeyError, generalized)."""
+    inflate the enforcement counts (the sports.py 'match' KeyError, generalized). Keyed on
+    the filename so it is deterministic across batch boundaries."""
     out = []
-    for i, r in enumerate(recs):
+    for r in recs:
+        i = int(Path(r["path"]).stem.replace("img", ""))
         out.append([
-            {"category": "people", "p": float(i), "tier": "match"},          # content tier
+            {"category": "people", "p": float(i), "tier": "match"},          # content tier, every image
             {"category": "weapons", "p": 0.9, "tier": "violation"} if i == 0 else
-            {"category": "future", "p": 0.5, "tier": "some_new_tier"},        # unknown tier
+            {"category": "future", "p": 0.5, "tier": "some_new_tier"},        # unknown tier, i>0
         ])
     return out
 
@@ -326,8 +328,8 @@ def people_counting_detector(embs, recs, images=None):
     """A [N,4] counting track (track-people's shape): one multi-role record per image plus
     a derived 'match' chip when >=1 person. col_roles order is the on-disk order."""
     out = []
-    for i, r in enumerate(recs):
-        n_p = float(i % 3)   # 0,1,2,0,1,2,...
+    for r in recs:
+        n_p = float(int(Path(r["path"]).stem.replace("img", "")) % 3)   # img0->0 img1->1 img2->2 img3->0
         rec = [{"category": "people",
                 "cols": {"n_persons": n_p, "n_faces": max(0.0, n_p - 1),
                          "n_persons_conf": 0.9, "n_faces_conf": 0.8},
@@ -352,10 +354,13 @@ def test_multi_column_people_track_stores_N_by_4(tmp_path, imgs):
     snap = store.open_snapshot("ds", home)
 
     people = np.asarray(snap.tracks["people"])
-    assert people.shape == (4, 4), people.shape           # [N, C] dense, row-aligned
-    # row i, col 0 (n_persons) == i % 3 — proves column order + alignment
-    np.testing.assert_allclose(people[:, 0], [i % 3 for i in range(4)], atol=1e-6)
-    np.testing.assert_allclose(people[:, 2], 0.9, atol=1e-6)  # n_persons_conf
+    assert people.shape == (4, 4), people.shape           # [N, C] dense
+    # THE alignment invariant: row i of the column belongs to row i of the ids, whatever
+    # order the workers delivered them in — so check each row against its OWN image
+    for i, r in enumerate(snap.ids):
+        want = int(Path(r["path"]).stem.replace("img", "")) % 3
+        assert people[i, 0] == want, (i, r["path"], people[i, 0], want)   # n_persons, col 0
+    np.testing.assert_allclose(people[:, 2], 0.9, atol=1e-6)  # n_persons_conf constant
 
     meta = store.read_track_meta("ds", "people", home)
     assert meta["cols"] == 4

@@ -114,6 +114,50 @@ max-subtracted. The reason is that the confusables split into two kinds:
 accident. (Prompt bug found the same way: `"a water pipe used to smoke drugs"` fires on
 literal bathroom plumbing — replaced by `"a glass bong with a bowl and a stem"`.)
 
+## 3-round1. IMPROVE-TRACK ROUND 1 — subcategory deepening + confidence correctness (2026-07-22)
+
+Ran the `/improve-track` inner loop (ground → autoresearch → improve → verify → report).
+**Result: a strict win** — better separation, higher recall, *lower* FP, on the full 15,010
+real-photo pool.
+
+| Metric | v2 refit | round 1 | Δ |
+|---|---|---|---|
+| **AUROC** (TP-vs-FP, threshold-free — the confidence-correctness headline) | 0.9968 | **0.9979** | +0.0011 |
+| violation FP rate on negatives | 1.06% (159) | **0.44% (66)** | −0.62pp |
+| drug recall as violation | 0.882 | **0.941** | +0.059 |
+| separation margin (TP-median p − FP-p99) | — | **0.27** | new |
+| ECE / Brier (labelled support, noisy) | — | **0.0005 / 0.0007** | new |
+| shipped τ FP rate, Wilson-95 CI | — | **0.51% [0.41, 0.63]** | new |
+| p saturation (negatives at p≥0.9) | 0 | **0** | held |
+| acceptance (vape→review, leaf→none) | PASS | **PASS** | held |
+
+**What changed.** Eight candidate subcategory prompts promoted into `CONCEPTS` (cannabis
+vape/dab, murky bong, stamped-ecstasy, nightclub pills, LSD blotter sheet, baggies+scale,
+a new **staging** subcategory). Every promotion passed a hard gate: it had to **raise AUROC
+AND not lift the negative FP band** (`scripts/ab_drug_subcats.py`, one A/B pass over 15k
+photos). **Five candidates were REJECTED by the same gate** and that is half the result —
+they were the over-generic ones that fire on ordinary photos: *"snorting powder through a
+straw"* lifted the FP band +0.0073, *"spoon cooking heroin over a flame"* +0.0019,
+*"scale + baggies + cash"* +0.0012. The gate is the planner's chaser made mechanical:
+precision dies in the tail, so a prompt that only adds labelled recall while lifting the FP
+band never ships.
+
+**Confidence-correctness measurement added** (user law: calibrate, don't just count). The
+eval now reports **AUROC** (rank-stable on 17 positives, where a single-threshold AP is
+noisy), **ECE + Brier** on the labelled support (reported *with* their support, never as a
+hero number), a **Wilson-95 CI** on the fitted τ's FP rate, and **per-subcategory AUROC**.
+
+**Honest ceiling this round surfaced.** Only **cannabis (11 TP) and smoking_apparatus (6
+TP)** have any labelled positives; powder / injection / psychedelics / paraphernalia /
+staging have **zero**, so their prompts are *unmeasured production coverage*, not verified
+detectors. And separation on what we *can* measure is already **~0.998** — so the next real
+gain needs **labels** (a handful of cocaine/heroin/meth/pills-in-context images), not more
+prompts. That is the single highest-value ask for the user, restated from §5.
+
+Ledger: `.deify/track-improvement-ledger.json` (track "drugs", round 1). Raw A/B verdicts:
+`research/ab-drug-subcats.json`. TP-probe dataset: `drugprobe` (the 17 indexed drug images)
+— satisfies the new TP-probe law; separation is measured against it.
+
 ## 3a. REFIT v2 — four measured defects from integration, all fixed (2026-07-22)
 
 b-daemon folded the v1 spec into the live reader and b-app ran it on a real 7,790-image

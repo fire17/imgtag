@@ -11,63 +11,81 @@
  },
  "negative_pool": "cocoval2017,unsplash-demo,unsplashb",
  "margin_negatives": {
-  "50": -0.0494,
-  "90": -0.0159,
-  "99": 0.0105,
-  "99.9": 0.0313,
-  "max": 0.0714
+  "50": -0.0486,
+  "90": -0.0158,
+  "99": 0.0102,
+  "99.9": 0.0308,
+  "max": 0.0723
  },
  "margin_positives": {
   "min": 0.002,
-  "median": 0.0377,
-  "max": 0.0661
+  "median": 0.0453,
+  "max": 0.0685
  },
  "drug": {
   "n_pos": 17,
-  "AP": 0.4722,
-  "R@fpr1%": 0.882,
+  "AP": 0.5789,
+  "R@fpr1%": 0.941,
   "R@fpr5%": 1.0
  },
  "proxy": {
   "n_pos": 33,
   "AP": 0.2471,
   "R@fpr1%": 0.333,
-  "R@fpr5%": 0.394
+  "R@fpr5%": 0.364
  },
  "platt": [
-  98.2058,
-  -5.4524
+  103.018,
+  -5.6314
  ],
- "p_max_evidence_cap": 0.9444,
- "tau": 0.01,
- "tau_review": 0.0083,
+ "p_max_evidence_cap": 0.9474,
+ "tau": 0.0198,
+ "tau_review": 0.0071,
  "p_histogram_negatives": {
-  "0-0.01": 14823,
-  "0.01-0.05": 161,
-  "0.05-0.1": 11,
-  "0.1-0.2": 8,
-  "0.2-0.3": 2,
-  "0.3-0.5": 4,
+  "0-0.01": 14857,
+  "0.01-0.05": 127,
+  "0.05-0.1": 13,
+  "0.1-0.2": 5,
+  "0.2-0.3": 4,
+  "0.3-0.5": 3,
   "0.5-0.7": 0,
   "0.7-0.9": 1,
   "0.9-1.0001": 0
  },
  "p_histogram_drug": {
   "0-0.01": 1,
-  "0.01-0.05": 3,
-  "0.05-0.1": 4,
+  "0.01-0.05": 2,
+  "0.05-0.1": 2,
   "0.1-0.2": 2,
-  "0.2-0.3": 1,
-  "0.3-0.5": 2,
+  "0.2-0.3": 2,
+  "0.3-0.5": 4,
   "0.5-0.7": 2,
   "0.7-0.9": 2,
   "0.9-1.0001": 0
  },
+ "confidence": {
+  "auroc_drug_vs_neg": 0.9979,
+  "separation_margin": 0.2655,
+  "tp_median_p": 0.2756,
+  "fp_p99": 0.0102,
+  "ece_labelled": 0.0005,
+  "brier_labelled": 0.0007,
+  "tau_fp_rate": 0.00506,
+  "tau_fp_wilson95": [
+   0.00405,
+   0.00633
+  ],
+  "note": "AUROC is the headline (rank-stable on 17 positives); ECE/Brier are noisy on this support and read as direction, not benchmark.",
+  "per_subcategory_auroc": {
+   "cannabis": 0.999,
+   "smoking_apparatus": 0.994
+  }
+ },
  "operating": {
-  "violation_rate_neg": 0.0106,
-  "violation_count_neg": 159,
-  "review_rate_neg": 0.0069,
-  "recall_drug_violation": 0.882,
+  "violation_rate_neg": 0.0044,
+  "violation_count_neg": 66,
+  "review_rate_neg": 0.0067,
+  "recall_drug_violation": 0.941,
   "recall_drug_surfaced": 0.941,
   "recall_proxy_surfaced": 0.364,
   "recall_tobacco_surfaced": 0.75,
@@ -78,14 +96,14 @@
   "O5BSKKHYiEU.jpg": {
    "expected": "review",
    "got": "review",
-   "p": 0.0341,
-   "p_review": 0.0308,
+   "p": 0.0328,
+   "p_review": 0.0285,
    "pass": true
   },
   "lhPLeHgox9Q.jpg": {
    "expected": "none",
    "got": "none",
-   "p": 0.0009,
+   "p": 0.0008,
    "p_review": 0.0,
    "pass": true
   }
@@ -93,77 +111,77 @@
  "top_negatives": [
   {
    "name": "vHrhy6TiC5Q.jpg",
-   "p": 0.8256,
+   "p": 0.86,
    "why": "marijuana buds"
   },
   {
    "name": "000000363875.jpg",
-   "p": 0.3899,
+   "p": 0.4152,
    "why": "illegal drugs and drug equipment"
   },
   {
-   "name": "JrKEOHhq54g.jpg",
-   "p": 0.3626,
-   "why": "a crack pipe"
-  },
-  {
    "name": "000000359855.jpg",
-   "p": 0.346,
+   "p": 0.3699,
    "why": "illegal drugs and drug equipment"
   },
   {
    "name": "000000286458.jpg",
-   "p": 0.3326,
+   "p": 0.3543,
+   "why": "illegal drugs and drug equipment"
+  },
+  {
+   "name": "JrKEOHhq54g.jpg",
+   "p": 0.2948,
+   "why": "a crack pipe"
+  },
+  {
+   "name": "000000155154.jpg",
+   "p": 0.2399,
    "why": "illegal drugs and drug equipment"
   },
   {
    "name": "000000067534.jpg",
-   "p": 0.2234,
+   "p": 0.2229,
    "why": "sheets of LSD blotter tabs"
   },
   {
    "name": "000000032610.jpg",
-   "p": 0.2134,
+   "p": 0.2196,
    "why": "illegal drugs and drug equipment"
   },
   {
-   "name": "000000155154.jpg",
-   "p": 0.1976,
+   "name": "000000136915.jpg",
+   "p": 0.153,
    "why": "illegal drugs and drug equipment"
   },
   {
    "name": "000000354307.jpg",
-   "p": 0.1451,
+   "p": 0.1461,
    "why": "a syringe and a tourniquet on an arm"
   },
   {
-   "name": "NlBbJnhz6og.jpg",
-   "p": 0.1449,
-   "why": "a crack pipe"
-  },
-  {
    "name": "6VWXU0srXYc.jpg",
-   "p": 0.1379,
+   "p": 0.1439,
    "why": "recreational drug pills in a plastic bag"
   },
   {
-   "name": "000000136915.jpg",
-   "p": 0.1262,
-   "why": "illegal drugs and drug equipment"
-  },
-  {
-   "name": "7xEEADgBOeM.jpg",
-   "p": 0.1138,
+   "name": "NlBbJnhz6og.jpg",
+   "p": 0.1127,
    "why": "a crack pipe"
   },
   {
-   "name": "000000284282.jpg",
-   "p": 0.112,
-   "why": "a digital scale weighing white powder in a bag"
+   "name": "7xEEADgBOeM.jpg",
+   "p": 0.1027,
+   "why": "a crack pipe"
+  },
+  {
+   "name": "000000308328.jpg",
+   "p": 0.0876,
+   "why": "illegal drugs and drug equipment"
   },
   {
    "name": "W05ltFhe47U.jpg",
-   "p": 0.1057,
+   "p": 0.082,
    "why": "a person smoking a marijuana joint"
   }
  ]

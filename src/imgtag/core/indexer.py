@@ -272,7 +272,8 @@ def _apply_moderation(hook, embs, recs, images, counts: dict, log, warned=None, 
                 for j, role in enumerate(roles[cat]):
                     col[i, j] = float(cv.get(role, float("nan")))
             else:
-                col[i] = float(f.get("p", (f.get("cols") or {}).get(roles.get(cat, ["p"])[0], float("nan"))))
+                role0 = (roles.get(cat) or ["p"])[0]  # a head may register col_roles=None
+                col[i] = float(f.get("p", (f.get("cols") or {}).get(role0, float("nan"))))
             # ADR-14/15: tier is the carrier. Legacy {flagged: bool} maps to violation so
             # an older track still counts for something instead of vanishing silently.
             tier = f.get("tier")

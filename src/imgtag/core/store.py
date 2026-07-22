@@ -372,9 +372,24 @@ class Writer:
         if self._thread:
             self._thread.join(timeout=60)
         self._flush_pending()  # belt & braces: nothing may stay in RAM
+        if exc[0] is None and not self._err:
+            self._finalize_tracks()  # every track ends with exactly `count` rows (T1)
         self._release()
         if self._err and exc[0] is None:
             raise self._err
+
+    def _finalize_tracks(self) -> None:
+        """Pad every track column to the manifest count (trailing NaN) so a track that
+        was silent in the final flush(es) still has one row per image — the T1 invariant
+        'every track scores every image', made true even when a detector goes quiet."""
+        total = self.manifest["count"]
+        changed = False
+        for cat, t in list((self.manifest.get("tracks") or {}).items()):
+            if t["rows"] < total:
+                self._write_track(cat, np.empty((0, t.get("cols", 1)), np.float32), total, 0)
+                changed = True
+        if changed:
+            self._commit()
 
     def _acquire(self) -> None:
         path = self.dir / ".writer.lock"
@@ -457,12 +472,24 @@ class Writer:
             raise ValueError(f"duplicate image_id already in {self.dataset!r}: "
                              f"{sorted(ids & self._ids)[:3]} — ids are content-addressed (IA.md)")
         self._ids |= ids
+        m = len(recs)
         with self._cv:
+            prior = len(self._buf_r)  # rows already buffered this flush (for backfilling)
             self._buf_e.append(embs)
             self._buf_r.extend(recs)
-            for cat, col in (tracks or {}).items():
-                col = np.asarray(col, np.float32).reshape(len(recs), -1)
+            tracks = tracks or {}
+            # EVERY buffered track column stays exactly len(_buf_r) rows — a track absent
+            # from THIS append is NaN-padded, and a track first seen mid-flush backfills the
+            # prior rows. Without this a batch that scored no images for a track would leave
+            # its column short of the shard and the manifest would claim rows the file lacks.
+            for cat, col in tracks.items():
+                col = np.asarray(col, np.float32).reshape(m, -1)
+                if cat not in self._buf_t and prior:
+                    self._buf_t[cat] = [np.full((prior, col.shape[1]), NOT_SCORED, np.float32)]
                 self._buf_t.setdefault(cat, []).append(col)
+            for cat in set(self._buf_t) - set(tracks):
+                cols = self._buf_t[cat][0].shape[1]
+                self._buf_t[cat].append(np.full((m, cols), NOT_SCORED, np.float32))
             if len(self._buf_r) >= FLUSH_ROWS:
                 self._cv.notify_all()
 

@@ -1,0 +1,183 @@
+{
+ "baseline": {
+  "auroc": 0.9968,
+  "fp_p99": 0.0112,
+  "tp_median": 0.0377,
+  "n_prompts": 29
+ },
+ "candidates": [
+  {
+   "subcat": "cannabis",
+   "prompt": "a cannabis vape cartridge and battery",
+   "d_auroc": 0.0004,
+   "d_fp_p99": -0.0005,
+   "verdict": "promote"
+  },
+  {
+   "subcat": "cannabis",
+   "prompt": "a dab rig for smoking cannabis concentrate",
+   "d_auroc": 0.0007,
+   "d_fp_p99": -0.0004,
+   "verdict": "promote"
+  },
+  {
+   "subcat": "cannabis",
+   "prompt": "cannabis wax concentrate on a dab tool",
+   "d_auroc": 0.0002,
+   "d_fp_p99": 0.0001,
+   "verdict": "promote"
+  },
+  {
+   "subcat": "cannabis",
+   "prompt": "a tray of ground cannabis and rolling papers",
+   "d_auroc": 0.0001,
+   "d_fp_p99": 0.0007,
+   "verdict": "promote"
+  },
+  {
+   "subcat": "smoking_apparatus",
+   "prompt": "a glass meth pipe with a bulbous end",
+   "d_auroc": -0.0002,
+   "d_fp_p99": 0.0006,
+   "verdict": "promote"
+  },
+  {
+   "subcat": "smoking_apparatus",
+   "prompt": "a bong with murky bong water",
+   "d_auroc": 0.0004,
+   "d_fp_p99": -0.0002,
+   "verdict": "promote"
+  },
+  {
+   "subcat": "powder",
+   "prompt": "a razor blade cutting lines of cocaine on a mirror",
+   "d_auroc": -0.0007,
+   "d_fp_p99": 0.0009,
+   "verdict": "reject"
+  },
+  {
+   "subcat": "powder",
+   "prompt": "a person snorting powder through a straw",
+   "d_auroc": -0.0025,
+   "d_fp_p99": 0.0073,
+   "verdict": "reject"
+  },
+  {
+   "subcat": "powder",
+   "prompt": "a rolled banknote next to lines of white powder",
+   "d_auroc": -0.0003,
+   "d_fp_p99": 0.0003,
+   "verdict": "promote"
+  },
+  {
+   "subcat": "pills_context",
+   "prompt": "a pile of ecstasy pills with stamped logos",
+   "d_auroc": 0.0004,
+   "d_fp_p99": -0.0004,
+   "verdict": "promote"
+  },
+  {
+   "subcat": "pills_context",
+   "prompt": "loose pills and a plastic baggie on a nightclub table",
+   "d_auroc": -0.0001,
+   "d_fp_p99": -0.0008,
+   "verdict": "promote"
+  },
+  {
+   "subcat": "injection",
+   "prompt": "a spoon cooking heroin over a lighter flame",
+   "d_auroc": -0.0007,
+   "d_fp_p99": 0.0019,
+   "verdict": "reject"
+  },
+  {
+   "subcat": "injection",
+   "prompt": "a cotton filter, spoon and syringe drug kit",
+   "d_auroc": 0.0004,
+   "d_fp_p99": 0.0004,
+   "verdict": "promote"
+  },
+  {
+   "subcat": "psychedelics",
+   "prompt": "a sheet of LSD blotter paper with printed squares",
+   "d_auroc": 0.0003,
+   "d_fp_p99": -0.0002,
+   "verdict": "promote"
+  },
+  {
+   "subcat": "psychedelics",
+   "prompt": "ketamine powder in a small bag",
+   "d_auroc": 0.0001,
+   "d_fp_p99": 0.0013,
+   "verdict": "reject"
+  },
+  {
+   "subcat": "paraphernalia",
+   "prompt": "small ziplock baggies of drugs and a digital scale",
+   "d_auroc": 0.0001,
+   "d_fp_p99": -0.0011,
+   "verdict": "promote"
+  },
+  {
+   "subcat": "paraphernalia",
+   "prompt": "a digital scale, baggies and cash on a table",
+   "d_auroc": -0.0002,
+   "d_fp_p99": 0.0012,
+   "verdict": "reject"
+  },
+  {
+   "subcat": "staging",
+   "prompt": "drugs, cash and a scale arranged for a sale",
+   "d_auroc": 0.0002,
+   "d_fp_p99": 0.0006,
+   "verdict": "promote"
+  },
+  {
+   "subcat": "staging",
+   "prompt": "bags of drugs displayed on a table for dealing",
+   "d_auroc": -0.0001,
+   "d_fp_p99": -0.0001,
+   "verdict": "promote"
+  }
+ ],
+ "promote": [
+  "a cannabis vape cartridge and battery",
+  "a dab rig for smoking cannabis concentrate",
+  "cannabis wax concentrate on a dab tool",
+  "a tray of ground cannabis and rolling papers",
+  "a glass meth pipe with a bulbous end",
+  "a bong with murky bong water",
+  "a rolled banknote next to lines of white powder",
+  "a pile of ecstasy pills with stamped logos",
+  "loose pills and a plastic baggie on a nightclub table",
+  "a cotton filter, spoon and syringe drug kit",
+  "a sheet of LSD blotter paper with printed squares",
+  "small ziplock baggies of drugs and a digital scale",
+  "drugs, cash and a scale arranged for a sale",
+  "bags of drugs displayed on a table for dealing"
+ ],
+ "reject": [
+  "a razor blade cutting lines of cocaine on a mirror",
+  "a person snorting powder through a straw",
+  "a spoon cooking heroin over a lighter flame",
+  "ketamine powder in a small bag",
+  "a digital scale, baggies and cash on a table"
+ ],
+ "promoted_together": {
+  "auroc": 0.9976,
+  "d_auroc": 0.0008,
+  "fp_p99": 0.0121,
+  "d_fp_p99": 0.0009,
+  "n_added": 14
+ },
+ "per_subcat_auroc_baseline": {
+  "cannabis": {
+   "n_tp": 11,
+   "auroc": 0.999
+  },
+  "smoking_apparatus": {
+   "n_tp": 6,
+   "auroc": 0.992
+  }
+ }
+}
