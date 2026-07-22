@@ -109,8 +109,12 @@ const API = {
       hits: (j.hits || []).map(normHit),
     };
   },
-  async moderation(dataset) {
-    return this.get(`/api/moderation${dataset ? `?dataset=${encodeURIComponent(dataset)}` : ''}`);
+  async moderation({ source, dataset } = {}) {
+    const p = new URLSearchParams();
+    if (source) p.set('source', source);
+    if (dataset) p.set('dataset', dataset);
+    const qs = p.toString();
+    return this.get(`/api/moderation${qs ? `?${qs}` : ''}`);
   },
   async track(category, { tier, k = 300, signal } = {}) {
     const p = new URLSearchParams({ track: category, k: String(k) });
@@ -1002,9 +1006,14 @@ async function viewModeration() {
   pad.append(head, note, body);
   mountView(root);
 
+  // Default to the STORED flags — what the indexer recorded when each batch ran, the numbers
+  // the user's own batch summaries referenced. The current scan is one click away and is
+  // always labelled; the two are never averaged, summed, or shown under one heading.
+  let source = 'stored';
   async function load() {
     let m;
-    try { m = await API.moderation(); API.online = true; } catch (e) { API.online = false; mountView(daemonDownView(e)); paintStatus(); return; }
+    try { m = await API.moderation({ source }); API.online = true; } catch (e) { API.online = false; mountView(daemonDownView(e)); paintStatus(); return; }
+    source = m.source || source;   // trust what the daemon says it gave us, not what we asked
     const labels = m.datasets?.[0]?.labels || {};
     // the per-category calibration map is authoritative; track pages read it from here
     if (m.calibration && typeof m.calibration === 'object') S.modCalibration = m.calibration;
@@ -1015,13 +1024,25 @@ async function viewModeration() {
     const cats = Object.keys(m.totals || {}).length ? Object.keys(m.totals) : CATS;
     $('#modSum').textContent = `${n0(m.indexed)} images scanned across ${m.datasets?.length || 0} datasets`;
 
+    const stored = source === 'stored';
     note.replaceChildren(
       el('div', { className: 'banner' },
-        el('span', null, 'Showing the '), el('b', { textContent: 'current scan' }),
-        el('span', { textContent: ' — computed just now from today’s prompt sets, not the numbers written into the index when each batch ran.' }),
+        el('span', null, 'Showing '),
+        el('b', { textContent: stored ? 'flagged at indexing' : 'the current scan' }),
+        el('span', {
+          textContent: stored
+            ? ' — what the indexer recorded into each image when its batch ran. These are the numbers your batch summaries reported.'
+            : ' — recomputed just now from today’s prompt sets. It can differ from what was stored: that means the detector changed, not that one is wrong.',
+        }),
         el('button', {
-          className: 'btn', type: 'button', textContent: 'Re-scan now',
-          onclick: (e) => { e.currentTarget.disabled = true; e.currentTarget.textContent = 'scanning…'; load(); },
+          className: 'btn', type: 'button',
+          textContent: stored ? 'Re-scan now' : 'Show what was stored',
+          onclick: (e) => {
+            e.currentTarget.disabled = true;
+            e.currentTarget.textContent = stored ? 'scanning…' : 'loading…';
+            source = stored ? 'current-scan' : 'stored';
+            load();
+          },
         })),
       el('p', { className: 'hint hint--caveat' },
         'Nothing here is a confirmed finding: a violation row means the image resembled the '
@@ -1031,10 +1052,11 @@ async function viewModeration() {
         + 'once it reads enforcement-ready.'),
       // the other source, named so the two numbers are never conflated
       el('p', { className: 'hint' },
-        'The other source — ', el('b', { textContent: 'flagged at indexing' }),
-        ' — is stored per image inside the index and shows on individual results as a stored chip. '
-        + 'The daemon does not expose stored counts yet, so this page cannot total them; '
-        + 'it never mixes them into the numbers above.'),
+        'The other source — ', el('b', { textContent: stored ? 'the current scan' : 'flagged at indexing' }),
+        stored
+          ? ' — recomputes every category now from today’s prompt sets, and can legitimately disagree with what was stored.'
+          : ' — is what each image carries inside the index, and shows on individual results as a stored chip.',
+        ' The two are never added together.'),
     );
 
     const cell = (cat, tier, count) => {
