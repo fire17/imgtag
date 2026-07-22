@@ -488,9 +488,18 @@ def test_duplicate_index_rows_collapse_but_stay_counted(home):
     assert [h["image_id"] for h in out] == ["a" * 16, "b" * 16]
     assert collapsed == 6
     assert len(out[0]["paths"]) == 7 and out[0]["path"] in out[0]["paths"]
-    # same id in ANOTHER dataset is a distinct row: B18(d) forbids cross-dataset merging
+    # Default (per-dataset) key: same id in ANOTHER dataset stays a distinct row.
     cross, n = S.dedupe(hits[:1] + [{**hits[0], "dataset": "d2"}])
     assert len(cross) == 2 and n == 0
+    # GLOBAL search path (2026-07-22, user-reported dupes): identical content indexed
+    # under two dataset names is ONE result; provenance survives in also_in and the
+    # collapse stays counted. B18(d) intact — every surfaced name/path is the true one.
+    g, gn = S.dedupe(
+        [hits[0], {**hits[0], "dataset": "d2", "path": "/elsewhere/0.jpg"}],
+        across_datasets=True)
+    assert len(g) == 1 and gn == 1
+    assert g[0]["dataset"] == "d1"  # best-ranked row keeps its own attribution
+    assert g[0]["also_in"] == [{"dataset": "d2", "path": "/elsewhere/0.jpg"}]
 
 
 def test_every_hit_carries_exists(home):
@@ -571,3 +580,42 @@ def test_alert_tier_outranks_violation_and_match_is_never_moderation(home, monke
                                "tier": "match", "kind": "content"}
     assert S.tier_rank("alert") < S.tier_rank("violation") < S.tier_rank("review")
     assert S.tier_rank("unknown-future-tier") == len(S.TIER_ORDER)  # never dropped
+
+
+def test_content_track_emits_a_per_prompt_label(home, monkeypatch):
+    """A content track names WHICH item fired (which sport) via `<tier>_labels`, and never
+    counts toward moderation totals (content_track: true)."""
+    spec = {"version": 2, "categories": {"sports": {
+        "label": "sports", "content_track": True,
+        "match": ["cat", "car", "boat"], "match_labels": ["tennis", "motorsport", "sailing"],
+        "negatives": ["sky"]}}}
+    monkeypatch.setattr(S, "tracks", lambda: spec)
+    be = build(home, "d1", ["car"] + ["tree"] * 19)  # one standout sport row
+    s = searcher(home, be)
+    t = s.track_scores("d1")
+    assert t["categories"]["sports"]["moderation"] is False
+    f = s.flags_for(t, 0)
+    assert f and f[0]["tier"] == "match" and f[0]["kind"] == "content"
+    assert f[0]["label"] == "motorsport"  # car -> its parallel match_label
+    m = s.moderation("d1", limit=3)
+    assert "sports" not in m["counts"] and m["content_counts"] == {"sports": {"match": 1}}
+
+
+def test_fitted_head_file_overrides_spec_thresholds(home, monkeypatch, tmp_path):
+    """Per-model tau lives in data/moderation/<category>-<model_id>.json (TRACKS.md T3),
+    and wins over the spec — so a refit is a file swap, no code change."""
+    fitdir = tmp_path / "moderation"
+    fitdir.mkdir()
+    (fitdir / "weapons-fake.json").write_text(json.dumps(
+        {"calibration": "fitted", "scorer": "margin", "tau": -9.9, "tau_review": -9.9}))
+    monkeypatch.setattr(S, "DATA", tmp_path)
+    S.fitted_head.cache_clear()
+    spec = {"version": 2, "categories": {"weapons": {
+        "label": "w", "violation": ["cat"], "review": ["dog"], "negatives": ["sky"],
+        "scorer": "margin"}}}
+    monkeypatch.setattr(S, "tracks", lambda: spec)
+    be = build(home, "d1", ["cat"] * 3 + ["misc"] * 5)
+    t = S.Searcher(home, backend=be).track_scores("d1")
+    assert t["categories"]["weapons"]["calibration"] == "fitted"  # came from the head file
+    assert int(t["counts"]["weapons"]["violation"]) > 0
+    S.fitted_head.cache_clear()

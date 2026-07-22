@@ -92,23 +92,32 @@ class CalibrationMismatchError(RuntimeError):
     """Manifest calib_sha/calib_model_sha != the tag table on disk (CLI exit 5)."""
 
 
-def dedupe(hits: list[dict]) -> tuple[list[dict], int]:
+def dedupe(hits: list[dict], across_datasets: bool = False) -> tuple[list[dict], int]:
     """Collapse rows that describe the SAME image (IA.md: the id is xxhash64 of the bytes,
     so duplicates are the same picture). Keeps the best-ranked row, folds the other paths
     into `paths`, and RETURNS the count collapsed so the caller can surface it instead of
-    hiding an indexer bug (b-app found 200 hits carrying 181 unique ids, one id x21)."""
+    hiding an indexer bug (b-app found 200 hits carrying 181 unique ids, one id x21).
+
+    With ``across_datasets`` (the global-search path) the same content indexed under two
+    dataset names is ALSO one result: the extra rows fold into ``also_in`` so provenance
+    survives the collapse (a user searching everything wants each picture once)."""
     out: list[dict] = []
-    seen: dict[tuple, dict] = {}
+    seen: dict = {}
     for h in hits:
-        key = (h["dataset"], h["image_id"])
+        key = h["image_id"] if across_datasets else (h["dataset"], h["image_id"])
         first = seen.get(key)
         if first is None:
             seen[key] = h
             out.append(h)
             continue
-        paths = first.setdefault("paths", [first["path"]])
-        if h["path"] not in paths:
-            paths.append(h["path"])
+        if h["dataset"] != first["dataset"]:
+            also = first.setdefault("also_in", [])
+            if not any(a["dataset"] == h["dataset"] for a in also):
+                also.append({"dataset": h["dataset"], "path": h["path"]})
+        else:
+            paths = first.setdefault("paths", [first["path"]])
+            if h["path"] not in paths:
+                paths.append(h["path"])
     return out, len(hits) - len(out)
 
 
@@ -199,6 +208,18 @@ def expand(term: str, depth: int = 3) -> list[str]:
 
 
 # ---------------------------------------------------------------- moderation
+
+
+@lru_cache(maxsize=32)
+def fitted_head(category: str, model_id: str) -> dict:
+    """Per-MODEL fitted thresholds for a track (TRACKS.md T3: tau is per-model, so it lives
+    beside the spec, not in it). ``data/moderation/<category>-<model_id>.json`` ->
+    {calibration, scorer, tau, tau_<tier>, platt}. Absent = the track is unfitted."""
+    f = DATA / "moderation" / f"{category}-{model_id}.json"
+    try:
+        return json.loads(f.read_bytes())
+    except (OSError, ValueError):
+        return {}
 
 
 @lru_cache(maxsize=1)
@@ -371,9 +392,12 @@ class Searcher:
         def best(sl):  # max similarity over a concept group (empty group -> -inf)
             return cos[:, sl].max(1) if sl.stop > sl.start else np.full(n, -1e9, np.float32)
 
+        model_id = snap.manifest.get("model_id", "")
+        base_model = model_id.rsplit("-", 1)[0] if model_id else ""
         cats, counts = {}, {}
         for name, g in groups.items():
-            cfg = spec[name]
+            # fitted head (per-model tau/platt) wins over the spec's declarations
+            cfg = {**spec[name], **fitted_head(name, base_model), **fitted_head(name, model_id)}
             tiers = [t for t in TIER_ORDER if t in g and g[t].stop > g[t].start]
             if not tiers:
                 continue
@@ -389,8 +413,14 @@ class Searcher:
             # FITTED means: trusted calibration + margin scorer + a tau for every tier.
             fitted = trusted and margin and all(tau_of(t) is not None for t in tiers)
             bg = best(g["negatives"]) if margin else None
-            feat, prob, thr = {}, {}, {}
+            feat, prob, thr, argc, labels = {}, {}, {}, {}, {}
             for t in tiers:
+                sl = g[t]
+                if sl.stop - sl.start > 1:  # which concept in the tier fired (for a label)
+                    argc[t] = sl.start + cos[:, sl].argmax(1)
+                else:
+                    argc[t] = np.full(n, sl.start, int)
+                labels[t] = cfg.get(f"{t}_labels")  # parallel array, concept-order
                 if margin:
                     # the negative set is a BACKGROUND for a max-margin, not a mean to
                     # subtract; applying this form to a spec written the other way measurably
@@ -418,11 +448,16 @@ class Searcher:
                 "is": {t: fires & (pick == i) for i, t in enumerate(tiers)},
                 # a category whose tiers are all CONTENT labels is not moderation at all
                 "moderation": not cfg.get("content_track") and not set(tiers) <= CONTENT_TIERS,
-                "calibration": cfg.get("calibration", "unfitted") if trusted else "unfitted",
+                # `calibration` reflects the ACTUAL gating: "fitted" only when every tier
+                # has a trusted tau. A spec that claims fitted but is missing a tier's tau
+                # is reported unfitted (its claim is preserved in spec_calibration).
+                "calibration": "fitted" if fitted else "unfitted",
                 "spec_calibration": cfg.get("calibration", "unfitted"),
-                "enforcement_ready": bool(cfg.get("enforcement_ready", False)) and trusted,
+                "enforcement_ready": bool(cfg.get("enforcement_ready", False)) and fitted,
                 "neighbour": best(g["policy_neighbours"]) if g["policy_neighbours"].stop
                 > g["policy_neighbours"].start else None,
+                # per-tier winning concept + label array, for "which sport / which kind"
+                "argc": argc, "labels": labels, "base": {t: g[t].start for t in tiers},
             }
             counts[name] = {t: int(cats[name]["is"][t].sum()) for t in tiers}
         out = {"categories": cats, "counts": counts, "floor": zfloor, "n": n,
@@ -481,8 +516,14 @@ class Searcher:
         for name, c in (tr.get("categories") or {}).items():
             for t in c["tiers"]:
                 if c["is"][t][i]:
-                    out.append({"category": name, "p": round(float(c["p"][t][i]), 4),
-                                "tier": t, "kind": "moderation" if c["moderation"] else "content"})
+                    rec = {"category": name, "p": round(float(c["p"][t][i]), 4),
+                           "tier": t, "kind": "moderation" if c["moderation"] else "content"}
+                    lab = c["labels"].get(t)
+                    if lab:  # e.g. WHICH sport / which weapon kind — the argmax concept's label
+                        j = int(c["argc"][t][i]) - c["base"][t]
+                        if 0 <= j < len(lab):
+                            rec["label"] = lab[j]
+                    out.append(rec)
                     break
         out.sort(key=lambda f: tier_rank(f["tier"]))
         return out
@@ -906,7 +947,7 @@ class Searcher:
             terms = terms or r["terms"]
             calibration = "fitted" if r["calibration"] == "fitted" else calibration
         hits.sort(key=_order)
-        hits, extra_collapsed = dedupe(hits)
+        hits, extra_collapsed = dedupe(hits, across_datasets=len(names) > 1)
         collapsed += extra_collapsed
         return {
             "query": query,
