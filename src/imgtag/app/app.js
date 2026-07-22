@@ -106,6 +106,23 @@ const API = {
       hits: (j.hits || []).map(normHit),
     };
   },
+  async moderation(dataset) {
+    return this.get(`/api/moderation${dataset ? `?dataset=${encodeURIComponent(dataset)}` : ''}`);
+  },
+  async track(category, { tier, k = 300, signal } = {}) {
+    const p = new URLSearchParams({ track: category, k: String(k) });
+    if (tier) p.set('tier', tier);
+    const t0 = performance.now();
+    const j = await this.get(`/api/search?${p}`, { signal });
+    return {
+      hits: (j.hits || []).map(normHit),
+      tookMs: Number.isFinite(j.tookMs) ? j.tookMs : null,
+      rttMs: performance.now() - t0,
+      enforcementReady: j.enforcement_ready || null,
+      calibration: j.calibration || null,
+      coverage: j.coverage || null,
+    };
+  },
   async jobs() {
     const j = await this.get('/api/jobs');
     return (Array.isArray(j) ? j : (j.jobs || [])).map(normJob);
@@ -152,9 +169,28 @@ function normHitTerms(why) {
     via: t.via || null,
   };
 }
+// ADR-14 moderation flags. TWO SOURCES that must never be added together or shown as one
+// number: `flags` is the CURRENT SCAN (computed now from today's prompt sets) and
+// `flags_stored` is what b-engine wrote INTO THE INDEX when the batch ran. They may
+// legitimately disagree — that is the detector version changing, not a bug — so the label
+// travels with the number everywhere in this app.
+function normFlags(h) {
+  const list = Array.isArray(h.flags) ? h.flags
+    : h.category ? [{ category: h.category, tier: h.tier, p: h.p }]   // track-browse row
+      : null;
+  return list ? list.map((f) => ({ category: f.category, tier: f.tier || 'review', p: f.p ?? null })) : null;
+}
+function normStoredFlags(f) {
+  if (Array.isArray(f)) return f.map((x) => ({ category: x.category, tier: x.tier || null, p: x.p ?? null }));
+  // legacy {category: p} map — no tier was recorded, so this claims none
+  if (f && typeof f === 'object') return Object.entries(f).map(([category, p]) => ({ category, tier: null, p }));
+  return null;
+}
 function normHit(h) {
   return {
     terms: normHitTerms(h.why),
+    flags: normFlags(h),
+    flagsStored: normStoredFlags(h.flags_stored),
     id: h.image_id ?? h.id ?? '',
     path: h.path ?? '',
     dataset: h.dataset ?? h.dataset_slug ?? '',
@@ -395,6 +431,25 @@ class VirtualGrid {
       dir && !this.hideDataset ? el('span', { className: 'tile__dir', textContent: dir }) : null,
       el('span', { className: 'tile__file', textContent: file || item.id }),
       this.hideDataset ? el('span', { className: 'tile__id', textContent: shortId }) : null));
+    // flag chips: violation and review are visually distinct because they mean different
+    // things — review is "a human should look", never "this is bad"
+    if (item.flags || item.flagsStored) {
+      const row = el('div', { className: 'tile__flags' });
+      for (const f of (item.flags || []).slice(0, 2)) {
+        row.append(el('span', {
+          className: `flag flag--${f.tier}`,
+          textContent: `${f.category}${f.p != null ? ` ${f.p.toFixed(2)}` : ''}`,
+          title: `${f.tier === 'violation' ? 'matched the violation prompt set' : 'needs a human look'} · current scan`,
+        }));
+      }
+      for (const f of (item.flagsStored || []).slice(0, 2)) {
+        row.append(el('span', {
+          className: 'flag flag--stored', textContent: f.category,
+          title: 'flagged at indexing (stored in the index, not this scan)',
+        }));
+      }
+      cap.append(row);
+    }
     if (item.terms) {
       // the terms themselves ARE the explanation: matched plain, missed struck through
       const row = el('div', { className: 'tile__terms' });
@@ -723,7 +778,7 @@ async function viewSearch(q, dataset) {
   }
   if (seq !== searchSeq) return;   // superseded: never paint into a view the user has left
   lastRes = res;
-  if (res.calibration) S.calibration = res.calibration;
+  if (typeof res.calibration === 'string') S.calibration = res.calibration;
   S.recent.unshift({ q, tookMs: res.tookMs, rttMs: res.rttMs, hits: res.hits.length, at: Date.now() });
   S.recent.length = Math.min(S.recent.length, 20);
 
@@ -795,7 +850,9 @@ async function viewSearch(q, dataset) {
       )));
   } else {
     gridMount.classList.add('grid');
-    grid = new VirtualGrid(root, gridMount, { onOpen: openDetail, cap: 60 }); // 3 caption lines
+    // one extra caption line when any hit carries moderation flags — rows stay uniform
+    const capH = res.hits.some((h) => h.flags || h.flagsStored) ? 78 : 60;
+    grid = new VirtualGrid(root, gridMount, { onOpen: openDetail, cap: capH });
     ctl.grid = grid;
     const groups = groupByCoverage(res);
     if (groups) grid.setGroups(groups); else grid.setItems(res.hits);
@@ -907,6 +964,189 @@ async function viewDataset(slug) {
   }
   paintProgress();
   paintStatus({ latency: '', hits: '', coverage: '' });
+}
+
+// (5) moderation — ADR-14. Two sources, never one number; two tiers, never merged.
+const CATS = ['nudity', 'weapons', 'drugs'];
+async function viewModeration() {
+  const root = el('div', { className: 'view' });
+  const pad = el('div', { className: 'pad' });
+  root.append(pad);
+  const head = el('div', { className: 'head' }, el('h1', { textContent: 'Moderation' }),
+    el('span', { className: 'sub', id: 'modSum', textContent: 'scanning…' }));
+  const note = el('div');
+  const body = el('div');
+  pad.append(head, note, body);
+  mountView(root);
+
+  async function load() {
+    let m;
+    try { m = await API.moderation(); API.online = true; } catch (e) { API.online = false; mountView(daemonDownView(e)); paintStatus(); return; }
+    const labels = m.datasets?.[0]?.labels || {};
+    // the per-category calibration map is authoritative; track pages read it from here
+    if (m.calibration && typeof m.calibration === 'object') S.modCalibration = m.calibration;
+    const cats = Object.keys(m.totals || {}).length ? Object.keys(m.totals) : CATS;
+    $('#modSum').textContent = `${n0(m.indexed)} images scanned across ${m.datasets?.length || 0} datasets`;
+
+    note.replaceChildren(
+      el('div', { className: 'banner' },
+        el('span', null, 'Showing the '), el('b', { textContent: 'current scan' }),
+        el('span', { textContent: ' — computed just now from today’s prompt sets, not the numbers written into the index when each batch ran.' }),
+        el('button', {
+          className: 'btn', type: 'button', textContent: 'Re-scan now',
+          onclick: (e) => { e.currentTarget.disabled = true; e.currentTarget.textContent = 'scanning…'; load(); },
+        })),
+      el('p', { className: 'hint hint--caveat' },
+        'Nothing here is a confirmed finding: a violation row means the image resembled the '
+        + 'violation prompt set more than the review set, and sampling by eye found both correct '
+        + 'and incorrect calls. Each category carries its own threshold state below — they are '
+        + 'not all at the same maturity — and a category is only safe to act on automatically '
+        + 'once it reads enforcement-ready.'),
+      // the other source, named so the two numbers are never conflated
+      el('p', { className: 'hint' },
+        'The other source — ', el('b', { textContent: 'flagged at indexing' }),
+        ' — is stored per image inside the index and shows on individual results as a stored chip. '
+        + 'The daemon does not expose stored counts yet, so this page cannot total them; '
+        + 'it never mixes them into the numbers above.'),
+    );
+
+    const cell = (cat, tier, count) => {
+      if (!count) return el('td', { className: 'n', textContent: '0' });
+      const a = el('a', { href: `#/track/${encodeURIComponent(cat)}?tier=${tier}`, textContent: n0(count) });
+      return el('td', { className: 'n' }, a);
+    };
+    const tb = el('tbody');
+    for (const cat of cats) {
+      const t = (m.totals || {})[cat] || { violation: 0, review: 0 };
+      const ready = (m.enforcement_ready || {})[cat];
+      // calibration is PER CATEGORY (nudity may be unfitted while drugs is proxy-fitted),
+      // so it is stated per row — a single page-level label would be false for some row
+      const calib = typeof m.calibration === 'string' ? m.calibration : (m.calibration || {})[cat];
+      tb.append(el('tr', null,
+        el('td', null, el('a', { href: `#/track/${encodeURIComponent(cat)}`, textContent: labels[cat] || cat, style: 'color:inherit' })),
+        cell(cat, 'violation', t.violation),
+        cell(cat, 'review', t.review),
+        el('td', null,
+          el('span', {
+            className: `chip ${ready ? '' : 'chip--warn'}`,
+            textContent: ready ? 'enforcement-ready' : 'not enforcement-ready',
+          }),
+          calib ? el('span', { className: 'chip', style: 'margin-left:8px', textContent: `τ ${calib}` }) : null)));
+    }
+    body.replaceChildren(
+      el('h2', { textContent: 'Across every dataset' }),
+      el('table', { style: 'margin-top:12px' },
+        el('thead', null, el('tr', null,
+          el('th', { textContent: 'category' }),
+          el('th', { className: 'n', textContent: 'violation' }),
+          el('th', { className: 'n', textContent: 'needs review' }),
+          el('th', { textContent: '' }))),
+        tb));
+
+    const dtb = el('tbody');
+    for (const d of m.datasets || []) {
+      for (const cat of cats) {
+        const c = (d.counts || {})[cat] || { violation: 0, review: 0 };
+        if (!c.violation && !c.review) continue;
+        dtb.append(el('tr', null,
+          el('td', null, el('a', { href: `#/d/${encodeURIComponent(d.dataset)}`, textContent: d.dataset, style: 'color:inherit' })),
+          el('td', { textContent: labels[cat] || cat }),
+          el('td', { className: 'n', textContent: n0(c.violation) }),
+          el('td', { className: 'n', textContent: n0(c.review) }),
+          el('td', { className: 'n', textContent: n0(d.indexed) })));
+      }
+    }
+    if (dtb.children.length) {
+      body.append(el('h2', { textContent: 'Per dataset', style: 'margin-top:32px' }),
+        el('table', { style: 'margin-top:12px' },
+          el('thead', null, el('tr', null,
+            el('th', { textContent: 'dataset' }), el('th', { textContent: 'category' }),
+            el('th', { className: 'n', textContent: 'violation' }),
+            el('th', { className: 'n', textContent: 'needs review' }),
+            el('th', { className: 'n', textContent: 'scanned' }))),
+          dtb));
+    }
+    const thr = m.datasets?.[0]?.threshold;
+    paintStatus({
+      latency: Number.isFinite(thr) ? `threshold ${thr.toFixed(3)}` : '',
+      hits: '',
+      coverage: `source: ${m.source || 'current-scan'} · calibration stated per category`,
+    });
+  }
+  load();
+}
+
+// (6) one moderation track — browse what fired, tier by tier
+async function viewTrack(category, tier) {
+  const root = el('div', { className: 'view' });
+  const pad = el('div', { className: 'pad' });
+  root.append(pad);
+  pad.append(el('div', { className: 'head' },
+    el('h1', { textContent: category }),
+    el('span', { className: 'sub', id: 'trackSum', textContent: 'loading…' })));
+  const chips = el('div', { className: 'filters' });
+  for (const [t, label] of [['', 'violations first, then review'], ['violation', 'violation only'], ['review', 'needs review only']]) {
+    const b = el('button', { type: 'button', textContent: label });
+    b.setAttribute('aria-pressed', String((tier || '') === t));
+    b.addEventListener('click', () => go(`#/track/${encodeURIComponent(category)}${t ? `?tier=${t}` : ''}`));
+    chips.append(b);
+  }
+  const caveat = el('p', { className: 'hint hint--caveat' },
+    'Not a confirmed finding. A violation row resembled the violation prompt set more than the '
+    + 'review set; a review row is one a human should look at. Thresholds are unfitted.');
+  const gridMount = el('div', { className: 'grid' });
+  pad.append(chips, caveat, gridMount);
+
+  let grid = null;
+  const ctl = {
+    destroy: () => grid?.destroy(),
+    key: (e) => {
+      if (!grid) return false;
+      const cols = grid.cols || 1;
+      const map = { ArrowRight: 1, ArrowLeft: -1, ArrowDown: cols, ArrowUp: -cols };
+      if (e.key in map) { grid.move(map[e.key]); return true; }
+      if (e.key === 'Enter' && grid.sel >= 0) { openDetail(grid.current()); return true; }
+      return false;
+    },
+  };
+  mountView(root, ctl);
+
+  let res;
+  try { res = await API.track(category, { tier }); API.online = true; } catch (e) {
+    API.online = false; mountView(daemonDownView(e)); paintStatus(); return;
+  }
+  if (typeof res.calibration === 'string') S.calibration = res.calibration;   // per-category on tracks
+  $('#trackSum').textContent = res.hits.length
+    ? `${n0(res.hits.length)} flagged · ${res.tookMs != null ? `${res.tookMs.toFixed(1)} ms server` : ''}`
+    : '';
+  // This track's own maturity. The τ value comes ONLY from /api/moderation, which reports it
+  // per category; the track endpoint returns a single scalar that can disagree with it
+  // (observed: moderation says drugs "proxy-fitted", track says "unfitted"). Showing the
+  // scalar would make two screens of this app contradict each other, so when the per-category
+  // value has not been loaded the chip is simply absent — never guessed.
+  const pick = (v) => (v && typeof v === 'object' ? v[category] : v);
+  const ready = pick(res.enforcementReady);
+  const cal = (S.modCalibration || {})[category];
+  caveat.append(el('span', { className: `chip ${ready ? '' : 'chip--warn'}`, style: 'margin-left:8px', textContent: ready ? 'enforcement-ready' : 'not enforcement-ready' }));
+  caveat.append(cal
+    ? el('span', { className: 'chip', style: 'margin-left:8px', textContent: `τ ${cal}` })
+    : el('a', { href: '#/moderation', className: 'sub', style: 'margin-left:8px', textContent: 'threshold state → Moderation' }));
+  if (!res.hits.length) {
+    gridMount.classList.remove('grid');
+    gridMount.replaceChildren(el('div', { className: 'empty' },
+      el('h2', { textContent: `Nothing fired in ${category}${tier ? ` at the ${tier} tier` : ''}` }),
+      el('p', { textContent: 'No indexed image resembled this prompt set closely enough to be flagged. That is a real answer about this corpus, not an error.' })));
+  } else {
+    grid = new VirtualGrid(root, gridMount, { onOpen: openDetail, cap: 60 });
+    ctl.grid = grid;
+    grid.setItems(res.hits);
+    grid.move(0);
+  }
+  paintStatus({
+    latency: res.tookMs != null ? `<b>${res.tookMs.toFixed(1)} ms</b> server · ${res.rttMs.toFixed(0)} ms round-trip` : '',
+    hits: `${n0(res.hits.length)} flagged`,
+    coverage: 'source: current scan · not enforcement-ready',
+  });
 }
 
 // (4) jobs & health
@@ -1033,6 +1273,12 @@ function route() {
     viewSearch((p.get('q') || '').trim(), p.get('d') || '');
   } else if (path.startsWith('/d/')) {
     viewDataset(decodeURIComponent(path.slice(3)));
+  } else if (path === '/moderation') {
+    $('[data-nav="moderation"]').setAttribute('aria-current', 'page');
+    viewModeration();
+  } else if (path.startsWith('/track/')) {
+    $('[data-nav="moderation"]').setAttribute('aria-current', 'page');
+    viewTrack(decodeURIComponent(path.slice(7)), p.get('tier') || '');
   } else if (path === '/jobs') {
     $('[data-nav="jobs"]').setAttribute('aria-current', 'page');
     viewJobs();
