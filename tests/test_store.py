@@ -467,3 +467,40 @@ def test_header_spec_is_disk_reproducible(tmp_path, monkeypatch):
     b = store.header_spec("weapons", "pecore-s16-384-fp32", "SHA", ["p"])
     assert store.spec_sha(a) == store.spec_sha(b)
     assert a.get("model_id") == "pecore-s16-384-fp32" and a["model_sha"] == "SHA"
+
+
+def test_repair_stale_shape_marks_col_roles_from_the_file_not_the_spec(tmp_path, monkeypatch):
+    """A sidecar whose file shape is STALE vs the current spec (e.g. a 1-col drugs from
+    before the 2-col arbitrated flip) must get col_roles/spec_sha reflecting the FILE, so
+    its spec_sha won't match the current 2-col spec and the reader recomputes live instead
+    of mis-slicing."""
+    import json as _json
+
+    import numpy as np
+
+    class M:
+        model_id = "m-fp32"
+        model_sha = "z" * 64
+        dim = 8
+
+    # a moderation.json whose drugs is 2-col arbitrated
+    data = tmp_path / "data"
+    (data / "moderation").mkdir(parents=True)
+    (data / "moderation.json").write_text(_json.dumps(
+        {"categories": {"drugs": {"scorer": "margin_arbitrated",
+                                  "col_roles": ["margin", "margin_review"], "tau": 0.02}}}))
+    monkeypatch.setattr(store, "_DATA", data)
+
+    # but the STORED column is 1-col (stale)
+    with store.Writer("ds", M(), home=tmp_path) as w:
+        e, r = _rows(3)
+        w.append(e, r, tracks={"drugs": np.array([0.5, 0.1, 0.9], np.float32)})
+    (tmp_path / "datasets/ds/tracks/drugs.json").unlink()  # simulate no header
+
+    acts = store.repair_track_metadata("ds", tmp_path)
+    assert any("STALE shape" in a for a in acts)
+    h = store.read_track_meta("ds", "drugs", tmp_path)
+    assert h["cols"] == 1 and h["col_roles"] == ["p"]         # honest to the 1-col file
+    # its spec_sha differs from the CURRENT 2-col spec -> reader will recompute live
+    cur = store.spec_sha(store.header_spec("drugs", "m-fp32", "z" * 64, ["margin", "margin_review"]))
+    assert h["spec_sha"] != cur

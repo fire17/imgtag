@@ -797,14 +797,29 @@ def repair_track_metadata(dataset: str, home: Path | None = None) -> list[str]:
             if not f.is_file() or not t.get("rows"):
                 continue
             actual = f.stat().st_size // (t["rows"] * 4)  # cols implied by the real file
-            if actual >= 1 and actual != t.get("cols"):
-                t["cols"] = int(actual)
+            if actual < 1:
+                continue
+            if actual != t.get("cols"):
                 actions.append(f"{cat}: cols {t.get('cols')}→{actual} (from file bytes)")
-            t["bytes"] = t["rows"] * t["cols"] * 4
-            spec = header_spec(cat, model_id, model_sha, t.get("col_roles"))
+            t["cols"], t["bytes"] = int(actual), t["rows"] * actual * 4
+            # col_roles MUST reflect the ACTUAL shape: adopt the current spec's names only if
+            # the count matches; else fall back so a STALE-shaped sidecar (e.g. a 1-col drugs
+            # from before the 2-col arbitrated flip) gets a spec_sha that WON'T match the
+            # current spec, and b-daemon recomputes it live instead of mis-slicing.
+            spec_roles = resolve_track_cfg(cat, model_id, None, model_sha).get("col_roles")
+            existing = t.get("col_roles")
+            if spec_roles and len(spec_roles) == actual:
+                roles = list(spec_roles)
+            elif existing and len(existing) == actual:
+                roles = list(existing)
+            else:
+                roles = ["p"] if actual == 1 else [f"col{i}" for i in range(actual)]
+                if spec_roles and len(spec_roles) != actual:
+                    actions.append(f"{cat}: STALE shape — file is {actual}-col, current spec "
+                                   f"wants {len(spec_roles)} ({spec_roles}); re-index to refresh")
+            t["col_roles"] = roles
+            spec = header_spec(cat, model_id, model_sha, roles)
             t["model_sha"], t["spec_sha"] = model_sha, spec_sha(spec)   # also on the manifest rec
-            if not t.get("col_roles") and spec.get("col_roles"):
-                t["col_roles"] = spec["col_roles"]
             write_track_meta(d, cat, t, spec)
             if not (d / TRACKS_DIR / f"{cat}.json").exists():
                 actions.append(f"{cat}: header missing (unexpected)")
