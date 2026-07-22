@@ -109,6 +109,10 @@ imgtag search "vehicle" --dataset my-photos -k 50 --json
   and returns what is durable so far. **Always report coverage when `indexed < total`.**
 - `why` explains the hit (`"path": "tag"` with the matching tag, or `"path": "text"` for a pure
   dense-embedding hit). `image_id`, `path`, `dataset` are **never null**.
+- A hit whose file was deleted since indexing carries `"exists": false` (a tombstone) instead of
+  vanishing — tell the user the match is stale rather than silently dropping it.
+- `served_by` names the transport: `"daemon"` (warm, milliseconds) or `"in-process"` (the daemon
+  wasn't reachable and the CLI answered locally — slower, still correct).
 - `no_match: true` with `hits: []` is a **real, correct answer** — the calibrated threshold said
   nothing in the dataset matches. Exit code is still 0. Report it as "no matching images",
   never as an error or a failure.
