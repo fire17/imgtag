@@ -231,6 +231,14 @@ class PeopleHead:
     category = CATEGORY
     wants_images = True        # pixels required: this track answers from optics
 
+    #: Multi-column sidecar schema (b-engine's [N,C] write path). INERT until the engine's
+    #: multi-col consumer lands: it reads this once per job, writes it verbatim into
+    #: ``tracks/people.json`` as ``col_roles``, and canonicalizes each record's ``cols``
+    #: dict into this order (a missing role → NaN, an honest "not scored"). The head is the
+    #: single authority for its own column schema — never repeated per record, never in the
+    #: shared moderation.json. Order here IS the on-disk column order.
+    col_roles = ["n_persons", "n_faces", "n_persons_conf", "n_faces_conf"]
+
     def __init__(self, session, cascade: PersonCascade | None = None,
                  tau_face: float = TAU_FACE, model_id: str = "yunet-640"):
         self.sess = session
@@ -239,6 +247,20 @@ class PeopleHead:
         self.model_id = model_id
         self._in = session.get_inputs()[0].name
         self._out = [o.name for o in session.get_outputs()]
+
+    @property
+    def spec(self) -> dict:
+        """Versioned scoring params (b-engine folds this into the header's ``spec_sha``,
+        so a stale sidecar is refused without touching a shared file — rule-7 safe). Carries
+        the derive() BAND EDGES as data (TRACKS.md T3: a future "crowd = 10+" is a new band
+        over the SAME column, no re-score), so b-daemon's reader derives identically."""
+        return {"version": 1, "scorer": "yunet-640 + pecore-cascade",
+                "tau_face": round(float(self.tau_face), 4),
+                "cascade_tau1": round(float(self.cascade_tau1), 4),
+                "cascade_tau2": round(float(self.cascade_tau2), 4),
+                "cascade_model": (self.cascade.model_id if self.cascade else None),
+                "bands": {"one-person": [1, 1], "multi-person": [2, None],
+                          "one-face": [1, 1], "multi-face": [2, None]}}
 
     # -- calibration honesty ---------------------------------------------------
     @property
