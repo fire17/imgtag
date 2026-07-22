@@ -497,6 +497,11 @@ label, or to compare a dev-machine number against a target-profile (🐧) budget
   lane complete-via-cross-checks in the gap. Lesson: disk truth led message truth by 20
   minutes — check the file BEFORE pinging, and re-check before declaring a lane missing.
 
+- 2026-07-22 11:25Z · l-logistics spawned as haiku reported MODEL: claude-opus-4-8 —
+  model-line tripwire caught a spawn-vs-actual mismatch (non-Fable either way; rule 4
+  intact). All 4 model repos fetched + validated (rclip 2.1.6; uform ONNX lives in the
+  uform3-image-text-english-base repo, NOT uform-vl-english — recorded for re-fetch).
+
 ---
 
 ## The final chaser (personal, from the planning mind — 2026-07-22)
