@@ -14,3 +14,8 @@ models/**/*.sha256
 models/*.sha256
 bench/cache/
 bench/cache/perf/
+
+# save_and_ship session snapshot (private, never published)
+conversation/
+.save_and_ship/
+CONTINUE.md
