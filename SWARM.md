@@ -27,7 +27,7 @@
 | 15 | editor-reviews | revalidation | opus | A2 ✅sp | apply 50 IMPORTANT/MINOR review fixes under ADJUDICATION law |
 | 16 | b-corpus | build | opus | A2 ✅sp | CORPUS-B/B12/D/CAL-SET builder (bench foundation) |
 
-Wave A done (3 reviews in, 22 CRITICALs applied — ADJUDICATION.md). Wave A2 running: editor-reviews + b-corpus + spikes finishing. Wave B after A2.
+Wave A+A2 done (79 review findings applied, 0 conflicts; corpora building in bg). Wave B FULLY LAUNCHED: lane 1 (b-engine, b-bench, l-logistics) since 11:20Z; lane 2 (b-daemon, b-app, b-skill) since 11:22Z — engine seams (store/models) landed as committed code first.
 Wave C after the engine works. Darwin loop agents (Phase 7) spawn post-delivery.
 
 > 2026-07-22: Wave A spawned. Zenith downgrade logged (flag for final report).
