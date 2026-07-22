@@ -321,6 +321,16 @@ highest-bar protocol — verbatim vision, budgets as tests, honest verification,
   `torch.backends.mha.set_fastpath_enabled(False)` first, else export fails (bench lane,
   2026-07-22).
 
+- **ADR-14 Moderation policy (user rulings 2026-07-22 12:50Z, VISION-ADDENDA).** Two-tier
+  flags: `violation` = human nudity/explicit · real weapons · illegal drugs/paraphernalia;
+  `review` = swimwear/lingerie · toy/replica weapons · tobacco/vape/smoking. Non-person
+  nude figures (mannequins/statues) = no flag. Per-image schema: {category, p, tier:
+  violation|review|none}; counts/API/UI always report tiers separately; recall-first
+  operating points per tier; enforcement_ready stays false per category until its τ is
+  fitted on labeled ground truth honoring these boundaries. The measured v0 failures
+  re-grade under policy: bikini/toy-rifle/vape flags were CORRECT at review tier; the
+  mannequin is the true FP class to eliminate.
+
 ## 3. Dead ends (do not rediscover)
 
 - **fp16 as a COMPUTE format on ORT CPU EP — dead** (no native fp16 kernels; casts to

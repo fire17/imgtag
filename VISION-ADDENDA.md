@@ -15,3 +15,16 @@ in the search i should be able to use space to enter more  tags (show results th
 
 i want to be able to use this one some public sites and to enforce good behavior and following the rules of our sites, we dont want images with nudity, weapons or drugs
 these are very important to indentify correctly - please make sure to create 3 tracks to specialize on each of these in a dedicated way - at the end we should be able to find (and later flag these) by searching, and also when indexing, so on every batch of images processed - i will be able to see something like "Found 10 images with drugs, 7 with weapons, 5 with nudity" alongside the images and metadata (like the filepaths etc, and we want to be able when indexing to also save more generic metadata that can hold account ids dates etc) - or check see these details accross the entire gallery, or by each dataset - does all of that makes sense ?
+
+## 2026-07-22 ~12:50Z — moderation policy rulings (structured answers)
+
+| Boundary | Ruling |
+|---|---|
+| Nude mannequin / statue / non-person figure | **Don't flag** |
+| Swimwear / lingerie on a person | **Flag for review** |
+| Toy / replica weapons | **Flag for review** |
+| Tobacco / vaping / smoking imagery | **Flag for review** |
+
+→ Two-tier flag model: `violation` (human nudity/explicit, real weapons, illegal drugs +
+paraphernalia) vs `review` (swimwear, toy weapons, tobacco/vape). Counts and views report
+both tiers distinctly.
