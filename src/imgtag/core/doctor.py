@@ -161,12 +161,14 @@ def autotune(backend_name: str = None, timebox_s: float = 45.0, n_images: int = 
     rng = np.random.default_rng(0)
     imgs = rng.integers(0, 255, (n_images, spec["size"], spec["size"], 3), dtype=np.uint8)
     rows, t0 = [], time.time()
-    for precision in [p for p in ("fp32", "int8") if p in spec["vision"]]:
+    # precision axis = the UNGATED vision variants only (RULING: a downloaded/naive int8
+    # vision file is never swept; b-bench promotes one through B24 first)
+    for precision in [p for p in ("fp32", "fp16", "int8") if p in spec["vision"]]:
         for intra in (1, 2, 4):
             if intra > prof["cores"]:
                 continue
             try:
-                be = ModelBackend(name, spec, {**prof, "precision": precision, "intra_op": intra})
+                be = ModelBackend(name, spec, {**prof, "precision": precision, "precision_explicit": True, "intra_op": intra})
             except Exception as e:  # artifact for this precision missing
                 log(f"  skip {precision} intra={intra}: {e}")
                 break
@@ -225,4 +227,29 @@ def autotune(backend_name: str = None, timebox_s: float = 45.0, n_images: int = 
         loadavg=[round(x, 2) for x in os.getloadavg()],
     )
     prof["workers"] = worker_count(prof["cores"], prof["mem_available_mb"], geometry=geometry)
+    prof["text_resident_rss_mb"] = text_resident_rss(name, log=log)
     return prof
+
+
+def text_resident_rss(backend: str, log=print) -> float | None:
+    """Peak RSS of a process that loads ONLY this backend's text tower + tokenizer.
+
+    Measured in a fresh child (a delta inside this process would be masked by the vision
+    session's high-water mark). Feeds candidate eligibility: PE-Core's int8 text tower is
+    154MB resident, SigLIP2's is ~757MB — B8 precedence, not taste, picks the default.
+    """
+    import subprocess
+    import sys
+
+    code = (
+        "import resource,sys;from imgtag.core.models import load_backend;"
+        f"be=load_backend({backend!r},{{'intra_op':1}},vision=False);be.embed_texts(['a photo of a dog']);"
+        "u=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss;"
+        "print(u/1e6 if sys.platform=='darwin' else u/1e3)"
+    )
+    try:
+        r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=180)
+        return round(float(r.stdout.strip().splitlines()[-1]), 1)
+    except Exception as e:  # text tower unavailable (no tokenizer binary / missing file)
+        log(f"  text RSS probe skipped: {str(e)[:100]}")
+        return None

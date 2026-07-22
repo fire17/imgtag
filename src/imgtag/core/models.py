@@ -80,12 +80,27 @@ def file_sha256(p: Path) -> str:
 # ---------------------------------------------------------------- tokenizer
 
 
-@lru_cache(maxsize=2)
-def _clip_bpe() -> tuple[list[str], dict]:
-    z = np.load(DATA / "clip-bpe.npz")
-    vocab = z["vocab"].tobytes().decode().split("\n")
-    ranks = {tuple(ln.split()): i for i, ln in enumerate(z["merges"].tobytes().decode().split("\n"))}
-    return vocab, ranks
+@lru_cache(maxsize=4)
+def _load_bpe(path: str) -> dict:
+    """Compact tokenizer binary -> numpy arrays ONLY.
+
+    The measured cost of the dict-of-str shape is 0.61s and 551MB resident for a 34MB
+    tokenizer.json (16× the file), so the whole merge loop runs on INTEGERS: pair lookup
+    is a searchsorted over packed (left<<32|right) int64 keys, and each merge row carries
+    the id of its result. The only Python objects built are the ≤~600 short "seed" tokens
+    (single characters and char+"</w>") needed to turn a word into its starting ids.
+    """
+    z = np.load(path)
+    blob, off = z["vocab_blob"], z["vocab_off"]
+    lens = np.diff(off)
+    seed: dict[str, int] = {}
+    for i in np.flatnonzero(lens <= 8):  # short tokens only; never the whole vocabulary
+        try:
+            seed.setdefault(blob[off[i]:off[i + 1]].tobytes().decode(), int(i))
+        except UnicodeDecodeError:
+            pass
+    return {"key": z["merge_key"], "rank": z["merges"][:, 0], "new": z["merges"][:, 1],
+            "seed": seed, "meta": json.loads(z["meta"].tobytes().decode()), "n": len(off) - 1}
 
 
 # CLIP's word pattern, expressed in the stdlib `re` dialect (no `regex` dep):
@@ -96,11 +111,11 @@ _WORD_RE = re.compile(r"<\|startoftext\|>|<\|endoftext\|>|'s|'t|'re|'ve|'m|'ll|'
 class ClipBPE:
     """CLIP byte-pair tokenizer over the compact bundled binary (PE-Core, OpenCLIP)."""
 
-    def __init__(self, ctx: int):
-        vocab, self.ranks = _clip_bpe()
-        self.ids = {t: i for i, t in enumerate(vocab)}
+    def __init__(self, ctx: int, path: Path | None = None):
+        t = _load_bpe(str(path or DATA / "clip-bpe.npz"))
+        self.key, self.rank, self.new, self.seed = t["key"], t["rank"], t["new"], t["seed"]
         self.ctx = ctx
-        self.sot, self.eot = self.ids["<|startoftext|>"], self.ids["<|endoftext|>"]
+        self.sot, self.eot = t["n"] - 2, t["n"] - 1  # <|startoftext|>, <|endoftext|>
         bs = list(range(ord("!"), ord("~") + 1)) + list(range(ord("¡"), ord("¬") + 1)) + list(range(ord("®"), ord("ÿ") + 1))
         cs, n = bs[:], 0
         for b in range(256):
@@ -109,28 +124,31 @@ class ClipBPE:
                 cs.append(256 + n)
                 n += 1
         self.byte_enc = {b: chr(c) for b, c in zip(bs, cs)}
-        self._cache: dict[str, list[str]] = {}
+        self._cache: dict[str, list[int]] = {}
 
-    def _bpe(self, token: str) -> list[str]:
-        if token in self._cache:
-            return self._cache[token]
-        word = list(token[:-1]) + [token[-1] + "</w>"]  # end-of-word marker rides the last char
-        while len(word) > 1:
-            pairs = {(word[i], word[i + 1]) for i in range(len(word) - 1)}
-            pair = min(pairs, key=lambda p: self.ranks.get(p, 1 << 30))
-            if pair not in self.ranks:
+    def _pair_rank(self, a: int, b: int) -> tuple[int, int]:
+        """(rank, merged_id) for an adjacent id pair — one searchsorted, no dicts."""
+        i = int(np.searchsorted(self.key, (a << 32) | b))
+        if i < len(self.key) and self.key[i] == (a << 32) | b:
+            return int(self.rank[i]), int(self.new[i])
+        return 1 << 30, -1
+
+    def _bpe(self, word: str) -> list[int]:
+        if word in self._cache:
+            return self._cache[word]
+        ids = [self.seed.get(c, -1) for c in word[:-1]] + [self.seed.get(word[-1] + "</w>", -1)]
+        ids = [i for i in ids if i >= 0]
+        while len(ids) > 1:
+            best, pos, merged = 1 << 30, -1, -1
+            for i in range(len(ids) - 1):
+                r, nid = self._pair_rank(ids[i], ids[i + 1])
+                if r < best:
+                    best, pos, merged = r, i, nid
+            if pos < 0:
                 break
-            a, b, out, i = pair[0], pair[1], [], 0
-            while i < len(word):
-                if word[i] == a and i + 1 < len(word) and word[i + 1] == b:
-                    out.append(a + b)
-                    i += 2
-                else:
-                    out.append(word[i])
-                    i += 1
-            word = out
-        self._cache[token] = word
-        return word
+            ids[pos : pos + 2] = [merged]
+        self._cache[word] = ids
+        return ids
 
     def encode(self, texts: list[str]) -> np.ndarray:
         out = np.zeros((len(texts), self.ctx), np.int64)
@@ -138,9 +156,59 @@ class ClipBPE:
             toks = [self.sot]
             clean = " ".join(text.lower().strip().split())
             for word in _WORD_RE.findall(clean):
-                enc = "".join(self.byte_enc[b] for b in word.encode())
-                toks += [self.ids[s] for s in self._bpe(enc) if s in self.ids]
+                toks += self._bpe("".join(self.byte_enc[b] for b in word.encode()))
             toks = toks[: self.ctx - 1] + [self.eot]
+            out[r, : len(toks)] = toks
+        return out
+
+
+class HFBPE(ClipBPE):
+    """HF-BPE tokenizer (SigLIP2's Gemma vocab) over a per-model compact binary.
+
+    Differences from CLIP's: the normalizer replaces " " with "▁" and there is no
+    end-of-word suffix, so a word's seed ids are its bare characters; unknown characters
+    fall back to their <0xXX> byte tokens. Same integer-only merge loop.
+    """
+
+    def __init__(self, ctx: int, path: Path):
+        t = _load_bpe(str(path))
+        self.key, self.rank, self.new, self.seed = t["key"], t["rank"], t["new"], t["seed"]
+        self.ctx, self.meta, self._cache = ctx, t["meta"], {}
+        self.replace = t["meta"].get("replace") or [" ", "▁"]
+        self.eot = self.seed.get("<eos>", 1)
+        self.byte_fallback = bool(t["meta"].get("byte_fallback"))
+
+    def _seed_ids(self, word: str) -> list[int]:
+        out = []
+        for ch in word:
+            i = self.seed.get(ch, -1)
+            if i < 0 and self.byte_fallback:
+                out += [self.seed[f"<0x{b:02X}>"] for b in ch.encode() if f"<0x{b:02X}>" in self.seed]
+            elif i >= 0:
+                out.append(i)
+        return out
+
+    def _bpe(self, word: str) -> list[int]:
+        if word in self._cache:
+            return self._cache[word]
+        ids = self._seed_ids(word)
+        while len(ids) > 1:
+            best, pos, merged = 1 << 30, -1, -1
+            for i in range(len(ids) - 1):
+                r, nid = self._pair_rank(ids[i], ids[i + 1])
+                if r < best:
+                    best, pos, merged = r, i, nid
+            if pos < 0:
+                break
+            ids[pos : pos + 2] = [merged]
+        self._cache[word] = ids
+        return ids
+
+    def encode(self, texts: list[str]) -> np.ndarray:
+        out = np.zeros((len(texts), self.ctx), np.int64)  # pad id 0
+        for r, text in enumerate(texts):
+            body = self._bpe(text.replace(*self.replace))[: self.ctx - 1]
+            toks = body + [self.eot]  # add_eos_token: true, add_bos_token: false
             out[r, : len(toks)] = toks
         return out
 
@@ -149,21 +217,28 @@ def _tokenizer(spec: dict):
     kind = spec["tokenizer"]
     if kind == "clip-bpe":
         return ClipBPE(spec["ctx"])
-    raise ModelUnavailableError(
-        f"tokenizer {kind!r} has no compact binary yet — text queries unavailable for this "
-        f"backend (build one offline in scripts/, per ADR: never parse tokenizer.json at runtime)"
-    )
+    path = find_artifact(spec, spec.get("tokenizer_file", "tokenizer.npz"))
+    if path is None:
+        raise ModelUnavailableError(
+            f"tokenizer binary for {kind!r} not found — build it offline: "
+            f"`uv run python scripts/build_tokenizer.py hf <tokenizer.json> <model-dir>/tokenizer.npz` "
+            f"(runtime never parses tokenizer.json: measured 0.61s and 551MB resident)"
+        )
+    return HFBPE(spec["ctx"], path)
 
 
 # ---------------------------------------------------------------- backend
 
 
-def _session(path: Path, intra: int) -> ort.InferenceSession:
+def _session(path: Path, intra: int, graph_opt: str = "ENABLE_ALL") -> ort.InferenceSession:
     o = ort.SessionOptions()
     o.intra_op_num_threads = int(intra)
     o.inter_op_num_threads = 1
     o.add_session_config_entry("session.use_env_allocators", "0")
     o.enable_cpu_mem_arena = True
+    # per-model, per-FILE optimisation level: ENABLE_ALL crashes SigLIP2's fp16 export
+    # (ORT 1.27 fusion bug), so that file is pinned to ENABLE_EXTENDED in backends.json
+    o.graph_optimization_level = getattr(ort.GraphOptimizationLevel, f"ORT_{graph_opt}")
     return ort.InferenceSession(str(path), o, providers=["CPUExecutionProvider"])
 
 
@@ -222,9 +297,27 @@ class ModelBackend:
         self.resample = getattr(Image.Resampling, spec["resample"])
         self.squash = spec["resize_mode"] == "squash"
         self.precision = profile.get("precision", "fp32")
-        if self.precision not in spec["vision"]:
-            self.precision = next(iter(spec["vision"]))
-        vfile = spec["vision"][self.precision]
+        gated = spec.get("vision_gated") or {}
+        if self.precision in gated and not profile.get("allow_gated"):
+            # RULING 2026-07-22: a downloaded/naive int8 VISION file is never a usable
+            # variant — two official int8 exports were measurably broken (SigLIP2 cos
+            # 0.78, Xenova cos 0.008). Only b-bench, via B24 tier-2, may promote one.
+            raise ModelUnavailableError(
+                f"{name}: {self.precision} vision is GATED — {gated.get('reason')}. "
+                f"Available now: {', '.join(spec['vision']) or 'none'}; b-bench may enable it "
+                f"with profile allow_gated after B24 passes on this arch."
+            )
+        vision_files = {**spec["vision"], **({k: v for k, v in gated.items() if k != "reason"}
+                                             if profile.get("allow_gated") else {})}
+        if not vision_files:
+            raise ModelUnavailableError(f"{name}: no ungated vision artifact (gated: {list(gated)})")
+        # a model may pin its own default weight file (SigLIP2: the fp16 export, which is
+        # bit-equivalent to fp32 at half the bytes); an EXPLICIT --precision still wins
+        if not profile.get("precision_explicit") and spec.get("default_precision") in vision_files:
+            self.precision = spec["default_precision"]
+        if self.precision not in vision_files:
+            self.precision = next(iter(vision_files))
+        vfile = vision_files[self.precision]
         path = find_artifact(spec, vfile)
         if path is None:
             raise ModelUnavailableError(
@@ -236,7 +329,7 @@ class ModelBackend:
         self.model_id = f"{name}-{self.precision}"
         self._vs = self._vin = self._fixed_batch = None
         if vision:  # geometry=worker: the coordinator wants the identity, not the session
-            self._vs = _session(path, profile.get("intra_op", 2))
+            self._vs = _session(path, profile.get("intra_op", 2), self._graph_opt(vfile))
             i = self._vs.get_inputs()[0]
             self._vin = i.name
             self._vout = _embed_output(self._vs)
@@ -252,6 +345,9 @@ class ModelBackend:
                 self.dim = out.shape[-1]
         self._ts = None
         self._tok = None
+
+    def _graph_opt(self, filename: str) -> str:
+        return (self.spec.get("graph_opt") or {}).get(filename, "ENABLE_ALL")
 
     # -- preprocess ------------------------------------------------
     def preprocess(self, im: Image.Image) -> np.ndarray:
@@ -283,7 +379,7 @@ class ModelBackend:
             path = find_artifact(self.spec, fname)
             if path is None:
                 raise ModelUnavailableError(f"{self.name}: text artifact {fname!r} not found")
-            self._ts = _session(path, self.profile.get("text_intra_op", 2))
+            self._ts = _session(path, self.profile.get("text_intra_op", 2), self._graph_opt(fname))
             self._tin = self._ts.get_inputs()[0].name
             self._tout = _embed_output(self._ts)
             self._tok = _tokenizer(self.spec)

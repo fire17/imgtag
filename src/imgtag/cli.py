@@ -71,7 +71,8 @@ def cmd_index(args) -> int:
             argv.append("--no-recursive")
         subprocess.Popen(argv, start_new_session=True, stdin=subprocess.DEVNULL,
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        obj = {"job_id": job_id, "dataset": ds, "state": "queued",
+        obj = {"job_id": job_id, "dataset": ds, "path": str(Path(args.path).expanduser()),
+               "status": "queued", "state": "queued", "queued": True,
                "tookMs": round((time.time() - t) * 1000, 1)}
         _out(args, obj, f"job {job_id} queued for {ds} — poll: imgtag info --job {job_id}")
         return 0
@@ -80,6 +81,8 @@ def cmd_index(args) -> int:
                  ("intra_op", args.intra_op), ("precision", args.precision)):
         if v:
             prof[k] = v
+    if args.precision:
+        prof["precision_explicit"] = True
     s = index(
         args.path,
         ds,
@@ -105,15 +108,19 @@ def cmd_index(args) -> int:
 def _daemon_state() -> dict:
     """Endpoint record published by the daemon (ADR-13); b-daemon owns writing it."""
     p = store.imgtag_home() / "daemon.json"
+    sock = str(store.imgtag_home() / "daemon.sock")
     try:
         d = json.loads(p.read_bytes())
-        return {"running": True, **d}
+        up = round(max(0.0, time.time() - float(d.get("started_at") or 0)), 1) if d.get("started_at") else None
+        return {"running": True, "pid": d.get("pid"), "version": d.get("version"),
+                "uptimeSec": up, "socket": d.get("socket", sock), **d}
     except (OSError, ValueError):
-        return {"running": False, "socket": str(store.imgtag_home() / "daemon.sock")}
+        return {"running": False, "pid": None, "version": None, "uptimeSec": None, "socket": sock}
 
 
 def cmd_info(args) -> int:
     t0 = time.perf_counter()
+    args.dataset = getattr(args, "dataset_flag_info", None) or args.dataset
     if getattr(args, "job", None):
         job = read_job(args.job)
         if job is None:
@@ -122,6 +129,9 @@ def cmd_info(args) -> int:
                 json.dump({"error": "UnknownJob", "job_id": args.job, "exit": 4}, sys.stdout)
                 sys.stdout.write("\n")
             return 4
+        job.setdefault("imgsPerSec", job.get("img_s", 0.0))   # b-skill's spelling
+        job.setdefault("etaSec", job.get("eta_s"))
+        job.setdefault("errors", job.get("failures", []))
         job["tookMs"] = round((time.perf_counter() - t0) * 1000, 2)
         _out(args, job, json.dumps(job, indent=1))
         return 0
@@ -129,7 +139,10 @@ def cmd_info(args) -> int:
         man = store.read_manifest(args.dataset)
         jobs = [j for j in list_jobs() if j.get("dataset") == args.dataset][:5]
         obj = {"dataset": args.dataset, "manifest": man, "jobs": jobs, "daemon": _daemon_state(),
-               "datasets": [{"dataset": args.dataset, "count": man["count"], "model_id": man["model_id"]}],
+               "datasets": [{"dataset": args.dataset, "count": man["count"], "model_id": man["model_id"],
+                             "model_sha": man["model_sha"], "dim": man["dim"],
+                             "bytes": sum(s["emb_bytes"] + s["ids_bytes"] for s in man["shards"]),
+                             "updated": man.get("updated")}],
                "tookMs": round((time.perf_counter() - t0) * 1000, 2)}
         _out(args, obj, f"{args.dataset}: {man['count']} images, model {man['model_id']} "
                         f"({man['model_sha'][:12]}), dim {man['dim']}, {len(man['shards'])} shard(s)")
@@ -137,7 +150,8 @@ def cmd_info(args) -> int:
     ds = []
     for name in store.list_datasets():
         m = store.read_manifest(name)
-        ds.append({"dataset": name, "count": m["count"], "model_id": m["model_id"], "dim": m["dim"],
+        ds.append({"dataset": name, "count": m["count"], "model_id": m["model_id"],
+                   "model_sha": m["model_sha"], "dim": m["dim"],
                    "updated": m.get("updated"), "bytes": sum(s["emb_bytes"] + s["ids_bytes"] for s in m["shards"])})
     obj = {"datasets": ds, "jobs": list_jobs(limit=10), "home": str(store.imgtag_home()),
            "daemon": _daemon_state(), "profile": load_profile(), "backends": sorted(models.registry()),
@@ -146,24 +160,64 @@ def cmd_info(args) -> int:
     return 0
 
 
+def _dir_bytes(d: Path) -> int:
+    return sum(p.stat().st_size for p in d.rglob("*") if p.is_file())
+
+
 def cmd_manage(args) -> int:
     home = store.imgtag_home()
+    t0 = time.perf_counter()
+    if args.action == "list":
+        ds = [{"dataset": n, **{k: store.read_manifest(n)[k] for k in ("count", "model_id", "model_sha", "dim")}}
+              for n in store.list_datasets()]
+        _out(args, {"datasets": ds, "tookMs": round((time.perf_counter() - t0) * 1000, 2)},
+             "\n".join(f"{d['dataset']:24s} {d['count']:>7} imgs  {d['model_id']}" for d in ds) or "no datasets")
+        return 0
+    if args.action == "verify":
+        # ADR-6 integrity: byte counts are the authority; recompute against them.
+        man = store.read_manifest(args.dataset)
+        d = store.dataset_dir(args.dataset, home)
+        problems = []
+        for sh in man["shards"]:
+            for fn, key in ((sh["name"], "emb_bytes"), (store._ids_name(sh["name"]), "ids_bytes")):
+                have = (d / fn).stat().st_size if (d / fn).exists() else -1
+                if have < sh[key]:
+                    problems.append({"file": fn, "expected": sh[key], "found": have})
+        snap = store.open_snapshot(args.dataset, home)
+        rows = len(snap.ids)
+        if rows != man["count"]:
+            problems.append({"file": "ids", "expected": man["count"], "found": rows})
+        import numpy as np
+
+        norms = np.linalg.norm(np.asarray(snap.emb), axis=1) if snap.count else np.ones(1)
+        if not (0.99 <= float(norms.mean()) <= 1.01):
+            problems.append({"file": "shards", "expected": "L2-normalized rows", "found": float(norms.mean())})
+        obj = {"dataset": args.dataset, "count": man["count"], "ok": not problems, "problems": problems,
+               "model_id": man["model_id"], "model_sha": man["model_sha"],
+               "tookMs": round((time.perf_counter() - t0) * 1000, 2)}
+        _out(args, obj, f"{args.dataset}: {'OK' if not problems else 'PROBLEMS: ' + json.dumps(problems)}")
+        return 0 if not problems else 6
     if args.action == "create":
         d = store.dataset_dir(args.dataset, home)
         d.mkdir(parents=True, exist_ok=True)
         _out(args, {"dataset": args.dataset, "created": True, "path": str(d)}, f"created {d}")
     elif args.action == "rename":
-        src, dst = store.dataset_dir(args.dataset, home), store.dataset_dir(args.to, home)
+        new = args.to or args.new
+        if not new:
+            _err("rename needs a target name: imgtag manage rename <old> <new>")
+            return 2
+        src, dst = store.dataset_dir(args.dataset, home), store.dataset_dir(new, home)
         if not (src / "manifest.json").is_file():
             raise store.UnknownDatasetError(args.dataset)
         if dst.exists():
-            _err(f"{args.to} already exists")
+            _err(f"{new} already exists")
             return 2
         src.rename(dst)
         man = json.loads((dst / "manifest.json").read_bytes())
-        man["dataset"] = args.to
+        man["dataset"] = new
         (dst / "manifest.json").write_text(json.dumps(man, indent=1))
-        _out(args, {"dataset": args.to, "renamed_from": args.dataset}, f"renamed -> {args.to}")
+        _out(args, {"dataset": new, "renamed_from": args.dataset,
+                    "tookMs": round((time.perf_counter() - t0) * 1000, 2)}, f"renamed -> {new}")
     elif args.action == "reindex":
         from .core.indexer import index
 
@@ -180,8 +234,11 @@ def cmd_manage(args) -> int:
         d = store.dataset_dir(args.dataset, home)
         if not d.exists():
             raise store.UnknownDatasetError(args.dataset)
+        freed = _dir_bytes(d)
         shutil.rmtree(d)  # leaves 0 orphan bytes: everything lives under this dir (B20)
-        _out(args, {"dataset": args.dataset, "deleted": True}, f"deleted {args.dataset}")
+        _out(args, {"dataset": args.dataset, "deleted": True, "freedBytes": freed,
+                    "tookMs": round((time.perf_counter() - t0) * 1000, 2)},
+             f"deleted {args.dataset} ({freed/1e6:.1f} MB freed)")
     return 0
 
 
@@ -260,6 +317,22 @@ def cmd_doctor(args) -> int:
     return 0
 
 
+def cmd_status(args) -> int:
+    """ADR-13: daemon pid/version/socket/uptime + what the engine would load."""
+    t0 = time.perf_counter()
+    prof = load_profile()
+    obj = {"daemon": _daemon_state(), "home": str(store.imgtag_home()),
+           "datasets": [{"dataset": n, "count": store.read_manifest(n)["count"]} for n in store.list_datasets()],
+           "profile": {k: prof.get(k) for k in ("precision", "intra_op", "batch", "workers", "geometry",
+                                                "cores", "cores_source", "measured")},
+           "version": __import__("imgtag").__version__ if hasattr(__import__("imgtag"), "__version__") else "0.1.0",
+           "jobs_running": [j["job_id"] for j in list_jobs() if j.get("state") == "running"],
+           "tookMs": round((time.perf_counter() - t0) * 1000, 2)}
+    _out(args, obj, f"daemon: {'up' if obj['daemon']['running'] else 'down'} · "
+                    f"{len(obj['datasets'])} dataset(s) · profile {obj['profile']}")
+    return 0
+
+
 def cmd_job(args) -> int:
     obj = read_job(args.job_id) if args.job_id else {"jobs": list_jobs()}
     if obj is None:
@@ -297,12 +370,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     n = sub.add_parser("info", help="datasets, jobs, profile", parents=[common])
     n.add_argument("dataset", nargs="?")
+    n.add_argument("--dataset", dest="dataset_flag_info")
     n.add_argument("--job", help="report one job's live status")
     n.set_defaults(fn=cmd_info)
 
     m = sub.add_parser("manage", help="create/rename/reindex/delete a dataset", parents=[common])
-    m.add_argument("action", choices=["create", "rename", "reindex", "delete"])
-    m.add_argument("dataset")
+    m.add_argument("action", choices=["list", "create", "rename", "reindex", "delete", "verify"])
+    m.add_argument("dataset", nargs="?")
+    m.add_argument("new", nargs="?", help="target name for `manage rename <old> <new>`")
     m.add_argument("--to")
     m.add_argument("--path")
     m.add_argument("--model")
@@ -323,6 +398,9 @@ def build_parser() -> argparse.ArgumentParser:
     d.add_argument("--allow-int8", action="store_true",
                    help="let the tune select int8 vision (B24: opt-in speed lane, v1 default is fp32)")
     d.set_defaults(fn=cmd_doctor)
+
+    st = sub.add_parser("status", help="daemon + engine state (ADR-13)", parents=[common])
+    st.set_defaults(fn=cmd_status)
 
     j = sub.add_parser("job", help="job status", parents=[common])
     j.add_argument("job_id", nargs="?")

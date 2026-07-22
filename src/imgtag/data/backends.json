@@ -19,14 +19,17 @@
     "resize_mode": "squash",
     "source": "timm/PE-Core-S-16-384 open_clip_config.json (self-exported, spike-pecore.md)",
     "vision": {
-      "fp32": "pecore-s16-384-vision.onnx",
-      "int8": "pecore-s16-384-vision-int8.onnx"
+      "fp32": "pecore-s16-384-vision.onnx"
     },
     "text": {
       "fp32": "pecore-s16-384-text.onnx",
       "int8": "pecore-s16-384-text-int8.onnx"
     },
-    "text_precision": "int8"
+    "text_precision": "int8",
+    "vision_gated": {
+      "int8": "pecore-s16-384-vision-int8.onnx",
+      "reason": "naive dynamic quant, cos 0.94 vs fp32 \u2014 fails B24; only a weight-only recipe that PASSES B24 may be promoted"
+    }
   },
   "pecore-t16-384": {
     "dim": 512,
@@ -47,14 +50,17 @@
     "resize_mode": "squash",
     "source": "timm/PE-Core-T-16-384 open_clip_config.json (export via scripts/export_pecore.py)",
     "vision": {
-      "fp32": "pecore-t16-384-vision.onnx",
-      "int8": "pecore-t16-384-vision-int8.onnx"
+      "fp32": "pecore-t16-384-vision.onnx"
     },
     "text": {
       "fp32": "pecore-t16-384-text.onnx",
       "int8": "pecore-t16-384-text-int8.onnx"
     },
-    "text_precision": "int8"
+    "text_precision": "int8",
+    "vision_gated": {
+      "int8": "pecore-t16-384-vision-int8.onnx",
+      "reason": "same as S16 \u2014 B24 decides"
+    }
   },
   "pecore-b16-224": {
     "dim": 1024,
@@ -74,17 +80,19 @@
     "resample": "BILINEAR",
     "resize_mode": "squash",
     "source": "onnx-community/PE-Core-B16-224-ONNX (vision only; FIXED batch=2 export) \u2014 measured output dim 1024 (config said 512; the graph wins)",
-    "vision": {
-      "int8": "pecore-b16-224-vision-int8.onnx"
-    },
+    "vision": {},
     "text": {},
-    "text_precision": "int8"
+    "text_precision": "int8",
+    "vision_gated": {
+      "int8": "pecore-b16-224-vision-int8.onnx",
+      "reason": "DOWNLOADED onnx-community int8 \u2014 the broken-official-int8 class (Xenova, SigLIP2); B24 before use"
+    }
   },
   "siglip2-base-224": {
     "dim": 768,
     "size": 224,
     "ctx": 64,
-    "tokenizer": "gemma-unigram",
+    "tokenizer": "gemma-bpe",
     "mean": [
       0.5,
       0.5,
@@ -97,17 +105,25 @@
     ],
     "resample": "BILINEAR",
     "resize_mode": "squash",
-    "source": "models/siglip2-base/preprocessor_config.json (resample=2 == BILINEAR, measured 2026-07-22)",
+    "source": "models/siglip2-base/preprocessor_config.json (resample=2 == BILINEAR, measured 2026-07-22) \u2014 fp16 weights file is bit-equivalent to fp32 (cos 0.9999986, identical recall), ENABLE_ALL crashes it (ORT 1.27 fusion bug)",
     "subdir": "siglip2-base",
     "vision": {
-      "fp32": "vision_model.onnx",
       "fp16": "vision_model_fp16.onnx",
-      "int8": "vision_model_int8.onnx"
+      "fp32": "vision_model.onnx"
     },
     "text": {
       "int8": "text_model_int8.onnx"
     },
-    "text_precision": "int8"
+    "text_precision": "int8",
+    "vision_gated": {
+      "int8": "vision_model_int8.onnx",
+      "reason": "official int8 vision export FAILS parity: cos 0.7846 / p05 0.65, COCO car recall@5 0.40 vs 0.80 fp32 \u2014 BLACKLISTED as a variant"
+    },
+    "graph_opt": {
+      "vision_model_fp16.onnx": "ENABLE_EXTENDED"
+    },
+    "default_precision": "fp16",
+    "tokenizer_file": "tokenizer.npz"
   },
   "openclip-vitb32": {
     "dim": 512,
@@ -129,8 +145,7 @@
     "source": "Xenova/clip-vit-base-patch32 (B17 control, MIT)",
     "subdir": "openclip-vitb32",
     "vision": {
-      "fp32": "vision_model.onnx",
-      "int8": "vision_model_quantized.onnx"
+      "fp32": "vision_model.onnx"
     },
     "text": {
       "fp32": "text_model.onnx",
@@ -142,6 +157,10 @@
       "vision_model_quantized.onnx": "https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/main/onnx/vision_model_quantized.onnx",
       "text_model.onnx": "https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/main/onnx/text_model.onnx",
       "text_model_quantized.onnx": "https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/main/onnx/text_model_quantized.onnx"
+    },
+    "vision_gated": {
+      "int8": "vision_model_quantized.onnx",
+      "reason": "downloaded int8 vision \u2014 B24 tier-2 before use"
     }
   },
   "siglip-base-224": {
@@ -164,13 +183,16 @@
     "source": "models/siglip-base/preprocessor_config.json (fetched by l-logistics 2026-07-22)",
     "subdir": "siglip-base",
     "vision": {
-      "fp32": "vision_model.onnx",
-      "int8": "vision_model_quantized.onnx"
+      "fp32": "vision_model.onnx"
     },
     "text": {
       "fp32": "text_model.onnx",
       "int8": "text_model_quantized.onnx"
     },
-    "text_precision": "int8"
+    "text_precision": "int8",
+    "vision_gated": {
+      "int8": "vision_model_quantized.onnx",
+      "reason": "downloaded int8 vision \u2014 B24 tier-2 before use"
+    }
   }
 }

@@ -13,9 +13,9 @@ from imgtag.core import models, store
 from imgtag.core.indexer import index, scan
 from imgtag.core.progress import read_job
 
-HAS_PECORE = models.find_artifact(models.registry()["pecore-s16-384"], "pecore-s16-384-vision-int8.onnx") is not None
+HAS_PECORE = models.find_artifact(models.registry()["pecore-s16-384"], "pecore-s16-384-vision.onnx") is not None
 needs_model = pytest.mark.skipif(not HAS_PECORE, reason="pecore-s16-384 artifacts not on this host")
-PROFILE = {"precision": "int8", "intra_op": 1, "batch": 2, "cores": 4, "mem_available_mb": 4096,
+PROFILE = {"precision": "fp32", "intra_op": 1, "batch": 2, "cores": 4, "mem_available_mb": 4096,
            "geometry": "central", "worker_intra_op": 1}
 
 

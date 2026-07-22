@@ -28,6 +28,14 @@ def test_tokenizer_truncates_to_context_and_keeps_eot():
     assert ids.shape == (1, 8) and ids[0, -1] == tok.eot and ids[0, 0] == tok.sot
 
 
+def test_gated_int8_vision_is_refused():
+    """RULING 2026-07-22: a downloaded/naive int8 VISION file is never a usable variant."""
+    with pytest.raises(models.ModelUnavailableError, match="GATED"):
+        models.load_backend("pecore-s16-384", {"precision": "int8", "precision_explicit": True})
+    be = models.load_backend("pecore-s16-384", {"precision": "int8", "allow_gated": True, "intra_op": 1})
+    assert be.precision == "int8"  # b-bench's escape hatch, for B24 measurement only
+
+
 def test_unknown_backend_is_loud():
     with pytest.raises(models.ModelUnavailableError):
         models.load_backend("no-such-model")
