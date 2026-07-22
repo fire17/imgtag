@@ -416,3 +416,21 @@ def test_tcp_port_is_sticky_across_restarts(short_tmp):
     assert json.loads(rec.read_bytes())["http_port"] is None
     D.request("POST", "/api/shutdown", home=home)
     t.join(timeout=10)
+
+
+def test_unknown_query_params_are_rejected_not_absorbed(live):
+    """Silently ignoring ?source= is how b-app got current-scan data under a stored label."""
+    st, r = get(live, "/api/search?q=cat&bogus=1")
+    assert st == 400 and r["exit_code"] == 1 and "bogus" in r["error"]
+    st, r = get(live, "/api/moderation?dataset=d1&source=nope")
+    assert st == 400 and "source" in r["error"]
+    st, _ = get(live, "/api/moderation?dataset=d1&source=stored")
+    assert st == 200  # a KNOWN param still works
+
+
+def test_moderation_source_stored(live):
+    st, r = get(live, "/api/moderation?dataset=d1&source=stored")
+    assert st == 200 and r["source"] == "stored"
+    assert r["datasets"][0]["indexed"] == 30  # no stored flags on this fixture -> empty counts
+    st, r2 = get(live, "/api/moderation?dataset=d1")
+    assert r2["source"] == "current-scan"  # default is unchanged and explicitly labelled

@@ -348,7 +348,14 @@ class Searcher:
         cats, counts = {}, {}
         for name, g in groups.items():
             cfg = spec[name]
-            fitted = cfg.get("scorer") == "margin" and cfg.get("tau") is not None
+            # A PROXY fit does not gate. Ruling 2026-07-22 after b-app's audit: the drugs
+            # track's proxy-fitted logistic put 218 violations on this corpus (vs nudity 5,
+            # weapons 10) with the first 21 eyeballed all benign at a SATURATED p=0.99 — a
+            # fit that is worse than no fit gets rolled back, per staleness-worse-than-
+            # absence. Only `calibration: "fitted"` may use its own taus; a proxy spec keeps
+            # its declared scorer but falls back to the dataset layer and says "unfitted".
+            trusted = cfg.get("calibration") == "fitted"
+            fitted = trusted and cfg.get("scorer") == "margin" and cfg.get("tau") is not None
             if fitted:
                 # margin ONLY where the spec was fitted for it: its negative set is a
                 # background for a max-margin, not a mean to subtract. Applying margin to a
@@ -367,6 +374,15 @@ class Searcher:
                 is_v = (over_v >= 0) & (over_v >= over_r)
                 is_r = (over_r >= 0) & ~is_v
                 pv, pr = self._margin_p(mv, cfg), self._margin_p(mr, cfg)
+            elif cfg.get("scorer") == "margin":  # declared margin, untrusted thresholds:
+                # keep the feature, drop the fitted taus, z-score against THIS corpus
+                bg = best(g["negatives"])
+                mv, mr = best(g["violation"]) - bg, best(g["review"]) - bg
+                pv = _sigmoid(za * ((mv - mv.mean()) / max(float(mv.std()), 1e-6)) + zb)
+                pr = _sigmoid(za * ((mr - mr.mean()) / max(float(mr.std()), 1e-6)) + zb)
+                fires = np.maximum(pv, pr) >= zfloor
+                is_v = fires & (pv > pr)
+                is_r = fires & ~is_v
             else:  # unfitted spec: mean-of-prompts minus half the mean of the negatives,
                 # z-scored against THIS corpus (the shape those prompt sets were written for)
                 neg = cos[:, g["negatives"]].mean(1) if g["negatives"].stop > g["negatives"].start else 0.0
@@ -380,7 +396,10 @@ class Searcher:
                 is_v = fires & (pv > pr)
                 is_r = fires & ~is_v
             cats[name] = {"violation_p": pv, "review_p": pr, "is_violation": is_v,
-                          "is_review": is_r, "calibration": cfg.get("calibration", "unfitted"),
+                          "is_review": is_r,
+                          # a proxy fit is reported as UNFITTED, with its claim preserved
+                          "calibration": cfg.get("calibration", "unfitted") if trusted else "unfitted",
+                          "spec_calibration": cfg.get("calibration", "unfitted"),
                           "enforcement_ready": bool(cfg.get("enforcement_ready", False)),
                           # explanation-only signal, never subtracted, never a gate
                           "neighbour": best(g["policy_neighbours"]) if g["policy_neighbours"].stop
@@ -446,6 +465,46 @@ class Searcher:
             elif c["is_review"][i]:
                 out.append({"category": name, "p": round(float(c["review_p"][i]), 4),
                             "tier": "review"})
+        return out
+
+    def track_state(self, dataset: str, category: str) -> dict:
+        """One category's calibration state — the SAME value /api/moderation reports, so
+        two screens of the app can never disagree about a threshold."""
+        c = (self.track_scores(dataset).get("categories") or {}).get(category)
+        if not c:
+            raise ValueError(f"unknown moderation category {category!r}")
+        return {"category": category, "calibration": c["calibration"],
+                "spec_calibration": c["spec_calibration"],
+                "enforcement_ready": c["enforcement_ready"]}
+
+    def stored_moderation(self, dataset: str, limit: int = 0) -> dict:
+        """Aggregate the INDEX-TIME flags b-engine wrote onto each ids record.
+
+        Answers a different question from the live scan — "what did we record when we
+        indexed it" — and needs no model at all, so it is cheap and survives a threshold
+        change. Never merged with current-scan numbers (they carry different labels).
+        """
+        snap = self.snapshot(dataset)
+        counts: dict[str, dict] = {}
+        flagged: list[dict] = []
+        for rec in snap.ids:
+            for f in rec.get("flags") or []:
+                cat, tier = f.get("category"), f.get("tier")
+                if not cat or tier not in ("violation", "review"):
+                    continue
+                counts.setdefault(cat, {"violation": 0, "review": 0})[tier] += 1
+                if limit:
+                    flagged.append({**f, "image_id": rec["image_id"], "path": rec["path"],
+                                    "dataset": rec.get("dataset") or dataset,
+                                    "dataset_slug": rec.get("dataset") or dataset})
+        flagged.sort(key=lambda f: (f["category"], f["tier"] != "violation",
+                                    -float(f.get("p") or 0), f["image_id"]))
+        out = {"dataset": dataset, "indexed": len(snap.ids), "counts": counts,
+               "source": "stored", "labels": {}, "threshold": None,
+               "calibration": {c: "unfitted" for c in counts},
+               "enforcement_ready": {c: False for c in counts}}
+        if limit:
+            out["flagged"] = flagged[: limit * max(1, 2 * len(counts))]
         return out
 
     def moderation(self, dataset: str, limit: int = 0) -> dict:

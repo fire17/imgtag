@@ -487,3 +487,42 @@ def test_every_hit_carries_exists(home):
                   for i in range(2)])
     r = S.Searcher(home, backend=be).search("cat", "d1", k=2)
     assert r["hits"] and all(h["exists"] is False for h in r["hits"])
+
+
+def test_proxy_fitted_spec_is_demoted_to_unfitted(home, monkeypatch):
+    """A PROXY fit may not gate (ruling after b-app's audit: the proxy logistic produced
+    218 benign violations at a saturated p=0.99). The scorer survives; the taus do not."""
+    spec = {"version": 2, "categories": {"x": {
+        "label": "x", "violation": ["cat"], "review": ["dog"], "negatives": ["sky"],
+        "scorer": "margin", "platt": [105.0, -6.6], "tau": 0.019, "tau_review": 0.031,
+        "calibration": "proxy-fitted", "enforcement_ready": False}}}
+    monkeypatch.setattr(S, "tracks", lambda: spec)
+    be = build(home, "d1", ["cat", "dog"] + ["tree"] * 18)
+    s = searcher(home, be)
+    t = s.track_scores("d1")
+    c = t["categories"]["x"]
+    assert c["calibration"] == "unfitted"       # what the engine reports
+    assert c["spec_calibration"] == "proxy-fitted"  # what the spec claimed, preserved
+    assert c["enforcement_ready"] is False
+    # p must not saturate: a fitted logistic on a margin pinned everything at 0.99
+    assert float(c["violation_p"].max()) < 0.999
+    assert s.track_state("d1", "x")["calibration"] == "unfitted"  # same value everywhere
+
+
+def test_stored_moderation_counts_index_time_flags(home):
+    """`source=stored` totals what the INDEXER recorded — no model, survives a threshold
+    change, and never merges with the live scan."""
+    be = FakeBackend()
+    recs = []
+    for i in range(6):
+        r = {"image_id": f"{i:016x}", "path": f"/img/{i}.jpg", "dataset": "d1", "w": 1, "h": 1}
+        if i < 3:
+            r["flags"] = [{"category": "weapons", "p": 0.9, "tier": "violation" if i < 2 else "review"}]
+        recs.append(r)
+    with Writer("d1", be, home) as w:
+        w.append(np.stack([be._vec("cat")] * 6), recs)
+    m = S.Searcher(home, backend=be).stored_moderation("d1", limit=5)
+    assert m["source"] == "stored" and m["indexed"] == 6
+    assert m["counts"] == {"weapons": {"violation": 2, "review": 1}}
+    assert m["enforcement_ready"] == {"weapons": False}
+    assert m["flagged"][0]["tier"] == "violation" and m["flagged"][0]["image_id"]

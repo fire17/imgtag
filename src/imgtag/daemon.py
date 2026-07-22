@@ -24,7 +24,8 @@ Endpoints::
                                                  can exclude the one-time load
     GET  /api/datasets                           fleet view (B18f: exactly what is on disk)
     GET  /api/status                             footprint + fleet + job count (app health)
-    GET  /api/moderation?dataset=&limit=         ADR-14 two-tier counts per category
+    GET  /api/moderation?dataset=&limit=&source=  source=current-scan (default) | stored
+                                                 ADR-14 two-tier counts per category
                                                  ("N violations, M for review") + flagged
                                                  images when limit>0. LIVE scan; b-engine's
                                                  stored index-time flags are a separate,
@@ -88,6 +89,14 @@ ERRORS = {
     _models.ModelUnavailableError: (503, 7),
     FileNotFoundError: (404, 4),
     ValueError: (400, 1),
+}
+
+
+PARAMS = {  # unknown query params are a 400, never silently ignored (b-app found ?source=)
+    "/api/search": {"q", "dataset", "k", "strict", "text", "track", "tier"},
+    "/api/moderation": {"dataset", "limit", "source"},
+    "/api/images": {"dataset", "offset", "limit"},
+    "/api/thumb": {"s"},
 }
 
 
@@ -354,6 +363,12 @@ class Handler(BaseHTTPRequestHandler):
         q = urllib.parse.parse_qs(u.query)
         d = self.daemon
         try:
+            known = PARAMS.get(u.path if not u.path.startswith("/api/thumb/") else "/api/thumb")
+            unknown = sorted(set(q) - known) if known else []
+            if unknown:
+                raise ValueError(
+                    f"unknown query parameter(s) {', '.join(unknown)} for {u.path} "
+                    f"— accepted: {', '.join(sorted(known))}")
             if u.path == "/api/hello":
                 self.json({"version": VERSION, "model_shas": d.model_shas(), "pid": os.getpid(),
                            "socket": str(daemon_paths(d.home)[0]),
@@ -379,16 +394,25 @@ class Handler(BaseHTTPRequestHandler):
                             for h in d.searcher.moderation(nm, limit=k).get("flagged", [])
                             if h["category"] == trk and (not want_tier or h["tier"] == want_tier)]
                     hits.sort(key=lambda h: (h["tier"] != "violation", -h["p"], h["image_id"]))
+                    info = d.searcher.track_state(names[0], trk) if names else {}
                     self.json({"query": "", "track": trk, "tookMs": 0.0, "hits": hits[:k],
-                               "no_match": not hits, "calibration": "unfitted",
-                               "enforcement_ready": False,
+                               "no_match": not hits,
+                               "calibration": info.get("calibration", "unfitted"),
+                               "track_calibration": info.get("calibration", "unfitted"),
+                               "spec_calibration": info.get("spec_calibration", "unfitted"),
+                               "enforcement_ready": info.get("enforcement_ready", False),
                                "coverage": {"indexed": sum(d.searcher.snapshot(n).count
                                                            for n in names)},
                                "datasets": names})
                     return
                 if not query.strip():
                     raise ValueError("q is required (or pass track= to browse a track)")
-                self.json(d.searcher.search(
+                if trk:  # the track's own calibration travels with a track-filtered query
+                    ds0 = (q.get("dataset") or [None])[0] or (list_datasets(d.home) or [None])[0]
+                    info = d.searcher.track_state(ds0, trk) if ds0 else {}
+                else:
+                    info = {}
+                res = d.searcher.search(
                     query,
                     dataset=(q.get("dataset") or [None])[0] or None,
                     k=k,
@@ -396,12 +420,21 @@ class Handler(BaseHTTPRequestHandler):
                     text=(q.get("text") or ["auto"])[0],
                     track=trk,
                     tier=(q.get("tier") or [None])[0] or None,
-                ))
+                )
+                if info:
+                    res["track_calibration"] = info["calibration"]
+                    res["spec_calibration"] = info["spec_calibration"]
+                    res["enforcement_ready"] = info["enforcement_ready"]
+                self.json(res)
             elif u.path == "/api/moderation":
                 ds = (q.get("dataset") or [None])[0]
                 limit = max(0, min(200, int((q.get("limit") or [0])[0])))
                 names = [ds] if ds else list_datasets(d.home)
-                per = [d.searcher.moderation(nm, limit) for nm in names]
+                src = (q.get("source") or ["current-scan"])[0]
+                if src not in ("current-scan", "stored"):
+                    raise ValueError("source must be 'current-scan' or 'stored'")
+                per = [(d.searcher.stored_moderation(nm, limit) if src == "stored"
+                        else d.searcher.moderation(nm, limit)) for nm in names]
                 totals: dict[str, dict] = {}
                 for r in per:  # ADR-14: violations and review counts never merge into one
                     for cat, c in r["counts"].items():
@@ -410,8 +443,9 @@ class Handler(BaseHTTPRequestHandler):
                         t["review"] += c["review"]
                 self.json({"datasets": per, "totals": totals,
                            "indexed": sum(r["indexed"] for r in per),
-                           "source": "current-scan",  # live; b-engine's stored flags are
-                           # "flagged at indexing" and come from `imgtag info --flags`
+                           # "stored" = flagged at indexing (survives a threshold change);
+                           # "current-scan" = today's detectors over today's embeddings
+                           "source": src,
                            # per-category, straight from each track's spec (a fitted track
                            # says so; an unfitted one can never claim otherwise)
                            "calibration": {c: v for r in per for c, v in r["calibration"].items()},
