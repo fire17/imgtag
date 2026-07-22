@@ -25,7 +25,6 @@ from .core.progress import list_jobs, read_job
 # loading an inference runtime it never uses.
 EXIT = {"LockedError": 3, "UnknownDatasetError": 4, "ModelMismatchError": 5,
         "CorruptIndexError": 6, "ModelUnavailableError": 7, "CalibrationMismatchError": 5}
-NO_MATCH_FLOOR = 0.20  # provisional dense floor; b-daemon replaces it with the calibrated tau
 
 
 def _out(args, obj: dict, human: str = "") -> None:
@@ -110,15 +109,16 @@ def cmd_index(args) -> int:
         f"indexed {s['indexed']} images ({s['skipped']} unchanged, {s['failed']} failed) "
         f"in {s['seconds']}s = {s['img_s']} img/s  [{s['model_id']}, {s['workers']} workers, "
         f"batch {s['batch']}, stages/img {s['stages_ms_per_img']}]"
-        + (f"\n{_moderation_line(s['moderation'])}" if s.get("moderation_active") else ""),
+        + (f"\n{_moderation_line(s['moderation'], s.get('moderation_active', False))}"
+           if s.get("moderation_requested") else ""),
     )
     return 0
 
 
-def _moderation_line(counts: dict) -> str:
+def _moderation_line(counts: dict, active: bool = True) -> str:
     from .core.indexer import moderation_summary
 
-    return moderation_summary(counts or {})
+    return moderation_summary(counts or {}, active)
 
 
 def _flags_rollup(dataset: str, limit: int = 200) -> dict:
@@ -421,17 +421,16 @@ def _search_via_daemon(args, t0: float):
 def cmd_search(args) -> int:
     """ADR-13 client: talk to the resident daemon, else start one, else answer in-process.
 
-    A cold in-process query pays a full ORT text-session load (~500ms); the daemon holds
-    it warm, which is the entire rationale of ADR-5. `--no-daemon` forces the local path.
+    Both paths return the SAME schema because both are produced by the same owner —
+    `core.search.Searcher` (b-daemon's file). The CLI has no query implementation of its
+    own; a second scan here would mean two sigmoids, two sets of keys, and two answers to
+    the same question. `--no-daemon` chooses the transport, never the semantics.
     """
-    import numpy as np
-
     t0 = time.perf_counter()
-    names = [args.dataset] if args.dataset else store.list_datasets()
-    if not names:  # nothing indexed yet is an honest empty answer, not an error
+    if not store.list_datasets():  # nothing indexed yet is an honest empty answer
         _out(args, {"query": args.query, "tookMs": round((time.perf_counter() - t0) * 1000, 2),
-                    "coverage": {"indexed": 0, "total": 0}, "hits": [], "no_match": True,
-                    "calibrated": False}, "no datasets indexed")
+                    "coverage": {"indexed": 0, "total": 0}, "hits": [], "no_match": True},
+             "no datasets indexed")
         return 0
 
     if not args.no_daemon:
@@ -439,49 +438,13 @@ def cmd_search(args) -> int:
         if served is not None:
             return served
 
-    snaps = [store.open_snapshot(n) for n in names]
-    from .core import models
-    # the manifest decides the model AND its precision — the query must live in the same
-    # embedding space as the index (int8 vs fp32 vision differ at cos ~0.94)
-    mid = snaps[0].manifest["model_id"]
-    name, prec = (args.model, None) if args.model else mid.rsplit("-", 1)
-    be = models.load_backend(name, {**load_profile(), **({"precision": prec} if prec else {})})
-    for s in snaps:
-        if s.manifest["model_sha"] != be.model_sha:
-            raise store.ModelMismatchError(
-                f"{s.dataset} was indexed with {s.manifest['model_id']} ({s.manifest['model_sha'][:12]}); "
-                f"loaded {be.model_id} ({be.model_sha[:12]})"
-            )
-    q = be.embed_texts([args.query])[0]
-    hits = []
-    for s in snaps:
-        if not s.count:
-            continue
-        scores = np.asarray(s.emb @ q, np.float32)
-        k = min(args.k, len(scores))
-        top = np.argpartition(-scores, k - 1)[:k]
-        for i in top[np.argsort(-scores[top], kind="stable")]:
-            r = s.ids[int(i)]
-            hits.append({
-                "image_id": r["image_id"], "path": r["path"], "dataset": r["dataset"],
-                "score": round(float(scores[i]), 6),
-                "p": round(float(1 / (1 + np.exp(-(float(scores[i]) - 0.22) * 40))), 4),
-                "why": {"path": "text", "tag": None, "calibrated": False},
-                "meta": r.get("meta", {}),      # generic per-image metadata (B18 provenance)
-                "flags": r.get("flags", []),    # moderation, when a detector ran
-            })
-    hits.sort(key=lambda h: (-h["score"], h["image_id"]))  # deterministic ties (B18e)
-    hits = hits[: args.k]
-    obj = {
-        "query": args.query,
-        "tookMs": round((time.perf_counter() - t0) * 1000, 2),
-        "coverage": {"indexed": sum(s.count for s in snaps), "total": sum(s.count for s in snaps)},
-        "hits": hits,
-        "no_match": not hits or hits[0]["score"] < NO_MATCH_FLOOR,
-        "calibrated": False,
-    }
-    _out(args, obj, "\n".join(f"{h['score']:.4f}  {h['dataset']:12s} {h['image_id']}  {h['path']}" for h in hits)
-         or "no match")
+    from .core.search import Searcher
+
+    obj = Searcher().search(args.query, dataset=args.dataset, k=args.k)
+    obj["clientMs"] = round((time.perf_counter() - t0) * 1000, 2)
+    obj.setdefault("served_by", "in-process")
+    _out(args, obj, "\n".join(f"{h['score']:.4f}  {h['dataset']:12s} {h['image_id']}  {h['path']}"
+                              for h in obj.get("hits", [])) or "no match")
     return 0
 
 

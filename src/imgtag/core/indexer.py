@@ -156,13 +156,16 @@ def _call_head(head, embs, images, recs):
     bare `score(batch)` is NOT guessed at — feeding it embeddings would silently produce
     numbers that mean nothing, which is worse than the loud skip the caller gets.
     """
-    if hasattr(head, "score_images"):
-        if images is None:
-            raise RuntimeError("head needs pixels but this batch has none (geometry=worker)")
-        from PIL import Image as _Image
+    try:
+        return head.score(embs, images, recs)          # the finalized seam
+    except TypeError:
+        if not hasattr(head, "score_images"):
+            raise
+    if images is None:                                  # legacy PIL-only head
+        raise RuntimeError("head needs pixels but this batch has none (geometry=worker)")
+    from PIL import Image as _Image
 
-        return head.score_images([_Image.fromarray(im) for im in images])
-    return head.score(embs, images, recs)
+    return head.score_images([_Image.fromarray(im) for im in images])
 
 
 def _apply_moderation(hook, embs, recs, images, counts: dict, log) -> int:
@@ -206,15 +209,16 @@ def merge_counts(counts: dict) -> dict:
     return out
 
 
-def moderation_summary(counts: dict) -> str:
-    """The user's phrasing, verbatim, per ADR-14 tier (violations lead; review follows)."""
+def moderation_summary(counts: dict, active: bool = True) -> str:
+    """The job-end line, in the user's phrasing with ADR-14's tiers made visible:
+    "Found N images with drugs (M for review), ...". Heads absent is a real answer."""
+    if not active:
+        return "moderation: off (no tracks loaded)"
     c = merge_counts(counts)
     order = list(MODERATION_CATEGORIES) + [k for k in sorted(c.get("violation", {})) if k not in MODERATION_CATEGORIES]
-    line = "Found " + ", ".join(f"{c['violation'].get(k, 0)} images with {k}" for k in order)
-    review = c.get("review", {})
-    if any(review.values()):
-        line += " · review tier: " + ", ".join(f"{v} {k}" for k, v in sorted(review.items()) if v)
-    return line
+    return "Found " + ", ".join(
+        f"{c['violation'].get(k, 0)} images with {k}" + (f" ({r} for review)" if (r := c["review"].get(k, 0)) else "")
+        for k in order)
 
 
 # ---------------------------------------------------------------- workers
@@ -565,6 +569,7 @@ def index(
                 "meta": job_meta,
                 "moderation": merge_counts(mod_counts),
                 "moderation_active": hook is not None,
+                "moderation_requested": bool(moderation),
                 "moderation_errors": mod_errors,
             }
             if job_meta:  # dataset-level metadata lives in the manifest, merged across jobs
@@ -583,8 +588,8 @@ def index(
                 }
             if job_meta or hook is not None:
                 w._commit()
-            if hook is not None:
-                log(moderation_summary(mod_counts))
+            if moderation:
+                log(moderation_summary(mod_counts, active=hook is not None))
             job.update(w.count, 0, summary["stages_ms_per_img"], force=True)
             job.state["moderation"] = summary["moderation"]
             job.state["meta"] = job_meta
