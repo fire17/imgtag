@@ -258,8 +258,17 @@ review-tier hits — emitting it would be worse than useless).
 - ❌ **True-positive recall — NOT verified here.** Published metric only, cited above.
 - ❌ **τ not fitted on labeled ground truth** — `calibrated: False`, `enforcement_ready` false.
 - ⚠️ **Latency UNRELIABLE** (load 41.5 / 16 cores). Re-measure idle, then on the 🐧 target.
-- ⚪ Never run end-to-end inside `imgtag index` — the seam is unit-tested, the integration
-  is not. b-engine's `test_meta_moderation.py` covers the hook with a stand-in detector.
+- ✅ **End-to-end through the real CLI** — `imgtag index … --moderation` on 4 files loads the
+  head via `load_heads`, and `imgtag info --flags --json` returns
+  `p = 0.8247 / 0.8019 / 0.6763` for the three FP-tail images — **bit-identical to the
+  offline bench**, which proves the re-open pixel path in production matches the measured
+  one. `calibration: "unfitted"` and `enforcement_ready: false` propagate to the rollup.
+  (Those three files were chosen *because* they are the known FP tail; three violations is
+  the harness working, not a quality claim.)
+- ⚠️ Two tests in b-engine's `tests/test_meta_moderation.py` fail on this checkout
+  (`test_summary_uses_the_users_phrasing`, `test_cli_meta_flags_rollup_and_dataset_meta`) —
+  their own expectation vs their own `moderation_summary` wording, mid-flight in that lane.
+  Not touched (F2); reported to team-lead.
 
 **Next, in order:** (1) re-measure §6 idle and on the target host; (2) if the operator can
 supply a *labeled, lawfully-held* in-house sample on the target machine, fit τ there and only
