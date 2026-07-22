@@ -236,6 +236,12 @@ and labeled as such; activity-only and contact-sports recall are under-measured 
    site needs strong activity recall.
 2. **Contact-sports recall is weak** (§8) — strengthen `martial arts` prompts and re-measure
    on a real (indexed) contact-sports slice; coordinate the retune with track-violence.
+   UNBLOCKED 2026-07-22: track-violence indexed dataset **`vslices`** (1856 imgs — real
+   ring/dojo/mat boxing/martial-arts/wrestling/fencing + team-contact & confusables,
+   pecore-s16-384-fp32). STAGED: run `SportsHead.score` over `store.open_snapshot("vslices")`
+   for REAL per-slice match rates (replaces the weak-keyword 0.102/0.146) — pending the
+   quiet-window ALL-CLEAR (scoring stored embeddings is compute). If a targeted prompt round
+   lifts boxing recall, ping track-violence to upgrade their §7 to "measured".
 3. **equestrian / motorsport are scored as FPs by the COCO taxonomy** but are arguably sport
    — a user ruling that they ARE sport would raise measured precision from 0.783 (LVIS) to
    ~0.80+. Configurable via the label set.
