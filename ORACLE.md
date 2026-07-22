@@ -635,6 +635,40 @@ label, or to compare a dev-machine number against a target-profile (🐧) budget
   model-line tripwire caught a spawn-vs-actual mismatch (non-Fable either way; rule 4
   intact). All 4 model repos fetched + validated (rclip 2.1.6; uform ONNX lives in the
   uform3-image-text-english-base repo, NOT uform-vl-english — recorded for re-fetch).
+- 2026-07-22 14:05Z · **Rule-4 tripwire #2: track-weapons self-reported MODEL:
+  claude-fable-5** despite an explicit opus spawn (same drift class as track-sports 13:3xZ).
+  TaskStop'd on receipt; its committed work (741f5a9 — OI-head verification, toys→review)
+  is content-verified and STAYS. Successor track-weapons3 spawned explicit opus. Law
+  reconfirmed: the MODEL first line is the only spawn-model truth; harness overrides drift.
+- 2026-07-22 14:10Z · **User-reported live dupes in search** → dedupe() keyed
+  (dataset,image_id) so identical content in two datasets shipped twice on the global path.
+  Fix: `across_datasets=True` on multi-dataset merges — collapse by image_id, fold extras
+  into `hits[].also_in`, count in collapsed_duplicates. B18(d) intact (attribution stays
+  true). Test extended; verified over HTTP. Owner b-daemon notified (conductor edit while
+  the lane was down).
+- 2026-07-22 14:12Z · **b-bench architectural ruling accepted**: fitted ALL-tier AND-query
+  precision ceiling is 0.281 even with a val-fitted τ (oracle bound) — a single global
+  embedding conflates co-occurring objects; calibration cannot separate what the embedding
+  merged. The 36%→70% acceptance is RETIRED as a v1 gate and moves to D1 (region/tile
+  embeddings) exit criteria. v1 ships: honest no-match, rank-boost, rare/mid-tag FP-gating
+  (pizza P0.93, bus P0.89, dog P0.72), recall-first fusion. Never publish a 70% AND number
+  before D1.
+- 2026-07-22 14:12Z · **ADR-4b addendum (B9)**: pecore-s16-384 shipping sum 182MB > B9
+  150MB. The fp16-WEIGHTS vision arm (bit-equivalent, expands to fp32 at load) is
+  LOAD-BEARING for shipping S16 (102→51MB ⇒ 130MB total ✅). Pending its RSS+speed bench
+  (b-bench). B6 min-clause re-based: evaluate at k=min(10,N_pos) with N_pos≥25 floor —
+  rare-class sparsity (toaster n=8) was measuring the dataset, not the model.
+- 2026-07-22 14:20Z · **14:12Z fp16-weights clause FALSIFIED by measurement** (b-bench):
+  fp16 weights load compact (293MB) and are bit-equivalent, but CPU EP has NO fp16 MatMul
+  kernel — every weight Casts→fp32 per MatMul, so peak RUN RSS is 938MB vs fp32's 622MB.
+  fp16-weights = disk-only win with a RAM regression; it rescues nothing into B8 and
+  self-converted pecore fp16 doesn't even load (mixed-type Div). RULING: **B9 relaxed to
+  ≤200MB "honest fp32-vision floor" for v1** — B9's 150 assumed a quantizable vision tower
+  and B24 took that off the table (2 of 2 official int8 towers broken + int8 pairing
+  silently drops 15% of weapons review flags). pecore-s16-384 fp32 (182MB) SHIPS; t16
+  (~112MB) remains the strict-disk edge floor. fp16-weights arm dropped from perf matrix.
+  Revisit trigger: ORT CPU EP gains fp16 MatMul kernels, or a B24-passing int8 vision
+  tower appears.
 
 ---
 
