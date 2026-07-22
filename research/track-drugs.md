@@ -6,14 +6,17 @@
 > Binding: VISION-ADDENDA 12:33Z (three tracks) + 12:50Z rulings / ADR-14 (two tiers),
 > ADR-3 (probability space, background-margin experiment), ADR-7 (no new deps).
 
-> **CHECKPOINT 2026-07-22 ~17:40Z** — WHERE I AM: refit v2 shipped (4 routed defects fixed;
-> committed 6a6a2e1/3ab7ce9; 18 tests green; live index reports 16 drug violations + 6
-> review). improve-track round 1 PREPARED during the b-bench quiet window (no compute):
-> confidence-correctness metrics written into eval (AUROC / ECE / Brier / Wilson-CI /
-> per-subcategory separation), candidate subcategory taxonomy drafted
-> (`data/drug-probe/taxonomy.json`, 7+staging subcats). WHAT'S NEXT (on ALL-CLEAR): A/B each
-> taxonomy candidate for TP-vs-FP separation, promote only prompts that lift AUROC without
-> lifting the FP band, refit, ledger entry, delete duplicate `drugprobe2`.
+> **CHECKPOINT 2026-07-22 ~18:20Z** — WHERE I AM: (1) refit v2 shipped (4 routed defects);
+> (2) improve-track round 1 done — 8 subcategory prompts promoted under a separation gate,
+> 5 rejected, AUROC 0.9968→0.9979, violation FP 1.06%→0.44%, ledger logged; (3) gate-safe +
+> arbitration-preserving storage contract shipped (1631abf) — spec declares `gate_safe` +
+> `gate_evidence` + `arbitrated_storage`, head emits both arbitration margins, storage still
+> single-col (no breakage). 21 tests green. WHAT'S NEXT: b-engine lands the `derive_tiers`
+> two-margin arbitration branch + b-daemon re-verifies the spread; then I flip
+> `col_roles=["margin","margin_review"]` + re-backfill `drugprobe` — the lane closes on that.
+> HONEST TOP ASK: only cannabis+smoking have labelled TP; the highest-value next step is a
+> handful of cocaine/heroin/meth/pills-in-context labels (separation is already ~0.998 on
+> what we can measure, so gains need labels, not prompts).
 
 ## 0. The one-paragraph answer
 
@@ -249,6 +252,36 @@ way, so a future prompt edit cannot silently drop a mitigation.
   200 labelled drug images from their own sites, a logistic head on those embeddings is a
   ~30-minute upgrade with a real fitted τ — that is the highest-value next step by a wide
   margin, and it is the only route to `enforcement_ready: true`.
+
+## 5b. Gallery lightup — gate-safe declaration + arbitration-preserving storage (2026-07-22)
+
+The TP-probe dataset (`drugprobe`, the 17 indexed drug images) must show its flags in the
+gallery like `weaponprobe`/`nudityprobe` do. Two things stood between the backfilled scores
+and the view, both now addressed:
+
+1. **The proxy-gate rule.** `search.py` refuses to gate any `calibration != "fitted"` spec —
+   a defensive rollback from b-app's v1 saturation (218 benign at p=0.99). My fit is
+   honestly `proxy-fitted` (a calibrated zero-shot ensemble, not a trained head), so it was
+   distrusted. Per the conductor ruling, the gate is now **earned by measurement, not by a
+   label**: the spec declares `gate_safe: true` + `evidence_cap: 0.947` and a `gate_evidence`
+   block (AUROC 0.9979, violation FP 0.44%, **0 negatives at p≥0.9**, acceptance
+   {vape→review, leaf→none}, corpus, and a one-line verify command). b-daemon re-verifies
+   the spread independently before trusting it. The label stays honest; the gate is measured.
+
+2. **Arbitration must survive storage.** Sidecars store raw scores and `derive_tiers()`
+   re-bands them at read time — a *single*-column τ band cannot reproduce my tobacco-vs-drug
+   arbitration, so it would re-flag a vape as a violation (vape drug-p 0.0222 > τ 0.0198).
+   The fix stores **two margins** (`col_roles: ["margin", "margin_review"]`), from which
+   `derive_tiers` reproduces the arbitration exactly — *without* freezing τ, so ADR-15's
+   free re-derivation on a τ change is preserved. The contract (rule + params) lives in the
+   spec's `arbitrated_storage`; my head already emits both margins per flag. `col_roles`
+   stays `None` (single-col, unchanged) until b-engine's `derive_tiers` honours the contract;
+   the flip is then two lines + one re-backfill. Chosen over a frozen tier/label column
+   precisely because it keeps τ live.
+
+Backfill is verified either way: `imgtag track add drugs --dataset drugprobe` → **18
+violations / 16 true TP**, identical to the eval. What remains is b-engine's `derive_tiers`
+branch + b-daemon's spread re-verify; the lane closes on the flip.
 
 ## 6. Integration
 
