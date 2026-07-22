@@ -83,6 +83,45 @@ Verify: rclip --help → OK
 
 ---
 
+## Task 5: Karpathy caption splits
+
+**Status:** ✅ OK  
+**Location:** `/Users/magic/Creations/ImgTag/data/karpathy/`  
+**Source:** https://cs.stanford.edu/people/karpathy/deepimagesent/caption_datasets.zip
+
+| File | Size (bytes) | SHA256 |
+|------|-------------|--------|
+| caption_datasets.zip | 36,745,453 | 4cfd70132527b80933105e5829dc9034eaab9573482e2e680abbab6130244817 |
+
+**Extracted JSON files:**
+- dataset_coco.json (144,186,139 bytes)
+- dataset_flickr30k.json (38,318,553 bytes)
+- dataset_flickr8k.json (9,035,673 bytes)
+
+**Verification:** ZIP archive verified (deflate), extracted clean, 3 JSON files present. ✓
+
+---
+
+## Task 6: MobileCLIP2 ONNX
+
+**Status:** ✅ OK  
+**Location:** `/Users/magic/Creations/ImgTag/models/mobileclip2/`  
+**Repo:** https://huggingface.co/plhery/mobileclip2-onnx/ (research-only license, gitignored)
+
+| File | Size (bytes) | SHA256 |
+|------|-------------|--------|
+| config.json | 129 | f511b1df41dd6ef377d986ed5553908fb5d665330ee753d67287fd0eb9302f96 |
+| preprocessor_config.json | 284 | 8c1c02280bd0edb8257c70c475e1cf06d936f5ff3a37bc13d1e9db9674356803 |
+| s0_vision_model.onnx | 45,555,784 | 13d20ebfa8a8f63890eb2727fe4dc63009ff970f43e0f7d9d2ed999659f70c8a |
+| s0_text_model.onnx | 254,053,669 | df590d47744f2ee9f3ccb67c4414d17419568c05bca0c4d166f2faeedf8b92f3 |
+| s2_vision_model.onnx | 143,044,797 | a841f72c5a5085748bbe271a1d5718aba877822a15cba865bdbd0d37036b849e |
+| s2_text_model.onnx | 254,053,669 | 622f10372bca71b5017f2efc5f8c2886610a2592b636de8984d717f03213f031 |
+| tokenizer.json | 2,224,041 | b556ac8c99757ffb677208af34bc8c6721572114111a6e0aaf5fa69ff0b8d842 |
+
+**Verification:** All files binary (`file` says "data"), all >1MB. ✓
+
+---
+
 ## Summary Table
 
 | Task | Model | Status | Files | Total Size |
@@ -91,8 +130,10 @@ Verify: rclip --help → OK
 | 2 | SigLIP v1 base | ✅ OK | 7 | ~520 MB |
 | 3 | OpenCLIP ViT-B/32 | ✅ OK | 7 | ~625 MB |
 | 4 | UForm English (uform3) | ✅ OK | 4 | ~83 MB |
+| 5 | Karpathy splits | ✅ OK | 4 (ZIP + 3 JSON) | ~230 MB |
+| 6 | MobileCLIP2 ONNX | ✅ OK | 7 | ~700 MB |
 
-**Total downloaded:** ~1.2 GB  
+**Total downloaded:** ~2.15 GB  
 **All files validated:** ✅ Binary, >1MB, SHA256 logged
 
 ---
@@ -100,6 +141,8 @@ Verify: rclip --help → OK
 ## Notes
 
 - UForm: uform-vl-english repo lacks ONNX files (only config/tokenizer). Used uform3-image-text-english-base instead (image_encoder.onnx + text_encoder.onnx).
+- Karpathy: ZIP size matched expected 36,745,453 bytes.
+- MobileCLIP2: S0 + S2 models fetched (larger variants available: b, l14).
 - All configs & tokenizers fetched from repo roots as specified.
 - SHA256SUMS files written to each model directory.
-- No HTML errors detected (all `file` commands returned "data" for ONNX).
+- No HTML errors detected (all `file` commands returned "data" for ONNX/archives).
