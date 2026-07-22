@@ -5,4 +5,7 @@ __pycache__/
 .DS_Store
 models/*.onnx
 models/*.bin
+models/**/*.onnx
+models/**/*.bin
+models/**/tokenizer.json
 data/

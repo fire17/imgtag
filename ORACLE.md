@@ -45,6 +45,20 @@ highest-bar protocol — verbatim vision, budgets as tests, honest verification,
   never in published artifacts), rclip (system-level head-to-head baseline).
   Winner chosen by bench on: index img/s, search ms, precision@10, hypernym recall, FP
   rate, RSS, disk. Revisit if: FG-CLIP2/OpenVision v1 export cheaply and beat the set.
+  **Measured refinements (runtime lane, 2026-07-22, research/runtime.md — first-party):**
+  quantization recipe = SELF-quantized dynamic weight-only int8, MatMul-only,
+  `MatMulConstBOnly`, QUInt8, per-tensor (measured 113 vs 40 img/s fp32, ranking
+  agreement 0.96 — beats off-the-shelf HF int8 on speed AND accuracy; static/calibrated
+  quant = the one untested axis, gets a bench slot). **FIDELITY GATE (CI): cos ≥0.98 AND
+  top-1 NN ranking agreement ≥0.90 vs fp32** — ranking agreement is the metric that
+  matters, mean cosine hides rank flips (per-channel scored 0.83 agreement at cos 0.955).
+  ☠️ BLACKLIST: `Xenova/mobileclip_s0` vision int8 ONNX — numerically broken (cos 0.008
+  vs its own fp32) AND 3.4× slower; MobileCLIP vision towers stay fp32 or self-quantized
+  behind the gate (Ente's fp32-vision/int8-text split independently corroborates).
+  Parallelism geometry: **N worker processes × 1 ORT intra-op thread** (12×1 = 181 img/s
+  e2e proxy; more ORT threads REGRESSES past perf-core count). Embedding storage: fp16
+  shards (measured lossless, cos 1.000000); compute in fp32 BLAS chunks (narrow-store/
+  wide-compute; numpy int8/fp16 matmul falls off BLAS = 6–30× slower).
 - **ADR-5 Resident daemon + warm text tower.** Anti-pattern proven: immich unloads models
   after 300s → 60–70s cold search. We keep the text tower resident (few hundred MB max),
   LRU query cache, tag table precomputed. CLI talks to the daemon when present, else
@@ -143,6 +157,8 @@ highest-bar protocol — verbatim vision, budgets as tests, honest verification,
 | Old-machine claims challenged | M | credibility | — | ⌂ numbers always labeled "projected, NOT live-verified" until real hardware run |
 | A lane half-succeeds and lies (looks done, isn't) | M | compounding | orchestrator spot-verification | every builder claim re-verified by independent run (fable credo #13; F-verify) |
 | Darwin loop optimizes a metric by breaking another | M | regression | full bench suite each round | DARWIN.md logs per-round FULL budget table; any red = revert round |
+| Bench numbers are noise from machine load (measured: thread sweep swung 3× at load 47) | H | wrong optimization decisions | record `os.getloadavg()` with every bench row | **bench refuses to run (or marks rows UNRELIABLE) when 1-min load > cores×0.6; darwin loops gate on this** |
+| Zero x86 validation exists (runtime lane R6) while primary target IS x86 | H | wrong quant/thread defaults shipped | — | `imgtag doctor` autotunes on the real machine (ADR-10d); offer user: run research/bench_scripts/ + bench on the actual Linux server (one command) — the single highest-value validation available |
 
 ## 6. Invariants & verification recipes
 
@@ -187,6 +203,10 @@ exceeds its timebox; (f) you catch yourself guessing a number you could measure.
 - 2026-07-22 10:45 · User constraint mid-mission: primary deploy = shared Linux x86 8GB
   no-GPU server, co-tenants must not slow. → ADR-10, B8/B15 tightened, Wave A briefs
   amended by broadcast. Lesson: the harbor moved; the map moved with it same-pass.
+- 2026-07-22 10:50 · runtime lane's completion message + report were delayed ~20min in
+  routing (report on disk 10:29Z, message landed 10:49Z); orchestrator had declared the
+  lane complete-via-cross-checks in the gap. Lesson: disk truth led message truth by 20
+  minutes — check the file BEFORE pinging, and re-check before declaring a lane missing.
 
 ---
 
