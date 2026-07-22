@@ -12,6 +12,11 @@ dependencies = [
   "xxhash>=3.4",
 ]
 
+[project.optional-dependencies]
+# ADR-7: HEIC is an OPTIONAL extra. Without it, .heic files are skipped with a named,
+# counted, actionable error — never a silent gap in the index.
+heic = ["pillow-heif>=0.16"]
+
 [project.scripts]
 imgtag = "imgtag.cli:main"
 
