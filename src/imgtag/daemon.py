@@ -99,7 +99,7 @@ PARAMS = {  # unknown query params are a 400, never silently ignored (b-app foun
     "/api/moderation": {"dataset", "limit", "source"},
     "/api/images": {"dataset", "offset", "limit"},
     "/api/thumb": {"s"},
-    "/api/image": set(),  # /api/image/<ds>/<id>/tracks takes no query params
+    "/api/image": {"source"},  # /api/image/<ds>/<id>/tracks?source=stored|current
 }
 
 
@@ -481,7 +481,8 @@ class Handler(BaseHTTPRequestHandler):
                 if len(parts) != 6:
                     raise ValueError("usage: /api/image/<dataset>/<image_id>/tracks")
                 self.json(d.searcher.image_tracks(
-                    urllib.parse.unquote(parts[3]), urllib.parse.unquote(parts[4])))
+                    urllib.parse.unquote(parts[3]), urllib.parse.unquote(parts[4]),
+                    source=(q.get("source") or ["stored"])[0]))
             elif u.path == "/" or (APP_DIR / u.path.lstrip("/")).is_file() or u.path.startswith("/app/"):
                 self.static(u.path)  # assets resolve at BOTH / and /app/ (b-app relative refs)
             else:

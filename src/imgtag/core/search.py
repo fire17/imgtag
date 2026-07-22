@@ -340,6 +340,7 @@ class Searcher:
         self._tracks: dict[str, tuple[tuple, dict]] = {}  # moderation scores per generation
         self._track_vecs: dict = {}
         self._heads: dict = {}  # arbitrated track heads (drugs), cached per (category, model_sha)
+        self._dflags: dict = {}  # store.dataset_flags cached per dataset generation (panel fast path)
         self._qvec = lru_cache(maxsize=cache)(self._embed_uncached)
         self._own_backend = backend is None  # only drop what we loaded ourselves
         self.text_loaded = False
@@ -663,37 +664,86 @@ class Searcher:
         out.sort(key=lambda f: tier_rank(f["tier"]))
         return out
 
-    def image_tracks(self, dataset: str, image_id: str) -> dict:
+    def image_tracks(self, dataset: str, image_id: str, source: str = "stored") -> dict:
         """Every registered track's confidence for ONE image (VISION-ADDENDA 14:16Z).
 
-        EVERY track appears — including ones scoring ~0 (the user said "each one of our
-        tracks") — so a panel can rank the full set and show "no signal" rather than
-        omitting. A track that fired reports its winning tier + label; one that scored but
-        cleared nothing reports ``tier: "none"``; one whose scorer is unavailable (a
-        dedicated head not warm, no sidecar yet) reports ``scored: false`` so the overlay
-        shows "score pending", never a fake 0. p is the CALIBRATED probability per track —
-        comparable within ``kind`` (all moderation on the margin scale, content on cosine);
-        a caller should rank within kind, not blindly across (moderation vs content differ).
+        Two sources (ADR-14 two-source split), selected by ``source``:
+
+        * ``stored`` (DEFAULT) — the INDEX-TIME tiers derived from the score sidecars
+          (``store.dataset_flags``): a column read + vectorized derive, ~13ms and cached,
+          vs the ~7s a full live re-scan costs. This is what the user feels on the first
+          click. Labeled ``source: "flagged at indexing"``. A track with no usable sidecar
+          reads ``pending`` -> ``scored: false`` (the "score pending" state).
+        * ``current`` — a live re-scan with today's detectors (my ``track_scores``): slower,
+          but reflects the current spec/thresholds. The panel's "re-scan" affordance.
+
+        EVERY registered track appears (the user said "each one of our tracks"), ranked
+        fired-first then by p. p is comparable WITHIN ``kind`` (moderation vs content differ
+        in scale), so a caller ranks within kind, not blindly across.
         """
         snap = self.snapshot(dataset)
         row = next((j for j, r in enumerate(snap.ids) if r["image_id"] == image_id), None)
         if row is None:
             raise FileNotFoundError(f"image {image_id!r} not in dataset {dataset!r}")
         spec = tracks().get("categories") or {}
-        tr = self.track_scores(dataset) if spec else {"categories": {}}
-        cats = tr.get("categories") or {}
+        out = (self._image_tracks_stored(dataset, spec, row) if source == "stored"
+               else self._image_tracks_current(dataset, spec, row))
+        out.sort(key=lambda e: (e.get("tier") in (None, "none", "pending"),
+                                tier_rank(e.get("tier") or "match"), -(e.get("p") or 0.0)))
+        return {"image_id": image_id, "dataset": dataset, "path": snap.ids[row]["path"],
+                "source": "flagged at indexing" if source == "stored" else "current scan",
+                "tracks": out}
+
+    def _kind(self, cfg: dict) -> str:
+        return "content" if cfg.get("content_track") else "moderation"
+
+    def _image_tracks_stored(self, dataset: str, spec: dict, row: int) -> list:
+        """Fast path: per-image tiers from the score sidecars (store.dataset_flags), the
+        index-time view — a memmap read + vectorized derive, cached, no text tower."""
+        from .store import dataset_flags
+
+        flags = self._stored_flags(dataset, dataset_flags)
+        out = []
+        for name, cfg in spec.items():
+            f = flags.get(name)
+            entry = {"category": name, "label": cfg.get("label", name), "kind": self._kind(cfg)}
+            tier = str(f["tiers"][row]) if f is not None and row < len(f["tiers"]) else None
+            if f is None or tier in (None, "pending"):  # no usable sidecar -> score pending
+                entry.update(scored=False, p=None, tier=None,
+                             calibration=cfg.get("calibration", "unfitted"))
+            else:
+                sc = f.get("scores")
+                # scores is 1-D (a single p) for single-col tracks, 2-D (raw margins/counts)
+                # for multi-col — only a 1-D scalar is a meaningful single confidence here.
+                val = sc[row] if sc is not None and row < len(sc) else None
+                p = round(float(val), 4) if val is not None and np.ndim(val) == 0 else None
+                entry.update(scored=True, p=p, tier=tier,
+                             calibration=f.get("cfg_calibration", cfg.get("calibration", "unfitted")),
+                             spec_calibration=cfg.get("calibration", "unfitted"),
+                             enforcement_ready=bool(cfg.get("enforcement_ready", False)))
+            out.append(entry)
+        return out
+
+    def _stored_flags(self, dataset: str, loader):
+        """dataset_flags cached per manifest generation (a repeat image click is instant)."""
+        stamp = self._manifest_stamp(dataset)
+        hit = self._dflags.get(dataset)
+        if hit is None or hit[0] != stamp:
+            self._dflags[dataset] = (stamp, loader(dataset, self.home))
+        return self._dflags[dataset][1]
+
+    def _image_tracks_current(self, dataset: str, spec: dict, row: int) -> list:
+        """Live re-scan: the current-scan source (my track_scores)."""
+        cats = (self.track_scores(dataset).get("categories") or {}) if spec else {}
         out = []
         for name, cfg in spec.items():
             c = cats.get(name)
-            entry = {"category": name, "label": cfg.get("label", name),
-                     "kind": "content" if (cfg.get("content_track") or c and not c["moderation"])
-                     else "moderation"}
-            if not c:  # spec present but reader could not score it (head-only track, no sidecar)
+            entry = {"category": name, "label": cfg.get("label", name), "kind": self._kind(cfg)}
+            if not c:
                 entry.update(scored=False, p=None, tier=None,
                              calibration=cfg.get("calibration", "unfitted"))
                 out.append(entry)
                 continue
-            # winning tier = the highest-severity tier that fired; else "none"
             fired = [t for t in c["tiers"] if c["is"][t][row]]
             tier = min(fired, key=tier_rank) if fired else "none"
             p = max(float(c["p"][t][row]) for t in c["tiers"]) if c["tiers"] else 0.0
@@ -707,11 +757,7 @@ class Searcher:
                     if 0 <= k < len(lab):
                         entry["label_value"] = lab[k]
             out.append(entry)
-        # rank: fired first (by severity), then by p — the panel's default order
-        out.sort(key=lambda e: (e.get("tier") in (None, "none"), tier_rank(e.get("tier") or "match"),
-                                -(e.get("p") or 0.0)))
-        return {"image_id": image_id, "dataset": dataset,
-                "path": snap.ids[row]["path"], "tracks": out}
+        return out
 
     def track_state(self, dataset: str, category: str) -> dict:
         """One category's calibration state — the SAME value /api/moderation reports, so

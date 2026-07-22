@@ -474,3 +474,19 @@ def test_image_tracks_endpoint(live):
     assert st == 404 and r["exit_code"] == 4
     st, r = D.request("GET", "/api/image/d1/x/tracks?bogus=1", home=live)
     assert st == 400  # unknown param rejected
+
+
+def test_image_tracks_source_param(live):
+    """The per-image panel defaults to the stored (index-time) source; ?source=current
+    triggers a live re-scan. Both return the same shape."""
+    iid = get(live, "/api/images?dataset=d1&limit=1")[1]["items"][0]["image_id"]
+    st, r = D.request("GET", f"/api/image/d1/{iid}/tracks", home=live)
+    assert st == 200 and r["source"] == "flagged at indexing"  # default = stored
+    st, r2 = D.request("GET", f"/api/image/d1/{iid}/tracks?source=current", home=live)
+    assert st == 200 and r2["source"] == "current scan"
+    # both carry every registered track with the same shape
+    assert {t["category"] for t in r["tracks"]} == {t["category"] for t in r2["tracks"]}
+    for t in r["tracks"]:
+        assert {"category", "label", "kind", "tier", "scored"} <= set(t)
+    st, r = D.request("GET", f"/api/image/d1/{iid}/tracks?source=bogus&x=1", home=live)
+    assert st == 400  # unknown param rejected

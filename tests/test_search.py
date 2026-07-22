@@ -643,8 +643,8 @@ def test_image_tracks_lists_every_track_ranked(home, monkeypatch):
     be = build(home, "d1", ["car"] + ["tree"] * 19)  # row 0 is a "car" (weapons/violation)
     s = searcher(home, be)
     iid = s.snapshot("d1").ids[0]["image_id"]
-    r = s.image_tracks("d1", iid)
-    assert r["image_id"] == iid and r["dataset"] == "d1"
+    r = s.image_tracks("d1", iid, source="current")  # synthetic dataset has no sidecars
+    assert r["image_id"] == iid and r["dataset"] == "d1" and r["source"] == "current scan"
     cats = {t["category"] for t in r["tracks"]}
     assert cats == {"weapons", "sports", "drugs"}  # ALL tracks present, even ~0 ones
     for t in r["tracks"]:
