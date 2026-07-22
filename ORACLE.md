@@ -677,6 +677,16 @@ label, or to compare a dev-machine number against a target-profile (🐧) budget
   before any file collision; successors TaskStop'd, originals kept (richer context).
   LAW: before spawning a successor for a dead lane, `ps aux | grep 'agent-id <name>'`
   AND TaskStop the original name first; a "dead" lane is one message away from alive.
+- 2026-07-22 14:52Z · **git add -A sweeps recurred 3× in one afternoon** under parallel
+  committers (45c10f6 hijacked sports2's stage; dd906c9 [b-bench] swept nudity3's test;
+  755f8e9 [b-corpus] swept b-engine's indexer/store edits). All benign THIS time (content
+  verified in HEAD each time) but the failure mode is committing a sibling's half-finished
+  edit under your name. Invariant re-affirmed + offenders notified: `git add <explicit
+  paths>` + `git commit -- <paths>`, never -A, never -a. Also: quiet-window postmortem —
+  bench's perf pass NEVER fired (GO ping sat batched in its inbox; the 17:43 results file
+  was cached-report regeneration). Ruling: proxy img/s stays ADVISORY, B1 locks on the 🐧
+  server per LOCK LAW; future windows require the "WINDOW OPEN" ACK handshake before the
+  hold counts as spent.
 
 ---
 
