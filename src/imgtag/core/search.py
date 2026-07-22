@@ -46,12 +46,26 @@ TEXT_FEATURE = "z"  # "z" = per-query corpus z-score (ADR-3 as written) | "cos" 
 TAU = 0.5  # probability floor for "this is a match"
 THETA_SYN = 0.90  # near-tag rule: inherit a tag's calibration only at cos >= theta_syn
 K_STD = 3.0  # dataset-layer effective tau = max(tau_tag, mean + K_STD*std)
+# Counting a tag as PRESENT for the ALL-SOME-ANY spectrum is ranking, not gating, and gets
+# its own (softer) floor. MEASURED on unsplash-demo (N=2000): at 3 sigma NO image clears two
+# tags at once — a single CLIP embedding splits its mass across concepts — so beach+sunset
+# co-occurs 0 times at 3.0, 1 at 2.5, 16 at 2.0. A gate floor would make ALL unreachable and
+# the whole spectrum collapse to ANY. Applies ONLY to unfitted tags; a CAL-SET-fitted tau
+# replaces it. Uncalibrated tags still may never gate or veto (ADR-3 tiers).
+SPECTRUM_K = 2.0
 MAX_TAGS = 32  # candidate tags per query (bounds the [N,C] tag matmul)
+NGRAM = 3  # longest multi-word tag a space-separated tag list may name ("night sky")
 DATA = Path(__file__).resolve().parent.parent / "data"
 
 
 class CalibrationMismatchError(RuntimeError):
     """Manifest calib_sha/calib_model_sha != the tag table on disk (CLI exit 5)."""
+
+
+def _order(h: dict) -> tuple:
+    """Result order: more query tags matched first (ALL > SOME > ANY), then probability,
+    then image id — the id tiebreak is what makes a result list byte-identical (B18e)."""
+    return (-int((h.get("why") or {}).get("tags_matched", 0)), -h["p"], h["image_id"])
 
 
 def _sigmoid(x) -> np.ndarray:
@@ -119,8 +133,11 @@ class TagTable:
         self.model_sha = meta.get("model_sha")
         self.calib_sha = meta.get("calib_sha") or meta.get("sha")
         self.tier: list[str] = list(meta.get("tier") or ["uncalibrated"] * n)
-        self.tau = np.asarray(meta.get("tau") or [TAU] * n, np.float32)
-        self.platt = np.asarray(meta.get("platt") or [[1.0, 0.0]] * n, np.float32)
+        # tau/platt are per-tag and may be null: "not calibrated yet", never a guessed
+        # threshold (tags.py's law). A null tag falls back to dataset-layer stats below
+        # and can never gate, whatever its tier says.
+        self.tau: list = list(meta.get("tau") or [None] * n)
+        self.platt: list = list(meta.get("platt") or [None] * n)
         self.theta_syn = float(meta.get("theta_syn", THETA_SYN))
         self.text_logistic = tuple(meta.get("text_logistic") or (TEXT_A, TEXT_B))
         self.text_feature = meta.get("text_feature", TEXT_FEATURE)
@@ -128,7 +145,8 @@ class TagTable:
         self.index = {name: i for i, name in enumerate(self.names)}
 
     def calibrated(self, i: int) -> bool:
-        return self.tier[i] == "calibrated"
+        """Gating-eligible: calibrated TIER *and* an actual fit on disk (ADR-3)."""
+        return self.tier[i] == "calibrated" and bool(self.platt[i]) and self.tau[i] is not None
 
     @classmethod
     def load(cls, model_sha: str, home: Path | None = None) -> "TagTable | None":
@@ -236,6 +254,39 @@ class Searcher:
         return True
 
     # -- tag path --------------------------------------------------
+    def concepts(self, table: TagTable, query: str) -> list[tuple[str, list[int]]]:
+        """Split a SPACE-SEPARATED TAG LIST into concepts — the ALL-SOME-ANY spectrum.
+
+        VISION-ADDENDA 2026-07-22 ~12:12Z (verbatim): "in the search i should be able to
+        use space to enter more tags (show results that have all tags first, then
+        decending for higher n/m found tags number, then finally results from each tag
+        (like any) … its like a specturm between ALL-SOME-ANY in tag-search".
+
+        Multi-tag mode needs EVERY content token to name a tag (directly or through the
+        hypernym table). That test is what keeps ADR-3 §3 intact: "my dog wearing a santa
+        hat" contains non-tag words, so it stays one natural-language query on the text
+        path and never inherits `dog`'s threshold — while "dog beach sunset" is three
+        exact tag names and is scored as three concepts.
+        """
+        toks = content_tokens(query)
+        if len(toks) < 2:
+            return []
+        out: list[tuple[str, list[int]]] = []
+        i = 0
+        while i < len(toks):
+            # greedy longest match first: the vocabulary has multi-word tags ("ocean wave",
+            # "night sky"), so "ocean wave sunset" is TWO concepts, not three unknown words.
+            for span in range(min(NGRAM, len(toks) - i), 0, -1):
+                term = " ".join(toks[i : i + span])
+                idxs = [table.index[n] for n in expand(term) if n in table.index]
+                if idxs:
+                    out.append((term, idxs[:MAX_TAGS]))
+                    i += span
+                    break
+            else:
+                return []  # a non-tag word -> not a tag list; text path owns this query
+        return out if len(out) > 1 else []
+
     def _name_candidates(self, table: TagTable, query: str) -> list[tuple[int, str]]:
         """Tags the query NAMES — exact or via the static hypernym table. No embedding
         involved, so a named-tag query is served with zero text-encoder involvement."""
@@ -264,22 +315,39 @@ class Searcher:
         return out
 
     def _tag_scores(self, snap, table: TagTable, idx: list[int], manifest: dict):
+        """[N,C] calibrated probabilities + each tag's effective threshold.
+
+        Two layers, exactly as ADR-3 orders them. A tag WITH a model-layer Platt fit uses
+        it (tags.py's convention, ``p = sigmoid(-(A*s+B))`` — imported, never re-derived)
+        and its fitted max-F1 tau, raised by the dataset layer when the manifest carries
+        per-tag stats. A tag WITHOUT a fit gets the dataset layer alone: its own score
+        distribution over THIS corpus, z-scored through the same global logistic. No
+        per-tag number is ever invented, and an unfitted tag can never gate.
+        """
+        from .tags import platt_apply
+
         T = np.ascontiguousarray(np.asarray(table.emb)[idx].T, np.float32)  # [D, C]
         cos = np.asarray(snap.emb @ T, np.float32).reshape(len(snap.ids), len(idx))
-        P = _sigmoid(cos * table.platt[idx, 0] + table.platt[idx, 1])  # [N, C]
+        a, b = table.text_logistic
         stats = manifest.get("tag_stats") or {}
-        eff = np.asarray(
-            [
-                max(
-                    float(table.tau[i]),
-                    float((stats.get(table.names[i]) or {}).get("mean", 0.0))
-                    + K_STD * float((stats.get(table.names[i]) or {}).get("std", 0.0)),
-                )
-                for i in idx
-            ],
-            np.float32,
-        )
-        return P, eff, cos
+        P = np.empty_like(cos)
+        eff = np.empty(len(idx), np.float32)
+        present = np.empty(len(idx), np.float32)  # softer floor, ranking only
+        for j, i in enumerate(idx):
+            st = stats.get(table.names[i]) or {}
+            if table.platt[i]:  # model layer: fitted per-tag sigmoid + max-F1 tau
+                P[:, j] = platt_apply(cos[:, j], table.platt[i])
+                floor = float(table.tau[i]) if table.tau[i] is not None else TAU
+                if st:  # dataset layer can only RAISE the bar, never lower it
+                    floor = max(floor, float(st.get("mean", 0.0)) + K_STD * float(st.get("std", 0.0)))
+                eff[j] = present[j] = floor  # a fitted tau is the right bar for both
+            else:  # dataset layer alone
+                mu = float(st["mean"]) if "mean" in st else float(cos[:, j].mean())
+                sd = float(st["std"]) if "std" in st else float(cos[:, j].std())
+                P[:, j] = _sigmoid(a * ((cos[:, j] - mu) / max(sd, 1e-6)) + b)
+                eff[j] = float(_sigmoid(a * K_STD + b))
+                present[j] = float(_sigmoid(a * SPECTRUM_K + b))
+        return P, eff, cos, present
 
     # -- the query -------------------------------------------------
     def search_one(self, query: str, dataset: str, k: int = 50, strict: bool = False,
@@ -302,6 +370,14 @@ class Searcher:
                     "text_tower": "skipped", "load_ms": 0.0}
         table = self.tags(man)
         cands = self._name_candidates(table, query) if table is not None else []
+        groups = self.concepts(table, query) if table is not None else []
+        if groups:
+            # A tag LIST is not a natural-language compound: each token is itself a tag, so
+            # every group's tags are candidates (ADR-3 §3 still bars borrowing a threshold
+            # through the near-tag rule — see concepts()).
+            named = {i: "tag-list" for _, idxs in groups for i in idxs}
+            named.update(dict(cands))
+            cands = sorted(named.items())[:MAX_TAGS]
         use_text = text == "always" or (text != "never" and not cands)
 
         q, load_ms, s, z = None, 0.0, None, np.zeros(n, np.float32)
@@ -320,14 +396,22 @@ class Searcher:
         col = np.full(n, -1, np.int32)  # winning tag column per row, -1 = no tag path
         gated = False  # a CALIBRATED tag cleared its effective tau somewhere
         tag_cos = None
+        matched = np.zeros(n, np.int32)  # ALL-SOME-ANY: how many query tags this row has
+        n_concepts = len(groups)
         if cands:
             idx = [i for i, _ in cands]
-            P, eff, tag_cos = self._tag_scores(snap, table, idx, man)
+            P, eff, tag_cos, present = self._tag_scores(snap, table, idx, man)
             col = P.argmax(1).astype(np.int32)
             p_tag = P[np.arange(n), col].astype(np.float32)
             calib = np.asarray([table.calibrated(i) for i in idx])
             if calib.any():
                 gated = bool((P[:, calib] >= eff[calib]).any())
+            if n_concepts:  # rank by ALL first, then n/m descending, then ANY
+                pos = {i: j for j, i in enumerate(idx)}
+                for _, tag_idxs in groups:
+                    cols = [pos[i] for i in tag_idxs if i in pos]
+                    if cols:
+                        matched += (P[:, cols] >= present[cols]).any(1)
             if strict:  # --strict: calibrated tags become a hard AND
                 keep = np.ones(n, bool)
                 for j, i in enumerate(idx):
@@ -337,7 +421,10 @@ class Searcher:
                 p_text = np.where(keep, p_text, 0.0).astype(np.float32)
 
         p = np.maximum(p_tag, p_text)
-        top = np.argpartition(-p, min(k, n) - 1)[:k] if k < n else np.arange(n)
+        # ALL-SOME-ANY ordering (VISION-ADDENDA): tag-count is the PRIMARY key, probability
+        # the tiebreak. p is in [0,1), so `matched + p` orders both in one pass.
+        rank = matched.astype(np.float32) + p
+        top = np.argpartition(-rank, min(k, n) - 1)[:k] if k < n else np.arange(n)
         hits = []
         for i in top:
             i = int(i)
@@ -353,6 +440,10 @@ class Searcher:
                 why = {"path": "text"}
                 score = float(s[i])
             why.update(p_tag=round(float(p_tag[i]), 4), p_text=round(float(p_text[i]), 4), z=round(float(z[i]), 3))
+            if n_concepts:
+                why.update(tags_matched=int(matched[i]), tags_total=n_concepts,
+                           spectrum="all" if matched[i] == n_concepts else
+                                    ("some" if matched[i] > 1 else "any"))
             hits.append(
                 {
                     "image_id": rec["image_id"],
@@ -364,7 +455,7 @@ class Searcher:
                     "why": why,
                 }
             )
-        hits.sort(key=lambda h: (-h["p"], h["image_id"]))  # B18(e) determinism: ties by id
+        hits.sort(key=_order)  # ALL-SOME-ANY, then p, then image id (B18e determinism)
         return {"hits": hits[:k], "gated": gated, "indexed": n, "best_p_text": float(p_text.max()),
                 "text_tower": ("loaded" if load_ms else "warm") if use_text else "skipped",
                 "load_ms": load_ms}
@@ -386,7 +477,7 @@ class Searcher:
             best_text = max(best_text, r["best_p_text"])
             load_ms += r["load_ms"]
             tower = r["text_tower"] if tower == "skipped" else tower
-        hits.sort(key=lambda h: (-h["p"], h["image_id"]))
+        hits.sort(key=_order)
         return {
             "query": query,
             "tookMs": round((time.perf_counter() - t0) * 1000, 2),

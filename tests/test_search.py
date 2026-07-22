@@ -163,6 +163,8 @@ def test_snapshot_isolation_during_concurrent_append(home):
 
 
 def write_tags(home, model_sha, names, tiers, platt, taus, extra=None):
+    """Platt pairs follow tags.py's convention: p = sigmoid(-(A*s + B)), so a tag that
+    should fire on a high cosine has a NEGATIVE A (e.g. [-12, 6] -> p(1.0)=0.997)."""
     d = home / "models" / model_sha
     d.mkdir(parents=True, exist_ok=True)
     be = FakeBackend()
@@ -176,7 +178,7 @@ def write_tags(home, model_sha, names, tiers, platt, taus, extra=None):
 def test_tag_path_wins_and_explains(home):
     be = build(home, "d1", ["cat"] * 5 + ["car"] * 15)
     write_tags(home, be.model_sha, ["cat", "car"], ["calibrated"] * 2,
-               [[12.0, -6.0]] * 2, [0.5, 0.5])
+               [[-12.0, 6.0]] * 2, [0.5, 0.5])
     r = searcher(home, be).search("cat", "d1", k=5)
     assert r["hits"] and r["hits"][0]["why"]["path"] == "tag"
     assert r["hits"][0]["why"]["tag"] == "cat" and r["hits"][0]["why"]["tier"] == "calibrated"
@@ -186,14 +188,14 @@ def test_tag_path_wins_and_explains(home):
 def test_uncalibrated_tag_never_gates(home):
     """An uncalibrated tag may boost/explain but may not create an honest no-match verdict."""
     be = build(home, "d1", ["cat"] * 20)
-    write_tags(home, be.model_sha, ["boat"], ["uncalibrated"], [[12.0, -6.0]], [0.5])
+    write_tags(home, be.model_sha, ["boat"], ["uncalibrated"], [[-12.0, 6.0]], [0.5])
     r = searcher(home, be).search("boat", "d1", k=5)
     assert r["no_match"] is True and r["hits"] == []
 
 
 def test_calibration_mismatch_refuses_loudly(home):
     be = build(home, "d1", ["cat"] * 5)
-    write_tags(home, be.model_sha, ["cat"], ["calibrated"], [[12.0, -6.0]], [0.5])
+    write_tags(home, be.model_sha, ["cat"], ["calibrated"], [[-12.0, 6.0]], [0.5])
     man_p = home / "datasets" / "d1" / "manifest.json"
     man = json.loads(man_p.read_bytes())
     man["calib_sha"] = "a-different-calibration"
@@ -221,7 +223,7 @@ def test_compound_query_never_inherits_a_component_tag(home):
     assert S.is_compound("my dog wearing a santa hat")
     assert not S.is_compound("a dog")
     be = build(home, "d1", ["dog"] * 10)
-    write_tags(home, be.model_sha, ["dog"], ["calibrated"], [[12.0, -6.0]], [0.5],
+    write_tags(home, be.model_sha, ["dog"], ["calibrated"], [[-12.0, 6.0]], [0.5],
                extra={"theta_syn": 0.5})
     s = searcher(home, be)
     simple = s.search("dog", "d1", k=3)
@@ -237,3 +239,65 @@ def test_hypernym_expansion_from_the_static_table():
     assert "dog" in S.expand("animal")
     assert "car" in S.expand("vehicle")
     assert S.expand("nonexistent-term-xyz") == ["nonexistent-term-xyz"]
+
+
+# ---------------------------------------------------------- ALL-SOME-ANY spectrum
+
+
+def test_all_some_any_spectrum(home):
+    """VISION-ADDENDA 2026-07-22 ~12:12Z (verbatim): space-separated tags rank ALL first,
+    then descending by how many of the m tags were found, then ANY."""
+    labels = ["cat dog car", "cat dog", "cat", "dog", "car", "tree", "misc", "misc"]
+    be = build(home, "d1", labels)
+    write_tags(home, be.model_sha, ["cat", "dog", "car"], ["calibrated"] * 3,
+               [[-12.0, 6.0]] * 3, [0.5] * 3)
+    r = searcher(home, be).search("cat dog car", "d1", k=8)
+    got = [(h["why"]["tags_matched"], h["why"]["spectrum"]) for h in r["hits"]]
+    assert got[0] == (3, "all"), got                       # ALL first
+    assert [m for m, _ in got] == sorted([m for m, _ in got], reverse=True)  # then descending
+    assert got[-1][0] == 1 and got[-1][1] == "any"         # ANY last
+    assert r["hits"][0]["why"]["tags_total"] == 3
+    # every row that owns at least one of the three tags is present; "tree"/"misc" are not
+    assert len(r["hits"]) == 5
+
+
+def test_spectrum_only_for_real_tag_lists(home):
+    """A natural-language query keeps ADR-3 §3: it is NOT split into tags."""
+    be = build(home, "d1", ["dog"] * 5 + ["misc"] * 15)
+    write_tags(home, be.model_sha, ["dog", "cat"], ["calibrated"] * 2, [[-12.0, 6.0]] * 2, [0.5] * 2)
+    s = searcher(home, be)
+    assert s.concepts(s.tags(s.snapshot("d1").manifest), "dog cat") != []
+    assert s.concepts(s.tags(s.snapshot("d1").manifest), "dog wearing santa hat") == []
+    r = s.search("dog wearing santa hat", "d1", k=3)
+    assert all("tags_matched" not in h["why"] for h in r["hits"])
+
+
+def test_unfitted_tags_fall_back_to_dataset_layer_and_never_gate(home):
+    """b-bench ships tau/platt as null until CAL-SET runs: the tag must still be usable
+    for ranking (dataset-layer z-score) and must never gate or claim calibration."""
+    be = build(home, "d1", ["cat"] * 2 + ["misc"] * 30)
+    d = home / "models" / be.model_sha
+    d.mkdir(parents=True, exist_ok=True)
+    np.stack([be._vec("cat")]).astype(np.float32).tofile(d / "tags.f32")
+    (d / "tags.json").write_text(json.dumps({
+        "names": ["cat"], "dim": DIM, "model_sha": be.model_sha,
+        "tier": ["calibrated"], "tau": [None], "platt": [None]}))  # tier says yes, fit says no
+    s = searcher(home, be)
+    table = s.tags(s.snapshot("d1").manifest)
+    assert table.calibrated(0) is False  # no fit -> not gating-eligible, whatever the tier
+    r = s.search("cat", "d1", k=5)
+    assert r["hits"] and r["hits"][0]["why"]["path"] == "tag"  # still ranks
+    assert r["hits"][0]["p"] > 0.5
+
+
+def test_all_outranks_a_higher_probability_any(home):
+    """The verbatim ordering claim: tag COUNT beats probability. A row with 2/2 tags sits
+    above a row with 1/2 even when the 1/2 row scores higher."""
+    labels = ["cat dog"] + ["cat"] * 4 + ["misc"] * 20
+    be = build(home, "d1", labels)
+    write_tags(home, be.model_sha, ["cat", "dog"], ["calibrated"] * 2, [[-12.0, 6.0]] * 2, [0.5] * 2)
+    r = searcher(home, be).search("cat dog", "d1", k=6)
+    top, rest = r["hits"][0], r["hits"][1:]
+    assert top["why"]["tags_matched"] == 2 and top["why"]["spectrum"] == "all"
+    assert rest and max(h["p"] for h in rest) > top["p"]  # a lower-ranked row scores HIGHER
+    assert all(h["why"]["tags_matched"] == 1 for h in rest)
