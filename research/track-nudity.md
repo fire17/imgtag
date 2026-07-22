@@ -424,7 +424,14 @@ swimwear-review from the tag path**. This head's own review band should be read 
 
 ## 10. Datasets & sub-category labeling (user 2026-07-22: "no true positives and no sub-category labeling")
 
-Both gaps are real; I raised the TP one myself as honest-gap #1. They are DISTINCT problems
+> **READER MAP (merge ruling 2026-07-22).** This §10 is the **VIOLATION branch** of the one
+> nudity taxonomy tree — anatomy-region subcategory *labels* via the NudeNet body-part
+> detector, run as an explainer on Marqo-gated images. §11 is the **REVIEW branch** —
+> clothing-context confidence *separation* + the ratio *threshold* + the indexed TP dataset.
+> §11.6 has the unified two-branch table. Both are versioned data in the `moderation.json`
+> nudity entry (`violation_subcategories` + `review_subcategories`).
+
+Both gaps are real; the TP one was raised as honest-gap #1. They are DISTINCT problems
 and one is architectural.
 
 ### 10.1 Sub-category labeling needs a second instrument — the binary head cannot do it
@@ -502,8 +509,9 @@ is the wrong review-tier instrument and the tag path owns that tier (§7 note). 
 ### 10.4 Files added this round
 
 `src/imgtag/moderation/nudity_subcat.py` · `tests/test_nudity_subcat.py` (7 tests) ·
-`scripts/fetch_art_proxy.py` · `research/bench_scripts/nudity_subcat_eval.py`. NudeNet
-artifact + art proxy are gitignored (models/**/*.onnx, /data/); regen from the scripts.
+`scripts/fetch_art_proxy.py`. NudeNet artifact + art proxy are gitignored (models/**/*.onnx,
+/data/); regen from `scripts/fetch_art_proxy.py`. (The §10.2 proxy numbers were produced by an
+inline eval, not a committed script; re-derivable from the fetch script + `nudity_subcat.py`.)
 
 ---
 
@@ -587,18 +595,32 @@ elevation the Marqo-only runtime could not produce.
   b-engine: compose `violation←Marqo(pixels)` + `review←NudityReviewScorer(embeddings)` in the
   index-time head when green-lit (the embeddings already flow into `score()`).
 
-### 11.6 Relationship to §10 (the parallel NudeNet round) — COMPLEMENTARY, both preserved
+### 11.6 The unified taxonomy tree — §10 and §11 are ONE story (conductor merge ruling 2026-07-22)
 
-§10 (NudeNet body-part explainer) and §11 (review-margin separation + probe + τ) were built
-concurrently by two nudity-lane agents and address **different halves** of the 13:58Z directive:
-§10 = subcategory *labels* (anatomy classes, run on already-flagged images); §11 = confidence
-*separation* + the ratio *threshold* + the indexed TP dataset. They share no runtime path
-(NudeNet uses `CLASS_TIER` constants; the margin reads `moderation.json.review_subcategories`).
-**Recommend the conductor dedupe the two subcategory taxonomies** (anatomy-region vs
-clothing-context) into one documented composition. Files added this round:
-`research/bench_scripts/nudity_probe.py` · `research/eval-nudity-probe.json` ·
-`data/nudity-probe/` (gitignored) · `moderation.json` nudity entry (taxonomy+fit) ·
-`nudity.py` (`NudityReviewScorer`) · `tests/test_nudity.py` (+5 tests).
+§10 and §11 were built concurrently by two nudity-lane agents (§10 = the original track-nudity,
+resurrected by a stray sibling message then stopped; field-logged 14:18Z). **RULING: compose,
+don't discard — one lane owner, ONE taxonomy tree, two branches, versioned data in the
+`moderation.json` nudity entry:**
+
+| branch | subcategories | instrument | where |
+|---|---|---|---|
+| **REVIEW** (clothing-context) | swimwear · lingerie · underwear · bare-chest-male · artistic-figure · medical-context | prompt-ensemble **margin** over index embeddings (`review_subcategories`) | §11 |
+| **VIOLATION** (anatomy-region) | exposed genitalia · exposed breast · exposed buttocks/anus (+ COVERED classes → review) | **NudeNet v3** body-part detector, run as an EXPLAINER on Marqo-gated images (`violation_subcategories`) | §10 |
+| **gate + control** | — | **Marqo head** (pixels) gates violation; §9 content-free guard; mannequin/statue never-flag control | §5, §9, §11 |
+
+They share no runtime path by design (NudeNet uses `CLASS_TIER` constants and runs only on
+flagged images; the margin reads `moderation.json.review_subcategories`; Marqo is the gate).
+**The composition SEAM — `violation ← Marqo(pixels)` gate + NudeNet labels, `review ←
+NudityReviewScorer(margin over embeddings)` — is a flagged HANDOFF to b-engine, not wired
+here** (the embeddings and the flagged-image trigger already exist in the pipeline; the
+conductor is routing the seam).
+
+Files this lane owns (merged): `nudity.py` (`NudityReviewScorer`) ·
+`nudity_subcat.py` (NudeNet head, adopted with credit) · `moderation.json` nudity entry
+(taxonomy tree + fit) · `tests/test_nudity.py` (+5) · `tests/test_nudity_subcat.py` (7) ·
+`scripts/fetch_art_proxy.py` (Met CC0 proxy) · `research/bench_scripts/nudity_probe.py` ·
+`research/eval-nudity-probe.json` · `data/nudity-probe/` + `nsfwprobe` slot (both gitignored).
+Darwin item **D-nudity-review-distill** is cited in `DARWIN.md`.
 
 ### 11.7 Violation-tier: the operator-supplied path (`nsfwprobe`)
 
