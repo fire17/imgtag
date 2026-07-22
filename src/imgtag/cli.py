@@ -24,7 +24,8 @@ from .core.progress import list_jobs, read_job
 # path of info/status/manage — B20 gives info a 200ms budget and it should not be spent
 # loading an inference runtime it never uses.
 EXIT = {"LockedError": 3, "UnknownDatasetError": 4, "ModelMismatchError": 5,
-        "CorruptIndexError": 6, "ModelUnavailableError": 7, "CalibrationMismatchError": 5}
+        "CorruptIndexError": 6, "ModelUnavailableError": 7, "CalibrationMismatchError": 5,
+        "ModerationTrackUnavailable": 7}
 
 
 def _out(args, obj: dict, human: str = "") -> None:
@@ -124,27 +125,34 @@ def _moderation_line(counts: dict, active: bool = True) -> str:
 
 
 def _flags_rollup(dataset: str, limit: int = 200) -> dict:
-    """Per-dataset moderation rollup, read straight from the ids records (no model)."""
-    snap = store.open_snapshot(dataset)
-    counts: dict[str, dict] = {}
-    flagged = []
-    for r in snap.ids:
-        fl = r.get("flags") or []
-        if not fl:
-            continue
-        for f in fl:
-            tier = f.get("tier", "violation")
-            counts.setdefault(tier, {})
-            counts[tier][f["category"]] = counts[tier].get(f["category"], 0) + 1
-        if len(flagged) < limit:
-            flagged.append({"image_id": r["image_id"], "path": r["path"], "dataset": r.get("dataset", dataset),
-                            "categories": fl, "meta": r.get("meta", {})})
-    from .core.indexer import merge_counts
+    """Per-dataset moderation rollup, DERIVED from the stored score sidecars (ADR-15 T1).
 
+    No model is loaded: raw scores + the tier spec recorded in the manifest produce the
+    per-tier counts and the flagged list. A threshold change re-derives this for free.
+    """
+    from .core.indexer import MODERATION_TIERS, merge_counts
+
+    snap = store.open_snapshot(dataset)
+    flags = store.dataset_flags(dataset, snap=snap)
+    counts: dict[str, dict] = {}
+    per_image: dict[int, list] = {}
+    for cat, d in flags.items():
+        for i, tier in enumerate(d["tiers"]):
+            if tier in MODERATION_TIERS:            # alert/violation/review — a real flag
+                counts.setdefault(tier, {})
+                counts[tier][cat] = counts[tier].get(cat, 0) + 1
+                per_image.setdefault(i, []).append(
+                    {"category": cat, "p": round(float(d["scores"][i]), 4), "tier": tier})
+    flagged = []
+    for i in sorted(per_image)[:limit]:
+        r = snap.ids[i]
+        flagged.append({"image_id": r["image_id"], "path": r["path"],
+                        "dataset": r.get("dataset", dataset),
+                        "categories": per_image[i], "meta": r.get("meta", {})})
     return {"dataset": dataset, "total": snap.count, "counts": merge_counts(counts),
             "calibration": (snap.manifest.get("moderation") or {}).get("calibration", "unfitted"),
             "enforcement_ready": (snap.manifest.get("moderation") or {}).get("enforcement_ready", False),
-            "flagged": flagged, "truncated": len(flagged) >= limit}
+            "tracks": sorted(flags), "flagged": flagged, "truncated": len(per_image) > limit}
 
 
 def _backend_names() -> list[str]:
@@ -475,6 +483,30 @@ def cmd_search(args) -> int:
     return 0
 
 
+def cmd_track(args) -> int:
+    """ADR-15: add/refresh ONE track column over an existing index (no re-embedding)."""
+    from .core.indexer import track_add
+
+    t0 = time.perf_counter()
+    if args.action == "list":
+        out = []
+        for ds in ([args.dataset] if args.dataset else store.list_datasets()):
+            man = store.read_manifest(ds)
+            out.append({"dataset": ds, "count": man["count"],
+                        "tracks": {c: {k: t[k] for k in ("rows", "cols") if k in t}
+                                   for c, t in (man.get("tracks") or {}).items()},
+                        "spec": man.get("tracks_spec")})
+        _out(args, {"datasets": out, "tookMs": round((time.perf_counter() - t0) * 1000, 2)},
+             "\n".join(f"{d['dataset']:24s} {', '.join(d['tracks']) or '(none)'}" for d in out))
+        return 0
+    names = [args.dataset] if args.dataset else store.list_datasets()
+    res = [track_add(ds, args.category, log=_err if not args.json else (lambda m: None)) for ds in names]
+    _out(args, {"results": res, "tookMs": round((time.perf_counter() - t0) * 1000, 2)},
+         "\n".join(f"{r['dataset']}: scored {r['scored']}/{r['rows']} for {r['track']} in {r['seconds']}s"
+                   for r in res))
+    return 0
+
+
 def cmd_doctor(args) -> int:
     from .core import models
 
@@ -594,6 +626,13 @@ def build_parser() -> argparse.ArgumentParser:
     d.add_argument("--allow-int8", action="store_true",
                    help="let the tune select int8 vision (B24: opt-in speed lane, v1 default is fp32)")
     d.set_defaults(fn=cmd_doctor)
+
+    tr = sub.add_parser("track", help="add/refresh a track column over an existing index",
+                        parents=[common])
+    tr.add_argument("action", choices=["add", "list"])
+    tr.add_argument("category", nargs="?", help="track name, e.g. weapons")
+    tr.add_argument("--dataset", help="one dataset (default: every dataset on disk)")
+    tr.set_defaults(fn=cmd_track)
 
     st = sub.add_parser("status", help="daemon + engine state (ADR-13)", parents=[common])
     st.set_defaults(fn=cmd_status)

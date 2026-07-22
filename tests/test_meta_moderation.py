@@ -35,6 +35,10 @@ def flag_every_other(embs, recs, images=None):
     return out
 
 
+# the tier bands the read path uses to DERIVE tiers from the stored weapons scores
+flag_every_other.specs = {"weapons": {"tau_violation": 0.5, "tau_review": 0.2}}
+
+
 def exploding_detector(embs, recs, images=None):
     raise RuntimeError("detector is broken")
 
@@ -101,13 +105,17 @@ def test_moderation_hook_flags_counts_and_summary(tmp_path, imgs):
     s = index(imgs, "ds", profile=PROFILE, home=home, workers=2,
               moderation=f"{__name__}:flag_every_other")
     assert s["moderation_active"] is True and s["moderation_errors"] == 0
-    assert s["moderation"]["violation"] == {"nudity": 0, "weapons": 2, "drugs": 0}
+    # category-agnostic (the 100-track law applied to the tests): assert the ONE track we
+    # drove, never a fixed-key dict — other lanes' tracks may be present or absent
+    assert s["moderation"]["violation"]["weapons"] == 2
     assert s["moderation"]["review"]["weapons"] == 1   # ADR-14: tiers counted separately
 
+    # T1: scores are stored per image in a dense sidecar; tiers derive from them
     snap = store.open_snapshot("ds", home)
-    flagged = [r for r in snap.ids if r.get("flags")]
-    assert len(flagged) == 3   # 2 violation + 1 review
-    assert flagged[0]["flags"][0] == {"category": "weapons", "p": 0.9, "tier": "violation"}
+    assert snap.tracks["weapons"] is not None and len(snap.tracks["weapons"]) == snap.count
+    flags = store.dataset_flags("ds", home)
+    tiers = flags["weapons"]["tiers"]
+    assert tiers.count("violation") == 2 and tiers.count("review") == 1
     assert snap.manifest["moderation"]["counts"]["violation"]["weapons"] == 2
     assert snap.manifest["moderation"]["enforcement_ready"] is False  # unfitted tau, stated
 
@@ -167,11 +175,16 @@ def test_legacy_head_is_tolerated_and_deprecation_fires_once(tmp_path, imgs, mon
 
 
 def test_summary_uses_the_users_phrasing():
-    assert moderation_summary({"violation": {"drugs": 3, "weapons": 1, "nudity": 0}}) == \
-        "Found 0 images with nudity, 1 images with weapons, 3 images with drugs"
-    # ADR-14 tiers are visible per category, in the lead's finalized phrasing
-    assert moderation_summary({"violation": {"drugs": 1}, "review": {"weapons": 2}}) == \
-        "Found 0 images with nudity, 0 images with weapons (2 for review), 1 images with drugs"
+    # category-agnostic: assert the user's per-category phrasing is PRESENT, not that the
+    # sentence has exactly N clauses — new tracks add clauses and must not break this
+    line = moderation_summary({"violation": {"drugs": 3, "weapons": 1}})
+    assert line.startswith("Found ")
+    assert "3 images with drugs" in line and "1 images with weapons" in line
+    # review tier is shown per category in the finalized "(M for review)" form
+    assert "(2 for review)" in moderation_summary({"violation": {"drugs": 1}, "review": {"weapons": 2}})
+    # the alert tier, when present, leads and cannot be scrolled past
+    alert = moderation_summary({"alert": {"safety": 2}, "violation": {"drugs": 1}})
+    assert alert.startswith("\u26a0 2 ALERTS") and "3 images" not in alert
     assert moderation_summary({}, active=False) == "moderation: off (no tracks loaded)"
 
 
@@ -186,7 +199,8 @@ def test_cli_meta_flags_rollup_and_dataset_meta(tmp_path, imgs):
     (tmp_path / "fakemod.py").write_text(
         "def detect(embs, recs, images=None):\n"
         "    return [[{'category': 'weapons', 'p': 0.9, 'tier': 'violation'}]\n"
-        "            if int(r['path'].split('img')[-1][0]) % 2 == 0 else [] for r in recs]\n")
+        "            if int(r['path'].split('img')[-1][0]) % 2 == 0 else [] for r in recs]\n"
+        "detect.specs = {'weapons': {'tau_violation': 0.5, 'tau_review': 0.2}}\n")
     env = {"IMGTAG_HOME": str(home), "PYTHONPATH": str(tmp_path)}
     cli = [sys.executable, "-m", "imgtag.cli"]
 
@@ -207,8 +221,45 @@ def test_cli_meta_flags_rollup_and_dataset_meta(tmp_path, imgs):
     assert m["source"] == "partner-a" and m["account_id"].startswith("acct-")
 
     roll = run("info", "--flags", "--json")
-    assert roll["counts"]["violation"]["weapons"] == 2
-    assert roll["datasets"][0]["flagged"][0]["categories"][0]["category"] == "weapons"
+    assert roll["counts"]["violation"]["weapons"] == 2   # derived from the score sidecar
+    flagged = roll["datasets"][0]["flagged"]
+    assert any(c["category"] == "weapons" for c in flagged[0]["categories"])
 
     assert run("manage", "meta", "shop", "--set", "owner=ops", "--json")["meta"]["owner"] == "ops"
     assert run("manage", "meta", "shop", "--json")["meta"] == {"source": "partner-a", "owner": "ops"}
+
+
+# ---------------------------------------------------------------- the free-view fast path
+
+
+@needs_model
+def test_prebuilt_view_matches_reopen_bit_for_bit(tmp_path):
+    """track-nudity's perf offer: on a 384 backend the worker's drafted decode also serves
+    the nudity view, so the head skips its re-open. The whole point is that scores are
+    UNCHANGED — a fast path that moves a score is a silent regression, not a win."""
+    pytest.importorskip("imgtag.moderation.nudity")
+    from imgtag.moderation import nudity
+
+    head = nudity.load_nudity_head({})
+    if head is None or not hasattr(nudity, "make_view"):
+        pytest.skip("nudity head/make_view not present on this host")
+
+    src = tmp_path / "imgs"
+    src.mkdir()
+    paths = []
+    for i in range(5):
+        p = src / f"v{i}.jpg"
+        Image.new("RGB", (900, 600), (i * 40 % 255, i * 25 % 255, 120)).save(p, quality=92)
+        paths.append(p)
+
+    # index on the 384 default -> the view fast path is taken (bit-parity precondition met)
+    s = index(src, "vv", profile=PROFILE, home=tmp_path / "home", workers=2, moderation=True)
+    assert s["moderation_active"]
+    view_scores = np.asarray(store.open_snapshot("vv", tmp_path / "home").tracks["nudity"])
+
+    # reference: the head re-opening each file itself (images=None)
+    ref = head.score(np.zeros((len(paths), 512), np.float32), None, [{"path": str(p)} for p in paths])
+    ref_scores = np.array([(f[0] if isinstance(f, list) else f)["p"] for f in ref], np.float32)
+
+    # per image (both enumerate the same folder, sorted) the scores are identical
+    np.testing.assert_allclose(sorted(view_scores), sorted(ref_scores), atol=1e-6)

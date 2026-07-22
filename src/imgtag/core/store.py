@@ -107,6 +107,74 @@ def read_manifest(dataset: str, home: Path | None = None) -> dict:
         raise UnknownDatasetError(f"no index for dataset {dataset!r} ({p})") from None
 
 
+# ---------------------------------------------------------------- track sidecars
+#
+# ADR-15/T1: every track scores EVERY image. Scores live in a dense f32 sidecar per
+# track per dataset, ROW-ALIGNED to the shards (row i of `tracks/<cat>.f32` is row i of
+# the concatenated shards), and RAW SCORES ARE WHAT IS STORED — tiers are derived at read
+# from a versioned spec, so a policy change costs a re-derivation, never a re-scan.
+# NaN means "not scored" (a head that failed a batch), which is an honest answer and
+# distinguishable from a real 0.0.
+
+TRACKS_DIR = "tracks"
+NOT_SCORED = np.float32("nan")
+
+
+def track_path(dataset: str, category: str, home: Path | None = None) -> Path:
+    return dataset_dir(dataset, home) / TRACKS_DIR / f"{category}.f32"
+
+
+def read_track(dataset: str, category: str, home: Path | None = None, manifest: dict | None = None):
+    """Memmap one track column. Capped at the manifest's row count — never stat()."""
+    man = manifest or read_manifest(dataset, home)
+    rec = (man.get("tracks") or {}).get(category)
+    if not rec or not rec["rows"]:
+        return None
+    p = track_path(dataset, category, home)
+    cols = rec.get("cols", 1)
+    shape = (rec["rows"],) if cols == 1 else (rec["rows"], cols)
+    return np.memmap(p, np.float32, "r", shape=shape)
+
+
+def dataset_flags(dataset: str, home: Path | None = None, snap=None) -> dict:
+    """Derive the per-image tier view from the stored SCORE sidecars (ADR-15 T1).
+
+    Flags are no longer stored — they are computed here from raw scores and the tier
+    spec recorded in the manifest, so a threshold change re-derives for free. Returns
+    ``{category: {"scores": memmap, "tiers": [...]}}`` for every scored track.
+    """
+    snap = snap or open_snapshot(dataset, home)
+    specs = ((snap.manifest.get("tracks_spec") or {}).get("tiers")) or {}
+    out = {}
+    for cat, col in snap.tracks.items():
+        if col is None:
+            continue
+        out[cat] = {"scores": col, "tiers": derive_tiers(col, specs.get(cat, {}))}
+    return out
+
+
+def derive_tiers(scores, spec: dict) -> list[str]:
+    """Raw scores + a track spec -> ADR-14/15 tier labels. Pure, deterministic, and the
+    ONE place the mapping lives, so daemon, CLI and bench cannot disagree (B25d).
+
+    Bands are read from the spec, highest first; a score below every band is "none",
+    and NaN (not scored) is "unknown" rather than a silently-passing "none".
+    """
+    bands = [(t, float(spec[k])) for t, k in
+             (("alert", "tau_alert"), ("violation", "tau_violation"), ("review", "tau_review"))
+             if spec.get(k) is not None]
+    if not bands and spec.get("tau") is not None:  # single-threshold spec
+        bands = [("violation", float(spec["tau"]))]
+    bands.sort(key=lambda b: -b[1])
+    out = []
+    for v in np.asarray(scores, np.float32).reshape(-1):
+        if np.isnan(v):
+            out.append("unknown")
+            continue
+        out.append(next((t for t, tau in bands if v >= tau), "none"))
+    return out
+
+
 def _ids_name(shard_name: str) -> str:
     return "ids-" + shard_name[len("shard-") : -len(".f32")] + ".jsonl"
 
@@ -163,6 +231,7 @@ class Snapshot:
 
     def __init__(self, dataset: str, home: Path | None = None):
         self.dataset = dataset
+        self.home = home
         self.dir = dataset_dir(dataset, home)
         self.manifest = self._open_all(retry=True)
 
@@ -184,6 +253,8 @@ class Snapshot:
             raise
         self.emb = ShardArray(mms, dim)
         self.ids = ids
+        self.tracks = {c: read_track(self.dataset, c, self.home, man)
+                       for c in (man.get("tracks") or {})}
         return man
 
     @property
@@ -218,6 +289,8 @@ class Writer:
         self.name = f"shard-{self.job_id}-0000.f32"
         self._buf_e: list[np.ndarray] = []
         self._buf_r: list[dict] = []
+        self._buf_t: dict[str, list[np.ndarray]] = {}
+        self._ids: set[str] = set()
         self._cv = threading.Condition()
         self._stop = False
         self._err: BaseException | None = None
@@ -231,6 +304,11 @@ class Writer:
         (self.dir / "trash").mkdir(exist_ok=True)
         self._acquire()
         self.manifest = self._load_or_init()
+        if self.manifest["count"]:  # content-addressed ids are unique per dataset (IA.md)
+            try:
+                self._ids = {r["image_id"] for r in Snapshot(self.dataset, self.home).ids}
+            except (OSError, ValueError, KeyError):
+                self._ids = set()
         self.recovery = recover(self.dir, self.manifest)  # torn tails + orphans, write-open only
         # We hold the exclusive lock, so every OTHER queued/running record for this
         # dataset is a corpse by definition (ADR-6: the flock is the authority).
@@ -319,7 +397,9 @@ class Writer:
         }
 
     # -- append / flush --------------------------------------------
-    def append(self, embs: np.ndarray, recs: list[dict]) -> None:
+    def append(self, embs: np.ndarray, recs: list[dict], tracks: dict | None = None) -> None:
+        """Append rows. ``tracks`` maps category -> f32 [n] (or [n, cols]) of RAW scores,
+        written to the row-aligned sidecars (ADR-15 T1)."""
         if self._err:
             raise self._err
         embs = np.ascontiguousarray(embs, np.float32)
@@ -327,9 +407,19 @@ class Writer:
             raise ValueError("embs/recs length mismatch")
         if embs.shape[1] != self.manifest["dim"]:
             raise ValueError(f"dim mismatch: {embs.shape[1]} != {self.manifest['dim']}")
+        ids = {r["image_id"] for r in recs}
+        if len(ids) != len(recs):
+            raise ValueError("duplicate image_id within one append batch")
+        if ids & self._ids:
+            raise ValueError(f"duplicate image_id already in {self.dataset!r}: "
+                             f"{sorted(ids & self._ids)[:3]} — ids are content-addressed (IA.md)")
+        self._ids |= ids
         with self._cv:
             self._buf_e.append(embs)
             self._buf_r.extend(recs)
+            for cat, col in (tracks or {}).items():
+                col = np.asarray(col, np.float32).reshape(len(recs), -1)
+                self._buf_t.setdefault(cat, []).append(col)
             if len(self._buf_r) >= FLUSH_ROWS:
                 self._cv.notify_all()
 
@@ -361,13 +451,14 @@ class Writer:
 
     def _flush_pending(self) -> None:
         with self._cv:
-            embs, recs = self._buf_e, self._buf_r
-            self._buf_e, self._buf_r = [], []
+            embs, recs, tracks = self._buf_e, self._buf_r, self._buf_t
+            self._buf_e, self._buf_r, self._buf_t = [], [], {}
         if not recs:
             return
-        self._write(np.concatenate(embs), recs)
+        self._write(np.concatenate(embs), recs,
+                    {c: np.concatenate(v) for c, v in tracks.items()})
 
-    def _write(self, embs: np.ndarray, recs: list[dict]) -> None:
+    def _write(self, embs: np.ndarray, recs: list[dict], tracks: dict | None = None) -> None:
         rec = next((s for s in self.manifest["shards"] if s["name"] == self.name), None)
         if rec is None:
             rec = {"name": self.name, "rows": 0, "emb_bytes": 0, "ids_bytes": 0}
@@ -388,6 +479,9 @@ class Writer:
             f.write(lines)
             f.flush()
             os.fsync(f.fileno())
+        # (3b) track sidecars — same durability discipline, before the manifest names them
+        for cat, col in (tracks or {}).items():
+            self._write_track(cat, col, base, len(recs))
         rec["rows"] += len(recs)
         rec["emb_bytes"] += len(blob)
         rec["ids_bytes"] += len(lines)
@@ -395,6 +489,23 @@ class Writer:
         # (5) manifest.tmp + fsync  (6) rename  (7) fsync dirfd
         self._commit()
         self.flushes += 1
+
+    def _write_track(self, category: str, col: np.ndarray, base: int, n: int) -> None:
+        """Append one track column, padding any gap so row alignment can never drift."""
+        t = self.manifest.setdefault("tracks", {}).setdefault(
+            category, {"name": f"{category}.f32", "rows": 0, "cols": int(col.shape[1]), "bytes": 0})
+        d = self.dir / TRACKS_DIR
+        d.mkdir(exist_ok=True)
+        gap = base - t["rows"]
+        if gap > 0:  # rows written before this track existed are "not scored", not 0.0
+            pad = np.full((gap, t["cols"]), NOT_SCORED, np.float32)
+            col = np.concatenate([pad, col])
+        with open(d / t["name"], "ab", buffering=1024 * 1024) as f:
+            f.write(col.tobytes())
+            f.flush()
+            os.fsync(f.fileno())
+        t["rows"] = base + n
+        t["bytes"] = t["rows"] * t["cols"] * 4
 
     def _commit(self) -> None:
         self.manifest["updated"] = _now()
@@ -442,6 +553,18 @@ def recover(d: Path, manifest: dict, log=None) -> list[str]:
                 os.truncate(p, want)
                 actions.append(f"truncated torn tail {fn}: {have} -> {want} bytes")
                 say(actions[-1])
+    for cat, t in (manifest.get("tracks") or {}).items():
+        p = d / TRACKS_DIR / t["name"]
+        want = t["rows"] * t.get("cols", 1) * 4
+        have = p.stat().st_size if p.exists() else -1
+        if have < 0 and want == 0:
+            continue
+        if have < want:
+            raise CorruptIndexError(f"track {cat}: {have} bytes on disk < {want} in manifest")
+        if have > want:
+            os.truncate(p, want)
+            actions.append(f"truncated torn tail tracks/{t['name']}: {have} -> {want} bytes")
+            say(actions[-1])
     if total != manifest["count"]:
         raise CorruptIndexError(f"manifest count {manifest['count']} != sum(shard rows) {total}")
     for p in d.iterdir():

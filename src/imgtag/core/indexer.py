@@ -15,6 +15,7 @@ edge). Backpressure is structural: a worker blocks on ``free_q.get()``.
 from __future__ import annotations
 
 import io
+import json
 import multiprocessing as mp
 import os
 import queue as _q
@@ -85,7 +86,10 @@ def scan(root: Path, recursive: bool = True) -> list[Path]:
 
 # ---------------------------------------------------------------- moderation hook
 
-MODERATION_CATEGORIES = ("nudity", "weapons", "drugs")
+MODERATION_CATEGORIES = ("nudity", "weapons", "drugs", "safety")
+#: ADR-14 amendment: "alert" is the highest tier (safety track — person-down + danger
+#: context); plain person-down is "review". Ordered highest-first for reporting.
+MODERATION_TIERS = ("alert", "violation", "review")
 
 
 def load_moderation_hook(spec=None, profile: dict | None = None, log=lambda m: None):
@@ -129,27 +133,38 @@ def load_moderation_hook(spec=None, profile: dict | None = None, log=lambda m: N
 
     warned: set[str] = set()   # deprecation notices fire ONCE per job, not per batch
 
-    def detect(embs, recs, images=None):
+    def detect(embs, recs, images=None, views=None):
         per: list[list[dict]] = [[] for _ in recs]
         for name, head in heads.items():
             try:
-                out = _call_head(head, embs, images, recs, name, warned, log) or []
+                out = _call_head(head, embs, images, recs, name, warned, log, views) or []
             except Exception as e:
                 log(f"moderation head {name!r} raised {type(e).__name__}: {e} — skipped for this batch")
                 continue
             for i, flags in enumerate(out[: len(per)]):
-                for f in (flags if isinstance(flags, list) else [flags]):
-                    if f:
-                        per[i].append(f)
+                per[i].extend(f for f in as_flag_list(flags) if f)
         return per
 
     detect.wants_images = any(getattr(h, "wants_images", False) or hasattr(h, "score_images")
                               for h in heads.values())
     detect.heads = heads
+    detect.specs = {c: track_tier_spec(c, h) for c, h in heads.items()}
     return detect
 
 
-def _call_head(head, embs, images, recs, name="head", warned=None, log=lambda m: None):
+def as_flag_list(x) -> list[dict]:
+    """One head's answer for ONE image, normalized to a list.
+
+    The seam says `-> [{category, p, tier}]`, i.e. one dict PER IMAGE; a multi-signal
+    track may return several. Accepting both shapes is what stops a single-dict return
+    from being iterated as its own keys (a str has no .get — loudly, but pointlessly).
+    """
+    if x is None:
+        return []
+    return list(x) if isinstance(x, (list, tuple)) else [x]
+
+
+def _call_head(head, embs, images, recs, name="head", warned=None, log=lambda m: None, views=None):
     """Call a track head through the ONE documented seam, with one tolerated legacy path.
 
     Seam (ruling 2026-07-22): `score(embeddings, images, ids) -> [{category, p, tier}]`.
@@ -158,6 +173,9 @@ def _call_head(head, embs, images, recs, name="head", warned=None, log=lambda m:
     tensor input with embeddings would silently produce numbers that mean nothing.
     """
     try:
+        if views is not None and getattr(head, "view_key", None) in views:
+            # the free-view fast path: hand the pre-made view so the head skips its re-open
+            return head.score(embs, images, recs, views=views)
         return head.score(embs, images, recs)          # the documented seam
     except TypeError:
         if not hasattr(head, "score_images"):
@@ -173,41 +191,77 @@ def _call_head(head, embs, images, recs, name="head", warned=None, log=lambda m:
     return head.score_images([_Image.fromarray(im) for im in images])
 
 
-def _apply_moderation(hook, embs, recs, images, counts: dict, log, warned=None) -> int:
-    """Attach ADR-14 flags to recs and accumulate per-TIER, per-category counts.
+def track_tier_spec(category: str, head=None) -> dict:
+    """The τ bands that DERIVE tiers for one track (ADR-15 T3: versioned spec, not code).
 
-    Returns 1 if the detector failed for this batch (counted, never fatal).
+    Read from the head's fitted attributes first, then the category's entry in
+    data/moderation.json, so the read path can derive tiers WITHOUT loading a model. A
+    band that is not yet fitted is simply absent — its scores derive to "unknown", never
+    a silently-passing "none" (enforcement_ready stays false until τ is fitted).
     """
+    spec = {}
+    for k in ("tau_alert", "tau_violation", "tau_review", "tau"):
+        v = getattr(head, k, None) if head is not None else None
+        if v is not None:
+            spec[k] = float(v)
+    try:
+        import json
+
+        cat = json.loads((models.DATA / "moderation.json").read_bytes()).get("categories", {}).get(category, {})
+        for k in ("tau_alert", "tau_violation", "tau_review", "tau"):
+            spec.setdefault(k, float(cat[k])) if k in cat else None
+    except Exception:
+        pass
+    return spec
+
+
+def _apply_moderation(hook, embs, recs, images, counts: dict, log, warned=None, views=None) -> tuple[int, dict]:
+    """Collect RAW per-image scores for every track (ADR-15 T1) and count derived tiers.
+
+    Returns ``(errors, columns)`` where columns maps category -> f32[len(recs)]: one score
+    per image, NaN where a track did not answer. SCORES, not flags, are what gets stored —
+    a later policy change then re-derives tiers for free (T1), and the per-tier counts
+    computed here are only for the job summary, never the durable answer.
+    """
+    n = len(recs)
+    # a dense NaN column per KNOWN category up front: every image gets a slot in every
+    # track, so the sidecars stay row-aligned even in a batch where a track never fires
+    known = list(getattr(hook, "specs", {}) or getattr(hook, "heads", {}) or [])
+    columns: dict[str, np.ndarray] = {c: np.full(n, np.float32("nan"), np.float32) for c in known}
     try:
         wants = getattr(hook, "wants_images", False)
-        out = hook(embs, recs, images if (images is not None or not wants) else None)
+        imgs = images if (images is not None or not wants) else None
+        out = hook(embs, recs, imgs, views) if views is not None else hook(embs, recs, imgs)
     except Exception as e:  # never let a detector break the index
-        log(f"moderation hook raised {type(e).__name__}: {e} — flags skipped for this batch")
-        return 1
-    for rec, flags in zip(recs, out or []):
-        keep = []
+        log(f"moderation hook raised {type(e).__name__}: {e} — scores skipped for this batch")
+        return 1, columns
+
+    for i, flags in enumerate(out or []):
+        if i >= n:
+            break
         for f in flags or []:
-            # ADR-14: tier is the carrier. Legacy `flagged: True` maps to violation so an
-            # older detector still counts for something instead of vanishing silently.
+            cat = f.get("category")
+            if not cat:
+                continue
+            col = columns.setdefault(cat, np.full(n, np.float32("nan"), np.float32))
+            col[i] = float(f.get("p", float("nan")))
+            # ADR-14/15: tier is the carrier. Legacy {flagged: bool} maps to violation so
+            # an older track still counts for something instead of vanishing silently.
             tier = f.get("tier")
-            if tier is None:  # legacy {flagged: bool} — counted, but say so once per job
+            if tier is None:
                 tier = "violation" if f.get("flagged") else "none"
                 if warned is not None and "tier" not in warned:
                     warned.add("tier")
-                    log(f"DEPRECATED: moderation flag for {f.get('category')!r} has no ADR-14 "
-                        f"`tier` — mapping flagged->violation; the track should emit tier")
-            if tier == "none":
-                continue
-            keep.append({"category": f["category"], "p": round(float(f.get("p", 1.0)), 4), "tier": tier})
-            counts.setdefault(tier, {})
-            counts[tier][f["category"]] = counts[tier].get(f["category"], 0) + 1
-        if keep:
-            rec["flags"] = keep
-    return 0
+                    log(f"DEPRECATED: moderation flag for {cat!r} has no ADR-14 `tier` — "
+                        f"mapping flagged->violation; the track should emit tier")
+            if tier != "none":
+                counts.setdefault(tier, {})
+                counts[tier][cat] = counts[tier].get(cat, 0) + 1
+    return 0, columns
 
 
 def empty_counts() -> dict:
-    return {t: {c: 0 for c in MODERATION_CATEGORIES} for t in ("violation", "review")}
+    return {t: {c: 0 for c in MODERATION_CATEGORIES} for t in MODERATION_TIERS}
 
 
 def merge_counts(counts: dict) -> dict:
@@ -220,16 +274,30 @@ def merge_counts(counts: dict) -> dict:
     return out
 
 
+def _moderation_spec_version():
+    try:
+        import json
+
+        return json.loads((models.DATA / "moderation.json").read_bytes()).get("version")
+    except Exception:
+        return None
+
+
 def moderation_summary(counts: dict, active: bool = True) -> str:
-    """The job-end line, in the user's phrasing with ADR-14's tiers made visible:
-    "Found N images with drugs (M for review), ...". Heads absent is a real answer."""
+    """The job-end line in the user's phrasing, with ADR-14's tiers visible. Alerts lead
+    when present — the whole point of the tier is that it cannot be scrolled past."""
     if not active:
         return "moderation: off (no tracks loaded)"
     c = merge_counts(counts)
-    order = list(MODERATION_CATEGORIES) + [k for k in sorted(c.get("violation", {})) if k not in MODERATION_CATEGORIES]
-    return "Found " + ", ".join(
+    order = list(MODERATION_CATEGORIES) + [k for k in sorted(c.get("violation", {}))
+                                           if k not in MODERATION_CATEGORIES]
+    line = "Found " + ", ".join(
         f"{c['violation'].get(k, 0)} images with {k}" + (f" ({r} for review)" if (r := c["review"].get(k, 0)) else "")
         for k in order)
+    if (n := sum(c.get("alert", {}).values())):
+        who = ", ".join(f"{v} {k}" for k, v in sorted(c["alert"].items()) if v)
+        line = f"\u26a0 {n} ALERTS ({who}) \u00b7 " + line
+    return line
 
 
 # ---------------------------------------------------------------- workers
@@ -252,7 +320,7 @@ class _Timeout(Exception):
 
 
 def _worker(task_q, ready_q, free_q, shm_name, size, squash, resample_name, sem, nice_level, worker_be=None,
-            known_ids=frozenset()):
+            known_ids=frozenset(), view_spec=None):
     """geometry=central: decode into a shm slot, the coordinator runs the one session.
     geometry=worker  : this process owns an ORT session and returns the embedding
     (measured 1.7× on CPU — process-level parallelism beats intra-op threading — at the
@@ -275,6 +343,15 @@ def _worker(task_q, ready_q, free_q, shm_name, size, squash, resample_name, sem,
         heic_ok = False
     resample = getattr(Image.Resampling, resample_name)
     be = load_backend(*worker_be) if worker_be else None
+    make_view = None
+    if view_spec and view_spec.get("size") == size:  # bit-parity precondition (make_view
+        import importlib                              # docstring): our decode is drafted@size
+
+        mod, _, fn = view_spec["builder"].partition(":")
+        try:
+            make_view = getattr(importlib.import_module(mod), fn)
+        except (ImportError, AttributeError):
+            make_view = None
     shm = slab = None
     if be is None:
         shm = SharedMemory(name=shm_name)
@@ -317,6 +394,9 @@ def _worker(task_q, ready_q, free_q, shm_name, size, squash, resample_name, sem,
                     sem.acquire()
                 try:
                     arr = preprocess_image(im, size, squash, resample)
+                    # the moderation view, built off the SAME drafted decode (zero extra
+                    # decode, one resize) — only when the draft scale matches (gated above)
+                    mod_view = make_view(im).tobytes() if make_view is not None else None
                 finally:
                     if heavy:
                         sem.release()
@@ -342,6 +422,7 @@ def _worker(task_q, ready_q, free_q, shm_name, size, squash, resample_name, sem,
                         "mtime": st.st_mtime,
                         "size": st.st_size,
                         "decode_ms": decode_ms,
+                        "mod_view": mod_view,
                         "pid": os.getpid(),
                     }
                 )
@@ -416,6 +497,18 @@ def index(
     batch = int(prof.get("batch", 2))
     nslots = min(128, max(16, 4 * batch, 4 * workers))
     slot_bytes = be.size * be.size * 3
+    view_spec = None
+    if hook is not None:
+        for h in (getattr(hook, "heads", {}) or {}).values():
+            g = getattr(h, "view_geometry", None)
+            vk = getattr(h, "view_key", None)
+            builder = getattr(h, "view_builder", None) or (
+                "imgtag.moderation.nudity:make_view" if vk == "nudity-384crop" else None)
+            # PRECONDITION (make_view docstring): only when the backend's decode is drafted
+            # at the head's required scale — otherwise the view differs and we re-open
+            if g and vk and builder and g.get("requires_draft") == be.size:
+                view_spec = {"builder": builder, "key": vk, "size": be.size}
+                break
     if hook is not None and getattr(hook, "wants_images", False) and geometry == "worker":
         # a detector that needs pixels cannot be fed under the per-worker geometry (only
         # embeddings cross that boundary), so the JOB drops to the central session — a
@@ -478,7 +571,7 @@ def index(
                 pr = ctx.Process(
                     target=_worker,
                     args=(task_q, ready_q, free_q, shm.name, be.size, be.squash, be.spec["resample"], sem,
-                          0 if full_speed else 10, worker_be, known_ids),
+                          0 if full_speed else 10, worker_be, known_ids, view_spec),
                     daemon=True,
                 )
                 pr.start()
@@ -489,6 +582,7 @@ def index(
 
             received = 0
             duplicates = 0
+            pend_views: list = []
             seen_ids = set(known_ids)   # + everything this job appends, so a folder that
             # contains the same photo twice still yields exactly one row
             pend_slots: list[int] = []
@@ -511,14 +605,23 @@ def index(
                     t = time.perf_counter()
                     embs = be.embed_images(images)
                     t_infer += time.perf_counter() - t
+                cols = None
                 if hook is not None:
-                    mod_errors += _apply_moderation(hook, embs, pend_recs, images, mod_counts, log, mod_warned)
-                w.append(embs, pend_recs.copy())
+                    views = None
+                    if view_spec and pend_views and all(v is not None for v in pend_views):
+                        views = {view_spec["key"]: np.stack([
+                            np.frombuffer(v, np.uint8).reshape(view_spec["size"], view_spec["size"], 3)
+                            for v in pend_views])}
+                    err, cols = _apply_moderation(hook, embs, pend_recs, images, mod_counts, log,
+                                                  mod_warned, views=views)
+                    mod_errors += err
+                w.append(embs, pend_recs.copy(), tracks=cols)
                 for s in pend_slots:
                     free_q.put(s)
                 pend_slots.clear()
                 pend_embs.clear()
                 pend_recs.clear()
+                pend_views.clear()
 
             while received < len(todo):
                 if job.aborted():  # `manage delete --force`: stop cleanly, keep the index consistent
@@ -560,6 +663,7 @@ def index(
                         pend_embs.append(np.frombuffer(msg["emb"], np.float32))
                     else:
                         pend_slots.append(msg["slot"])
+                    pend_views.append(msg.get("mod_view"))
                     rec = {
                         "image_id": msg["image_id"],
                         "path": msg["path"],
@@ -613,6 +717,13 @@ def index(
             if job_meta:  # dataset-level metadata lives in the manifest, merged across jobs
                 w.manifest["meta"] = {**w.manifest.get("meta", {}), **job_meta}
             if hook is not None:
+                w.manifest["tracks_spec"] = {
+                    # WHICH spec produced these scores — derivation at read is only
+                    # reproducible if the version that scored them is recorded (T3)
+                    "moderation_version": _moderation_spec_version(),
+                    "categories": sorted(w.manifest.get("tracks", {})),
+                    "tiers": getattr(hook, "specs", {}),
+                }
                 prev = (w.manifest.get("moderation") or {}).get("counts", {})
                 total = merge_counts(prev)
                 for tier, per_cat in merge_counts(mod_counts).items():
@@ -655,3 +766,98 @@ def index(
             if on_progress:
                 on_progress(summary)
     return summary
+
+
+# ---------------------------------------------------------------- track backfill
+
+
+def track_add(dataset: str, category: str, home: Path | None = None, profile: dict | None = None,
+              job_id: str | None = None, log=lambda m: None, batch: int = 256) -> dict:
+    """Score ONE track over an existing index — no re-embedding (ADR-15 T3 / `track add`).
+
+    Embedding-space tracks read the shards that are already on disk, so adding track #101
+    is a matvec pass over f32 rows: milliseconds per thousand images, and indexing time for
+    everyone else is unchanged. A track that needs pixels re-reads only its own images.
+    """
+    from .doctor import load_profile
+    from .progress import Job
+    from .store import open_snapshot
+
+    prof = dict(profile or load_profile(home))
+    snap = open_snapshot(dataset, home)
+    heads = load_moderation_hook(True, prof, log)
+    if heads is None or category not in getattr(heads, "heads", {}):
+        raise ModerationTrackUnavailable(
+            f"no head for track {category!r} — available: "
+            f"{sorted(getattr(heads, 'heads', {}) or [])}")
+    head = heads.heads[category]
+    n = snap.count
+    job = Job(job_id or f"track-{category}", dataset, n, home=home, kind="track-add", track=category)
+    job.start()
+    scores = np.full(n, np.float32("nan"), np.float32)
+    t0 = time.time()
+    try:
+        for i in range(0, n, batch):
+            recs = snap.ids[i : i + batch]
+            embs = np.ascontiguousarray(np.asarray(snap.emb)[i : i + batch], np.float32)
+            images = None
+            if getattr(head, "wants_images", False):
+                images = None  # the head re-reads its own pixels from rec["path"]
+            out = _call_head(head, embs, images, recs, category, set(), log) or []
+            for j, flags in enumerate(out):
+                for f in as_flag_list(flags):
+                    if f.get("category") == category:
+                        scores[i + j] = float(f.get("p", float("nan")))
+            job.update(min(i + batch, n))
+        _write_track_column(dataset, category, scores, home)
+        job.finish(indexed=n, seconds=round(time.time() - t0, 2))
+    except BaseException as e:
+        job.fail(f"{type(e).__name__}: {e}")
+        raise
+    return {"dataset": dataset, "track": category, "rows": n, "job_id": job.state["job_id"],
+            "seconds": round(time.time() - t0, 2), "scored": int((~np.isnan(scores)).sum())}
+
+
+class ModerationTrackUnavailable(RuntimeError):
+    """No head can score the requested track on this machine (CLI exit 7)."""
+
+
+def _write_track_column(dataset: str, category: str, scores: np.ndarray, home=None) -> None:
+    """Swap in a whole track column atomically, under the dataset's writer lock.
+
+    Backfill replaces one column and nothing else — no shard is touched, no embedding is
+    recomputed, and readers either see the old column or the new one (ADR-6's rename).
+    """
+    import fcntl
+
+    from .store import TRACKS_DIR, dataset_dir
+
+    d = dataset_dir(dataset, home)
+    lock = d / ".writer.lock"
+    fd = os.open(lock, os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        os.close(fd)
+        from .store import LockedError
+
+        raise LockedError(f"{dataset} is being written — track backfill refused") from None
+    try:
+        (d / TRACKS_DIR).mkdir(exist_ok=True)
+        tmp = d / TRACKS_DIR / f"{category}.f32.tmp"
+        with open(tmp, "wb") as f:
+            f.write(np.ascontiguousarray(scores, np.float32).tobytes())
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, d / TRACKS_DIR / f"{category}.f32")
+        man = json.loads((d / "manifest.json").read_bytes())
+        man.setdefault("tracks", {})[category] = {
+            "name": f"{category}.f32", "rows": int(scores.shape[0]), "cols": 1,
+            "bytes": int(scores.nbytes), "backfilled": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        }
+        mtmp = d / "manifest.json.tmp"
+        mtmp.write_text(json.dumps(man, indent=1))
+        os.replace(mtmp, d / "manifest.json")
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)

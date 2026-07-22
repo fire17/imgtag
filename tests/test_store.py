@@ -25,11 +25,12 @@ def _w(home, ds="ds"):
     return store.Writer(ds, FakeModel(), home=home)
 
 
-def _rows(n, dim=8, seed=0):
+def _rows(n, dim=8, seed=0, base=0):
     rng = np.random.default_rng(seed)
     e = rng.standard_normal((n, dim)).astype(np.float32)
     e /= np.linalg.norm(e, axis=1, keepdims=True)
-    recs = [{"image_id": f"{i:016x}", "path": f"/x/{i}.jpg", "dataset": "ds", "w": 4, "h": 4} for i in range(n)]
+    recs = [{"image_id": f"{base + i:016x}", "path": f"/x/{base + i}.jpg", "dataset": "ds", "w": 4, "h": 4}
+            for i in range(n)]
     return e, recs
 
 
@@ -103,11 +104,63 @@ def test_snapshot_isolation_during_append(tmp_path):
         w._flush_pending()
         snap = store.open_snapshot("ds", home=tmp_path)
         assert snap.count == 5 and len(snap.ids) == 5
-        w.append(*_rows(7, seed=1))
+        w.append(*_rows(7, seed=1, base=100))
         w._flush_pending()
         assert snap.count == 5  # frozen
         assert len(np.asarray(snap.emb)) == 5
         assert store.open_snapshot("ds", home=tmp_path).count == 12  # fresh sees all
+
+
+def test_writer_refuses_a_duplicate_id(tmp_path):
+    """IA.md makes xxhash64-of-bytes the identity, so one dataset may never hold the same
+    id twice — the writer refuses rather than trusting callers to dedup (b-daemon's ask)."""
+    with _w(tmp_path) as w:
+        w.append(*_rows(3))
+        with pytest.raises(ValueError, match="duplicate image_id"):
+            w.append(*_rows(1))            # same id, already committed
+        e, r = _rows(2)
+        with pytest.raises(ValueError, match="duplicate image_id"):
+            w.append(np.concatenate([e, e]), r + r)   # duplicate WITHIN one batch
+    # a fresh writer on the same dataset still knows the ids on disk
+    with _w(tmp_path) as w:
+        with pytest.raises(ValueError, match="duplicate image_id"):
+            w.append(*_rows(1))
+
+
+def test_track_sidecars_round_trip_and_stay_aligned(tmp_path):
+    """ADR-15 T1: dense f32 per track, row-aligned to the shards; RAW scores stored."""
+    with _w(tmp_path) as w:
+        e, r = _rows(4)
+        w.append(e, r, tracks={"nudity": np.array([0.1, 0.9, 0.5, 0.02], np.float32)})
+        w._flush_pending()
+        e2, r2 = _rows(2, base=50)
+        w.append(e2, r2, tracks={"nudity": np.array([0.7, 0.3], np.float32)})
+    snap = store.open_snapshot("ds", home=tmp_path)
+    col = snap.tracks["nudity"]
+    assert len(col) == snap.count == 6
+    np.testing.assert_allclose(col[:4], [0.1, 0.9, 0.5, 0.02], atol=1e-6)
+    # row alignment is the invariant: row i of the column IS row i of the ids
+    assert snap.ids[1]["image_id"] == f"{1:016x}" and col[1] == np.float32(0.9)
+
+
+def test_a_track_added_late_pads_earlier_rows_as_not_scored(tmp_path):
+    with _w(tmp_path) as w:
+        w.append(*_rows(3))
+        w._flush_pending()
+        e, r = _rows(2, base=50)
+        w.append(e, r, tracks={"weapons": np.array([0.8, 0.1], np.float32)})
+    col = store.open_snapshot("ds", home=tmp_path).tracks["weapons"]
+    assert len(col) == 5
+    assert np.isnan(col[:3]).all()      # never scored != scored 0.0
+    np.testing.assert_allclose(col[3:], [0.8, 0.1], atol=1e-6)
+
+
+def test_tier_derivation_is_deterministic_and_honest(tmp_path):
+    spec = {"tau_alert": 0.9, "tau_violation": 0.5, "tau_review": 0.2}
+    got = store.derive_tiers([0.95, 0.6, 0.3, 0.05, float("nan")], spec)
+    assert got == ["alert", "violation", "review", "none", "unknown"]
+    assert got == store.derive_tiers([0.95, 0.6, 0.3, 0.05, float("nan")], spec)  # B25d
+    assert store.derive_tiers([0.05, 0.5], {"tau": 0.02}) == ["violation", "violation"]
 
 
 def test_torn_tail_recovery(tmp_path):
