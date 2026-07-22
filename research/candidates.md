@@ -1,6 +1,6 @@
 # research/candidates.md — ADR-4 candidate matrix (phase 1)
 
-> Generated 2026-07-22T17:46:10 · b-bench · git aec848c
+> Generated 2026-07-22T19:28:17 · b-bench · git 2aca9e8
 
 > **EVERY NUMBER IS A PROXY.** Bench host is Apple M3 Max (arm64/NEON); the primary target is shared Linux x86_64, 8GB, no GPU. Per ADR-10e int8 speed/accuracy does NOT transfer across ISAs. No 🐧 row may lock on these.
 
@@ -15,13 +15,13 @@
 
 | # | candidate | ships | B24 | img/s 1-proc | ms/img | per-worker RSS | workers ≤B8 | proj. POLITE img/s | proj. index RSS | B8 | artifacts | B9 | B6 p@k | B5 p@100 | B5 min-child | B17 R@10 | B7 leak |
 |---|---|---|---|---:|---:|---:|---:|---:|---:|---|---:|---|---:|---:|---:|---:|---:|
-| 1 | `pecore-s16-384` | fp32 | ✅ (ref) | 8.6* | 116.2 | 425MB | 2 | 17 | 850MB | ✅ | 182MB | ❌ | 0.893 | 0.927 | 0.287 | 77.2 | 0.300 |
-| 2 | `pecore-t16-384` | fp32 | ✅ (ref) | 23.2* | 43.1 | 230MB | 4 | 46 | 459MB | ✅ | 112MB | ✅ | 0.841 | 0.908 | 0.317 | 70.9 | 0.467 |
+| 1 | `pecore-s16-384` | fp32 | ✅ (ref) | 8.2* | 121.3 | 456MB | 2 | 16 | 913MB | ✅ | 182MB | ❌ | 0.893 | 0.927 | 0.287 | 77.2 | 0.300 |
+| 2 | `pecore-t16-384` | fp32 | ✅ (ref) | 22.1* | 45.4 | 212MB | 4 | 44 | 424MB | ✅ | 112MB | ✅ | 0.841 | 0.908 | 0.317 | 70.9 | 0.467 |
 | 3 | `mobileclip2-s2` | fp32 | ✅ (ref) | — | — | —MB | 0 | — | —MB | 🔴 INELIGIBLE-DEFAULT | 413MB | ❌ | 0.914 | 0.913 | 0.337 | 82.0 | 0.133 |
-| 4 | `siglip-base-224` | fp32 | ✅ (ref) | 9.8* | 101.5 | 688MB | 1 | 10 | 1376MB | 🔴 INELIGIBLE-DEFAULT | 831MB | ❌ | 0.893 | 0.917 | 0.353 | 80.5 | 0.200 |
+| 4 | `siglip-base-224` | fp32 | ✅ (ref) | — | — | —MB | 0 | — | —MB | 🔴 INELIGIBLE-DEFAULT | 831MB | ❌ | 0.893 | 0.917 | 0.353 | 80.5 | 0.200 |
 | 5 | `mobileclip2-s0` | fp32 | ✅ (ref) | — | — | —MB | 0 | — | —MB | 🔴 INELIGIBLE-DEFAULT | 315MB | ❌ | 0.895 | 0.907 | 0.339 | 78.6 | 0.200 |
-| 6 | `siglip2-base-224` | fp32 | ✅ (ref) | 10.1* | 99.5 | 645MB | 1 | 10 | 1291MB | 🔴 INELIGIBLE-DEFAULT | 673MB | ❌ | 0.925 | 0.937 | 0.357 | 77.5 | 0.200 |
-| 7 | `openclip-vitb32` | fp32 | ✅ (ref) | 38.4* | 26.1 | 626MB | 1 | 38 | 1252MB | 🔴 INELIGIBLE-DEFAULT | 622MB | ❌ | 0.775 | 0.832 | 0.246 | 65.2 | 0.600 |
+| 6 | `siglip2-base-224` | fp32 | ✅ (ref) | 9.7* | 103.1 | 713MB | 1 | 10 | 1426MB | 🔴 INELIGIBLE-DEFAULT | 673MB | ❌ | 0.925 | 0.937 | 0.357 | 77.5 | 0.200 |
+| 7 | `openclip-vitb32` | fp32 | ✅ (ref) | 37.5* | 26.7 | 662MB | 1 | 38 | 1324MB | 🔴 INELIGIBLE-DEFAULT | 622MB | ❌ | 0.775 | 0.832 | 0.246 | 65.2 | 0.600 |
 
 `*` = ADVISORY (machine under swarm load during the timed run).
 `ships` = default precision. v1 = **fp32 vision** everywhere (no int8 vision artifact clears B24's DEFAULT nn@200≥0.90 bar). B24 col: `✅ (ref)` = a fp32 row IS its own reference; int8 arms classified `✅ default` / `◐ opt-in` (nn 0.60–0.90, printed deltas) / `❌ banned` (below tier-1 cos 0.95 & nn 0.60). int8 opt-in deltas vs fp32:
@@ -52,24 +52,24 @@ Artifacts: `vision_fp32_mb` 102.6MB · `vision_int8_mb` 33.2MB · `text_fp32_mb`
 
 | precision | intra | batch | img/s | ms/img | peak RSS | spread | load | status |
 |---|---:|---:|---:|---:|---:|---:|---:|---|
-| fp32 | 1 | 1 | 2.59 | 385.71 | 362MB | 0.0% | None | ADVISORY |
-| fp32 | 1 | 2 | 2.56 | 390.54 | 440MB | 0.0% | None | ADVISORY |
-| fp32 | 1 | 8 | 2.4 | 416.51 | 763MB | 0.0% | None | ADVISORY |
-| fp32 | 2 | 1 | 4.84 | 206.56 | 370MB | 0.0% | None | ADVISORY |
-| fp32 | 2 | 2 | 4.75 | 210.71 | 467MB | 0.0% | None | ADVISORY |
-| fp32 | 2 | 8 | 4.54 | 220.26 | 748MB | 0.0% | None | ADVISORY |
-| fp32 | 4 | 1 | 8.35 | 119.71 | 415MB | 0.0% | None | ADVISORY |
-| fp32 | 4 | 2 | 8.61 | 116.18 | 425MB | 0.0% | None | ADVISORY |
-| fp32 | 4 | 8 | 8.57 | 116.63 | 737MB | 0.0% | None | ADVISORY |
-| int8 | 1 | 1 | 4.78 | 209.0 | 208MB | 0.0% | None | ADVISORY |
-| int8 | 1 | 2 | 4.71 | 212.46 | 247MB | 0.0% | None | ADVISORY |
-| int8 | 1 | 8 | 4.65 | 215.17 | 460MB | 0.0% | None | ADVISORY |
-| int8 | 2 | 1 | 8.73 | 114.52 | 220MB | 0.0% | None | ADVISORY |
-| int8 | 2 | 2 | 8.75 | 114.33 | 268MB | 0.0% | None | ADVISORY |
-| int8 | 2 | 8 | 8.58 | 116.52 | 448MB | 0.0% | None | ADVISORY |
-| int8 | 4 | 1 | 13.93 | 71.81 | 188MB | 0.0% | None | ADVISORY |
-| int8 | 4 | 2 | 14.72 | 67.91 | 254MB | 0.0% | None | ADVISORY |
-| int8 | 4 | 8 | 14.69 | 68.09 | 475MB | 0.0% | None | ADVISORY |
+| fp32 | 1 | 1 | 2.6 | 384.01 | 424MB | 0.1% | 10.14 | ADVISORY |
+| fp32 | 1 | 2 | 2.56 | 389.93 | 458MB | 0.5% | 9.13 | OK |
+| fp32 | 1 | 8 | 2.44 | 410.47 | 771MB | 1.0% | 10.44 | ADVISORY |
+| fp32 | 2 | 1 | 4.9 | 204.15 | 400MB | 0.6% | 10.06 | ADVISORY |
+| fp32 | 2 | 2 | 4.83 | 206.95 | 447MB | 1.0% | 10.36 | ADVISORY |
+| fp32 | 2 | 8 | 4.63 | 215.96 | 767MB | 2.0% | 12.33 | ADVISORY |
+| fp32 | 4 | 1 | 8.03 | 124.47 | 384MB | 5.9% | 12.37 | ADVISORY |
+| fp32 | 4 | 2 | 8.25 | 121.26 | 456MB | 9.2% | 12.54 | ADVISORY |
+| fp32 | 4 | 8 | 8.54 | 117.16 | 751MB | 2.9% | 12.5 | ADVISORY |
+| int8 | 1 | 1 | 4.77 | 209.56 | 208MB | 0.6% | 12.23 | ADVISORY |
+| int8 | 1 | 2 | 4.74 | 210.75 | 254MB | 0.4% | 12.2 | ADVISORY |
+| int8 | 1 | 8 | 4.65 | 215.17 | 452MB | 1.4% | 12.43 | ADVISORY |
+| int8 | 2 | 1 | 8.77 | 113.97 | 206MB | 0.1% | 12.05 | ADVISORY |
+| int8 | 2 | 2 | 8.76 | 114.21 | 264MB | 0.2% | 12.14 | ADVISORY |
+| int8 | 2 | 8 | 8.62 | 115.98 | 454MB | 1.5% | 12.14 | ADVISORY |
+| int8 | 4 | 1 | 13.48 | 74.19 | 212MB | 3.6% | 11.69 | ADVISORY |
+| int8 | 4 | 2 | 14.08 | 71.02 | 256MB | 2.0% | 11.72 | ADVISORY |
+| int8 | 4 | 8 | 13.93 | 71.79 | 463MB | 1.4% | 11.72 | ADVISORY |
 
 **Quality / fp32** on CORPUS-A/coco5k:
 
@@ -114,24 +114,24 @@ Artifacts: `vision_fp32_mb` 32.0MB · `vision_int8_mb` 14.7MB · `text_fp32_mb` 
 
 | precision | intra | batch | img/s | ms/img | peak RSS | spread | load | status |
 |---|---:|---:|---:|---:|---:|---:|---:|---|
-| fp32 | 1 | 1 | 7.63 | 131.02 | 204MB | 0.0% | None | ADVISORY |
-| fp32 | 1 | 2 | 7.61 | 131.45 | 228MB | 0.0% | None | ADVISORY |
-| fp32 | 1 | 8 | 7.35 | 136.05 | 411MB | 0.0% | None | ADVISORY |
-| fp32 | 2 | 1 | 12.97 | 77.11 | 204MB | 0.0% | None | ADVISORY |
-| fp32 | 2 | 2 | 14.07 | 71.07 | 240MB | 0.0% | None | ADVISORY |
-| fp32 | 2 | 8 | 13.73 | 72.85 | 408MB | 0.0% | None | ADVISORY |
-| fp32 | 4 | 1 | 22.25 | 44.94 | 206MB | 0.0% | None | ADVISORY |
-| fp32 | 4 | 2 | 23.21 | 43.09 | 230MB | 0.0% | None | ADVISORY |
-| fp32 | 4 | 8 | 24.23 | 41.26 | 394MB | 0.0% | None | ADVISORY |
-| int8 | 1 | 1 | 11.32 | 88.33 | 147MB | 0.0% | None | ADVISORY |
-| int8 | 1 | 2 | 11.2 | 89.28 | 174MB | 0.0% | None | ADVISORY |
-| int8 | 1 | 8 | 11.05 | 90.5 | 292MB | 0.0% | None | ADVISORY |
-| int8 | 2 | 1 | 18.09 | 55.28 | 145MB | 0.0% | None | ADVISORY |
-| int8 | 2 | 2 | 20.16 | 49.6 | 174MB | 0.0% | None | ADVISORY |
-| int8 | 2 | 8 | 20.05 | 49.89 | 290MB | 0.0% | None | ADVISORY |
-| int8 | 4 | 1 | 29.38 | 34.04 | 150MB | 0.0% | None | ADVISORY |
-| int8 | 4 | 2 | 30.99 | 32.26 | 158MB | 0.0% | None | ADVISORY |
-| int8 | 4 | 8 | 33.87 | 29.53 | 296MB | 0.0% | None | ADVISORY |
+| fp32 | 1 | 1 | 7.63 | 131.08 | 199MB | 0.4% | 11.77 | ADVISORY |
+| fp32 | 1 | 2 | 7.61 | 131.48 | 236MB | 2.8% | 11.26 | ADVISORY |
+| fp32 | 1 | 8 | 7.34 | 136.3 | 402MB | 2.8% | 11.56 | ADVISORY |
+| fp32 | 2 | 1 | 12.99 | 76.97 | 198MB | 0.3% | 11.51 | ADVISORY |
+| fp32 | 2 | 2 | 14.09 | 70.98 | 243MB | 0.5% | 11.31 | ADVISORY |
+| fp32 | 2 | 8 | 13.74 | 72.78 | 400MB | 0.3% | 11.38 | ADVISORY |
+| fp32 | 4 | 1 | 22.05 | 45.35 | 212MB | 4.7% | 11.35 | ADVISORY |
+| fp32 | 4 | 2 | 21.77 | 45.93 | 242MB | 0.9% | 11.4 | ADVISORY |
+| fp32 | 4 | 8 | 22.73 | 44.0 | 402MB | 3.1% | 12.09 | ADVISORY |
+| int8 | 1 | 1 | 11.34 | 88.19 | 151MB | 0.5% | 12.09 | ADVISORY |
+| int8 | 1 | 2 | 11.21 | 89.22 | 175MB | 1.2% | 12.0 | ADVISORY |
+| int8 | 1 | 8 | 11.04 | 90.55 | 297MB | 2.1% | 11.69 | ADVISORY |
+| int8 | 2 | 1 | 18.2 | 54.95 | 147MB | 1.2% | 11.12 | ADVISORY |
+| int8 | 2 | 2 | 20.24 | 49.42 | 177MB | 1.0% | 11.19 | ADVISORY |
+| int8 | 2 | 8 | 20.06 | 49.84 | 297MB | 0.8% | 11.25 | ADVISORY |
+| int8 | 4 | 1 | 28.34 | 35.29 | 146MB | 2.9% | 10.99 | ADVISORY |
+| int8 | 4 | 2 | 29.81 | 33.54 | 175MB | 1.8% | 11.07 | ADVISORY |
+| int8 | 4 | 8 | 32.27 | 30.99 | 294MB | 2.1% | 11.07 | ADVISORY |
 
 **Quality / fp32** on CORPUS-A/coco5k:
 
@@ -176,24 +176,24 @@ Artifacts: `vision_fp32_mb` 371.8MB · `vision_int8_mb` 94.6MB · `text_int8_mb`
 
 | precision | intra | batch | img/s | ms/img | peak RSS | spread | load | status |
 |---|---:|---:|---:|---:|---:|---:|---:|---|
-| fp32 | 1 | 1 | 2.69 | 371.78 | 627MB | 0.0% | None | ADVISORY |
-| fp32 | 1 | 2 | 2.68 | 373.21 | 675MB | 0.0% | None | ADVISORY |
-| fp32 | 1 | 8 | 2.51 | 398.36 | 884MB | 0.0% | None | ADVISORY |
-| fp32 | 2 | 1 | 5.25 | 190.32 | 631MB | 0.0% | None | ADVISORY |
-| fp32 | 2 | 2 | 5.23 | 191.1 | 670MB | 0.0% | None | ADVISORY |
-| fp32 | 2 | 8 | 4.93 | 203.04 | 822MB | 0.0% | None | ADVISORY |
-| fp32 | 4 | 1 | 10.05 | 99.46 | 645MB | 0.0% | None | ADVISORY |
-| fp32 | 4 | 2 | 10.04 | 99.56 | 695MB | 0.0% | None | ADVISORY |
-| fp32 | 4 | 8 | 9.5 | 105.31 | 835MB | 0.0% | None | ADVISORY |
-| int8 | 1 | 1 | 7.17 | 139.46 | 347MB | 0.0% | None | ADVISORY |
-| int8 | 1 | 2 | 7.21 | 138.76 | 406MB | 0.0% | None | ADVISORY |
-| int8 | 1 | 8 | 6.96 | 143.58 | 574MB | 0.0% | None | ADVISORY |
-| int8 | 2 | 1 | 13.72 | 72.86 | 346MB | 0.0% | None | ADVISORY |
-| int8 | 2 | 2 | 13.83 | 72.31 | 372MB | 0.0% | None | ADVISORY |
-| int8 | 2 | 8 | 13.55 | 73.8 | 563MB | 0.0% | None | ADVISORY |
-| int8 | 4 | 1 | 25.4 | 39.36 | 367MB | 0.0% | None | ADVISORY |
-| int8 | 4 | 2 | 26.1 | 38.31 | 394MB | 0.0% | None | ADVISORY |
-| int8 | 4 | 8 | 23.95 | 41.75 | 581MB | 0.0% | None | ADVISORY |
+| fp32 | 1 | 1 | 2.7 | 370.36 | 630MB | 0.8% | 10.99 | ADVISORY |
+| fp32 | 1 | 2 | 2.68 | 373.49 | 658MB | 0.5% | 10.7 | ADVISORY |
+| fp32 | 1 | 8 | 2.54 | 393.19 | 854MB | 2.3% | 10.12 | ADVISORY |
+| fp32 | 2 | 1 | 5.26 | 189.94 | 628MB | 1.3% | 9.18 | OK |
+| fp32 | 2 | 2 | 5.28 | 189.49 | 700MB | 1.4% | 9.47 | OK |
+| fp32 | 2 | 8 | 4.75 | 210.31 | 811MB | 4.0% | 9.58 | OK |
+| fp32 | 4 | 1 | 9.53 | 104.96 | 632MB | 17.1% | 9.53 | OK |
+| fp32 | 4 | 2 | 9.7 | 103.13 | 713MB | 2.8% | 9.17 | OK |
+| fp32 | 4 | 8 | 9.24 | 108.28 | 859MB | 2.8% | 9.77 | ADVISORY |
+| int8 | 1 | 1 | 7.17 | 139.49 | 344MB | 0.4% | 9.77 | ADVISORY |
+| int8 | 1 | 2 | 7.2 | 138.84 | 380MB | 0.7% | 10.5 | ADVISORY |
+| int8 | 1 | 8 | 6.99 | 143.04 | 585MB | 1.2% | 10.62 | ADVISORY |
+| int8 | 2 | 1 | 13.74 | 72.78 | 343MB | 2.4% | 9.85 | ADVISORY |
+| int8 | 2 | 2 | 13.94 | 71.72 | 360MB | 1.0% | 9.95 | ADVISORY |
+| int8 | 2 | 8 | 13.38 | 74.76 | 536MB | 3.1% | 10.35 | ADVISORY |
+| int8 | 4 | 1 | 25.17 | 39.73 | 354MB | 2.7% | 10.08 | ADVISORY |
+| int8 | 4 | 2 | 25.99 | 38.48 | 372MB | 0.2% | 9.99 | ADVISORY |
+| int8 | 4 | 8 | 24.32 | 41.11 | 580MB | 2.9% | 9.83 | ADVISORY |
 
 **Quality / fp32** on CORPUS-A/coco5k:
 
@@ -233,29 +233,6 @@ Artifacts: `vision_fp32_mb` 371.7MB · `vision_int8_mb` 95.8MB · `text_fp32_mb`
 | precision | mean cos | min cos | p1 cos | NN agree | top-3 overlap | verdict |
 |---|---:|---:|---:|---:|---:|---|
 | int8 | 0.9878 | 0.9715 | 0.9746 | 0.875 | 0.850 | ❌ FAIL |
-
-**Perf matrix** (median of fresh processes; ms/img, img/s, peak RSS):
-
-| precision | intra | batch | img/s | ms/img | peak RSS | spread | load | status |
-|---|---:|---:|---:|---:|---:|---:|---:|---|
-| fp32 | 1 | 1 | 2.68 | 373.15 | 620MB | 0.0% | None | ADVISORY |
-| fp32 | 1 | 2 | 2.66 | 375.97 | 660MB | 0.0% | None | ADVISORY |
-| fp32 | 1 | 8 | 2.52 | 397.06 | 760MB | 0.0% | None | ADVISORY |
-| fp32 | 2 | 1 | 5.24 | 191.01 | 634MB | 0.0% | None | ADVISORY |
-| fp32 | 2 | 2 | 5.25 | 190.36 | 637MB | 0.0% | None | ADVISORY |
-| fp32 | 2 | 8 | 5.0 | 199.8 | 772MB | 0.0% | None | ADVISORY |
-| fp32 | 4 | 1 | 9.72 | 102.91 | 629MB | 0.0% | None | ADVISORY |
-| fp32 | 4 | 2 | 9.85 | 101.55 | 688MB | 0.0% | None | ADVISORY |
-| fp32 | 4 | 8 | 9.32 | 107.31 | 784MB | 0.0% | None | ADVISORY |
-| int8 | 1 | 1 | 7.37 | 135.76 | 362MB | 0.0% | None | ADVISORY |
-| int8 | 1 | 2 | 7.36 | 135.8 | 364MB | 0.0% | None | ADVISORY |
-| int8 | 1 | 8 | 7.16 | 139.74 | 451MB | 0.0% | None | ADVISORY |
-| int8 | 2 | 1 | 14.08 | 71.01 | 350MB | 0.0% | None | ADVISORY |
-| int8 | 2 | 2 | 14.41 | 69.42 | 344MB | 0.0% | None | ADVISORY |
-| int8 | 2 | 8 | 14.14 | 70.72 | 443MB | 0.0% | None | ADVISORY |
-| int8 | 4 | 1 | 26.79 | 37.32 | 331MB | 0.0% | None | ADVISORY |
-| int8 | 4 | 2 | 27.34 | 36.58 | 376MB | 0.0% | None | ADVISORY |
-| int8 | 4 | 8 | 26.96 | 37.1 | 458MB | 0.0% | None | ADVISORY |
 
 **Quality / fp32** on CORPUS-A/coco5k:
 
@@ -338,24 +315,24 @@ Artifacts: `vision_fp32_mb` 351.8MB · `vision_int8_mb` 96.0MB · `text_fp32_mb`
 
 | precision | intra | batch | img/s | ms/img | peak RSS | spread | load | status |
 |---|---:|---:|---:|---:|---:|---:|---:|---|
-| fp32 | 1 | 1 | 10.28 | 97.23 | 589MB | 0.0% | None | ADVISORY |
-| fp32 | 1 | 2 | 10.64 | 93.96 | 613MB | 0.0% | None | ADVISORY |
-| fp32 | 1 | 8 | 10.38 | 96.29 | 687MB | 0.0% | None | ADVISORY |
-| fp32 | 2 | 1 | 19.45 | 51.41 | 624MB | 0.0% | None | ADVISORY |
-| fp32 | 2 | 2 | 20.48 | 48.83 | 632MB | 0.0% | None | ADVISORY |
-| fp32 | 2 | 8 | 20.51 | 48.75 | 680MB | 0.0% | None | ADVISORY |
-| fp32 | 4 | 1 | 35.63 | 28.06 | 648MB | 0.0% | None | ADVISORY |
-| fp32 | 4 | 2 | 38.37 | 26.06 | 626MB | 0.0% | None | ADVISORY |
-| fp32 | 4 | 8 | 39.17 | 25.53 | 642MB | 0.0% | None | ADVISORY |
-| int8 | 1 | 1 | 27.58 | 36.26 | 313MB | 0.0% | None | ADVISORY |
-| int8 | 1 | 2 | 28.84 | 34.68 | 312MB | 0.0% | None | ADVISORY |
-| int8 | 1 | 8 | 28.91 | 34.59 | 348MB | 0.0% | None | ADVISORY |
-| int8 | 2 | 1 | 50.54 | 19.79 | 299MB | 0.0% | None | ADVISORY |
-| int8 | 2 | 2 | 53.42 | 18.72 | 350MB | 0.0% | None | ADVISORY |
-| int8 | 2 | 8 | 55.15 | 18.13 | 378MB | 0.0% | None | ADVISORY |
-| int8 | 4 | 1 | 86.02 | 11.63 | 324MB | 0.0% | None | ADVISORY |
-| int8 | 4 | 2 | 93.77 | 10.66 | 362MB | 0.0% | None | ADVISORY |
-| int8 | 4 | 8 | 101.99 | 9.81 | 380MB | 0.0% | None | ADVISORY |
+| fp32 | 1 | 1 | 10.31 | 97.01 | 603MB | 0.4% | 9.85 | ADVISORY |
+| fp32 | 1 | 2 | 10.7 | 93.48 | 617MB | 1.3% | 9.89 | ADVISORY |
+| fp32 | 1 | 8 | 10.53 | 94.99 | 676MB | 0.7% | 10.07 | ADVISORY |
+| fp32 | 2 | 1 | 19.47 | 51.36 | 578MB | 0.9% | 9.82 | ADVISORY |
+| fp32 | 2 | 2 | 20.24 | 49.4 | 592MB | 1.3% | 10.16 | ADVISORY |
+| fp32 | 2 | 8 | 19.78 | 50.56 | 670MB | 7.2% | 10.8 | ADVISORY |
+| fp32 | 4 | 1 | 34.36 | 29.1 | 619MB | 9.8% | 10.8 | ADVISORY |
+| fp32 | 4 | 2 | 37.48 | 26.68 | 662MB | 6.4% | 11.14 | ADVISORY |
+| fp32 | 4 | 8 | 35.67 | 28.04 | 653MB | 9.7% | 12.49 | ADVISORY |
+| int8 | 1 | 1 | 27.73 | 36.07 | 338MB | 0.5% | 12.49 | ADVISORY |
+| int8 | 1 | 2 | 28.7 | 34.84 | 338MB | 1.0% | 12.69 | ADVISORY |
+| int8 | 1 | 8 | 29.08 | 34.38 | 344MB | 1.5% | 12.69 | ADVISORY |
+| int8 | 2 | 1 | 51.14 | 19.55 | 329MB | 2.1% | 12.47 | ADVISORY |
+| int8 | 2 | 2 | 54.07 | 18.49 | 336MB | 1.2% | 12.47 | ADVISORY |
+| int8 | 2 | 8 | 55.7 | 17.95 | 343MB | 0.9% | 12.27 | ADVISORY |
+| int8 | 4 | 1 | 85.61 | 11.68 | 324MB | 4.1% | 12.33 | ADVISORY |
+| int8 | 4 | 2 | 93.67 | 10.68 | 347MB | 2.8% | 12.33 | ADVISORY |
+| int8 | 4 | 8 | 100.77 | 9.92 | 347MB | 3.2% | 12.33 | ADVISORY |
 
 **Quality / fp32** on CORPUS-A/coco5k:
 
@@ -396,6 +373,21 @@ Artifacts: `vision_fp32_mb` 351.8MB · `vision_int8_mb` 96.0MB · `text_fp32_mb`
 > throughput pass has NOT been run (see the honesty note below the table). The WINNER verdict
 > is unaffected: it rests on per-worker RSS (contention-immune) + quality (contention-immune),
 > not on img/s. Karpathy-split B17 + fp16-weights RSS/speed bench = next pass.
+
+> **WINDOW RUN 2026-07-22 ~19:15 (lanes held, load ~10–12 — cleanest this proxy box
+> offers; ≤9.6 unreachable: desktop baseline herdr/WindowServer/replayd/browsers ~3-4
+> cores, not lanes).** Shipping-candidate perf refreshed (6 rows hit OK; rest ADVISORY,
+> per-row loadavg recorded). Cross-check vs spike bench4.py VALIDATES both harnesses:
+> siglip2 fp32 i2b1 5.26 vs 4.89 (+7.6%), int8 i2b1 13.74 vs 13.14 (+4.6%). **B1/B2 e2e**
+> (`bench index --corpus quick --headtohead`, 500 COCO imgs, POLITE 4-worker, ADVISORY):
+> imgtag **4.78 img/s** CPU-only, stages decode 3.84ms / **infer 208ms** / queue 0.22ms
+> (model-bound on 640×480 — confirms the corpus-scoped thesis; decode 3.84ms cross-validates
+> the spike's draft 3.66ms) vs **rclip 58.1 img/s on CoreML/ANE** — an ANE-vs-CPU gap that
+> INVERTS on the GPU-less Linux target (rclip is CPU-only there too). ⚠️ the 4-worker run
+> showed ~1-worker throughput (4.78 ≈ single-process rate) under the desktop-baseline
+> contention — worker scaling needs a genuinely quiet box (the Linux target) to show; B1
+> locks there per LOCK LAW. mc2/siglip-base perf not refreshed this window (B8-ineligible
+> ceiling arms).
 
 ## WINNER — the default backend recommendation (b-bench, phase 1)
 
