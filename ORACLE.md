@@ -556,6 +556,12 @@ label, or to compare a dev-machine number against a target-profile (🐧) budget
   params×4B arithmetic) verified by ORT load+forward. LAW: fetch validation must include
   expected-size-or-load-test — ">1MB and binary" passes truncated files. SHA256SUMS.fp32-
   verified is the new baseline in both dirs.
+- 2026-07-22 13:30Z · 🚨 RULE-4 TRIPWIRE FIRED: track-sports' MODEL line read
+  claude-fable-5 DESPITE an explicit model:"opus" at spawn — the harness has drifted
+  model overrides all session (haiku→opus4.8, opus→opus4.6, opus→FABLE). Agent stopped
+  within one message of detection; respawned as track-sports2. LAW REINFORCED: the
+  MODEL-line-first tripwire is the only reliable guard — explicit spawn params are NOT
+  sufficient; every first report gets checked, every violation gets an immediate stop.
 - 2026-07-22 12:25Z · b-daemon falsified ADR-3's z-score free-text calibration with a
   15-real-vs-15-nonsense probe (nonsense max-z median 4.16 > real 3.81) and shipped the
   fix behind a selector without touching the ADR — escalation contract §7(b) honored

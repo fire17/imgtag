@@ -14,7 +14,7 @@ A Head exposes .score(embeddings, images, ids) -> list[dict] per the schema abov
 
 from importlib import import_module
 
-_TRACKS = ("nudity", "weapons", "drugs")
+_TRACKS = ("nudity", "weapons", "drugs", "safety", "sports", "people", "violence")
 
 
 def load_heads(profile):
