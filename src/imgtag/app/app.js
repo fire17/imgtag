@@ -99,7 +99,9 @@ const API = {
       rttMs: performance.now() - t0,
       coverage: j.coverage || null,
       terms: normTerms(j.terms),
-      calibration: j.calibration || null,   // "measured-default" until the CAL-SET fit lands
+      calibration: j.calibration || null,   // "fitted" | "unfitted" — gates every confidence word
+      servedBy: j.served_by || null,        // "tag-table" | "warm-tower" | "cold-load"
+      towerLoadMs: Number.isFinite(j.text_tower_load_ms) ? j.text_tower_load_ms : null,
       noMatch: j.no_match === true || (j.hits || []).length === 0,
       hits: (j.hits || []).map(normHit),
     };
@@ -212,6 +214,7 @@ function markPainted() {
 }
 
 // ── virtualized grid (hand-rolled: scroll math + node reuse, no libraries) ──
+const MAX_NEW_TILES_PER_FRAME = 6;   // decode budget: see the note in render()
 class VirtualGrid {
   /** @param scroller scrolling element  @param mount element inside it that owns the grid */
   constructor(scroller, mount, { min = 190, gap = 10, overscan = 2, cap = 44, hideDataset = false, onOpen, onFill } = {}) {
@@ -304,11 +307,19 @@ class VirtualGrid {
       if (i < from || i > to) { node.remove(); this.nodes.delete(i); }
     }
     let missing = null;
+    // Creating every newly-visible tile in one frame makes the browser decode a burst of
+    // thumbnails in a single task — measured at ~2.9s of long task over a fast scroll, which
+    // blows B14. Cap the new nodes per frame and finish the rest on the next one: the work is
+    // identical, spread across frames instead of blocking one.
+    let budget = MAX_NEW_TILES_PER_FRAME;
+    let deferred = false;
     for (let i = from; i <= to; i++) {
       const item = this.items[i];
       if (!item) { (missing ||= []).push(i); continue; }
       let node = this.nodes.get(i);
       if (!node) {
+        if (budget <= 0) { deferred = true; continue; }
+        budget--;
         node = item.kind === 'band' ? this.band(item) : this.tile(item, i);
         this.nodes.set(i, node); this.win.append(node);
       }
@@ -316,6 +327,9 @@ class VirtualGrid {
       node.style.width = `${this.tw}px`;
       node.style.height = `${this.th}px`;
       node.style.transform = `translate(${c * (this.tw + this.gap)}px, ${r * rowH}px)`;
+    }
+    if (deferred && !this._raf) {
+      this._raf = requestAnimationFrame(() => { this._raf = 0; this.render(); });
     }
     if (missing && this.onFill) this.onFill(missing[0], missing[missing.length - 1] - missing[0] + 1);
   }
@@ -362,9 +376,13 @@ class VirtualGrid {
         el('span', { className: 'tile__ds', textContent: item.dataset || '—' }),
         el('span', { className: 'tile__id', textContent: shortId }));
       if (item.terms) {
+        // "scored present", never "verified present": measured against COCO ground truth the
+        // ALL tier is recall-heavy and precision-poor (92% / 36%) while τ is unfitted
         l1.append(el('span', {
           className: 'tile__cov', textContent: `${item.terms.m}/${item.terms.n}`,
-          title: tierLabel(item.terms.m, item.terms.n),
+          title: S.calibration === 'fitted'
+            ? tierLabel(item.terms.m, item.terms.n)
+            : `${tierLabel(item.terms.m, item.terms.n)} — scored present, thresholds unfitted`,
         }));
       }
       if (item.score != null) l1.append(el('span', { className: 'tile__score', textContent: item.score.toFixed(3) }));
@@ -499,6 +517,8 @@ async function refreshStatus() {
     if (Number.isFinite(st?.rss)) S.rss = st.rss;
     if (Array.isArray(st?.models_loaded)) S.models = st.models_loaded;
     if (st?.text_tower) S.textTower = st.text_tower;
+    // text_ttl_s is null when no timer is armed — "no timer" and "evict now" are not the same
+    S.eviction = st?.eviction_policy || (st?.text_ttl_s ? `text tower evicted after ${dur(st.text_ttl_s)} idle` : null);
     if (Array.isArray(st?.datasets) && st.datasets.length) S.datasets = st.datasets.map(normDataset);
     paintStatus();
   } catch { /* older daemons have no /api/status; every tile fed by it reads "—" */ }
@@ -746,6 +766,13 @@ async function viewSearch(q, dataset) {
   paintFilters(res);
   if (res.terms) markSyntaxKnown();          // used it once — stop teaching it
   else { const h = syntaxHint(); if (h) filterSlot.append(h); }
+  if (res.terms && S.calibration !== 'fitted') {
+    filterSlot.append(el('p', { className: 'hint hint--caveat' },
+      'Coverage is unfitted: a ', el('b', { textContent: `${res.terms.n}/${res.terms.n}` }),
+      ' means every term scored present, not that it was verified present. Measured against '
+      + 'ground truth this tier finds nearly everything it should and over-claims about two '
+      + 'thirds of the time, until the calibration fit lands.'));
+  }
   const allTier = res.terms ? res.hits.filter((h) => h.terms && h.terms.m >= h.terms.n).length : 0;
   $('#resSum').textContent = res.hits.length
     ? [
@@ -775,10 +802,15 @@ async function viewSearch(q, dataset) {
     grid.move(0);   // land on the first real image, skipping any band label
   }
 
+  // served_by makes a slow first query legible: a cold load is a one-time model load, not the
+  // engine being slow — say which, rather than letting the number look like the steady state
+  const servedNote = res.servedBy === 'cold-load'
+    ? ` · cold model load${res.towerLoadMs ? ` ${Math.round(res.towerLoadMs)} ms` : ''}`
+    : res.servedBy ? ` · ${res.servedBy}` : '';
   paintStatus({
     latency: res.tookMs != null
-      ? `<b>${res.tookMs.toFixed(1)} ms</b> server · ${res.rttMs.toFixed(0)} ms round-trip`
-      : `${res.rttMs.toFixed(0)} ms round-trip`,
+      ? `<b>${res.tookMs.toFixed(1)} ms</b> server · ${res.rttMs.toFixed(0)} ms round-trip${servedNote}`
+      : `${res.rttMs.toFixed(0)} ms round-trip${servedNote}`,
     hits: `${n0(res.hits.length)} ${res.hits.length === 1 ? 'hit' : 'hits'}`,
     coverage: res.coverage ? `coverage ${n0(res.coverage.indexed)}/${n0(res.coverage.total)}` : '',
   });
@@ -906,7 +938,8 @@ async function viewJobs() {
       el('div', { className: 'metric' }, el('b', { textContent: act.length ? act.reduce((a, j) => a + j.imgS, 0).toFixed(1) : '0' }), el('span', { textContent: 'images / second, right now' })),
       el('div', { className: 'metric' }, el('b', { textContent: n0(S.datasets.reduce((a, d) => a + d.count, 0)) }), el('span', { textContent: 'images searchable' })),
       el('div', { className: 'metric' }, el('b', { textContent: idxBytes ? bytes(idxBytes) : '—' }), el('span', { textContent: 'index on disk' })),
-      el('div', { className: 'metric' }, el('b', { textContent: S.rss != null ? bytes(S.rss) : '—' }),
+      el('div', { className: 'metric', title: S.eviction || '' },
+        el('b', { textContent: S.rss != null ? bytes(S.rss) : '—' }),
         el('span', {
           // an empty model list at idle is the design, not a fault (ADR-5): nothing stays
           // resident until a free-text query needs it

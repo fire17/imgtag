@@ -256,6 +256,8 @@ h2 { font: 600 var(--t-lg)/1.25 var(--font); margin: 0; text-wrap: balance; }
 .band--any .band__m, .band--any .band__label { color: var(--ink-mute); }
 
 .hint { color: var(--ink-dim); font-size: var(--t-sm); max-width: 70ch; margin: 0 0 var(--sp-4); text-wrap: pretty; }
+.hint--caveat { color: var(--ink-mute); }
+.hint--caveat b { color: var(--ink-dim); font-family: var(--mono); font-weight: 600; }
 .tile:hover .tile__img { box-shadow: inset 0 0 0 1px oklch(1 0 0 / 0.16); }
 .tile[aria-selected="true"] .tile__img { box-shadow: 0 0 0 2px var(--accent); }
 .tile[aria-selected="true"] .tile__ds { color: var(--accent); }
