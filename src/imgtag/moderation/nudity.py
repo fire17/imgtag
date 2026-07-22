@@ -297,6 +297,107 @@ class ZeroShotNudityHead:
                 for v in self.margins(embeddings)]
 
 
+# ── REVIEW-TIER instrument: prompt-ensemble margin over the index embeddings ───────────
+# Measured 2026-07-22 (research/track-nudity.md §10, research/eval-nudity-probe.json): the
+# Marqo head is a VIOLATION detector and scores swimwear in the SAME 0.05-0.15 band as
+# mannequins (swimwear p50 0.056 == mannequin p50 0.056), so it CANNOT carry the review
+# tier. Review is served instead by a margin over the embedding the index already computed
+# (TRACKS T1, ~0 extra cost): margin = max(review concepts) - max(negatives incl. the
+# ADR-14 never-flag figures). This COMPOSES with the Marqo head — violation from Marqo
+# (pixels), review from the margin (embeddings) — and is fitted on data/nudity-probe.
+# SEPARATION IS SWIMWEAR-ONLY: lingerie/underwear/bare-chest do NOT separate on the shared
+# embedding (a distilled head is owed, TRACKS T2). tau_review is a recall-first review-QUEUE
+# threshold in MARGIN space, never enforcement — calibrated stays False.
+
+
+def _review_spec() -> dict:
+    """The ``nudity`` entry of data/moderation.json (conductor-owned file, this key ours).
+    Never raises — a missing/broken spec just means the review instrument is unavailable."""
+    try:
+        data = Path(__file__).resolve().parent.parent / "data" / "moderation.json"
+        return json.loads(data.read_bytes())["categories"]["nudity"]
+    except (OSError, ValueError, KeyError):
+        return {}
+
+
+def _concept_vectors(backend, texts: list[str], templates) -> np.ndarray:
+    """One L2-normalized vector per concept = mean over templates (classic CLIP ensembling)."""
+    flat = [t.format(c) for c in texts for t in templates]
+    emb = np.asarray(backend.embed_texts(flat), np.float32).reshape(len(texts), len(templates), -1)
+    v = emb.mean(1)
+    return np.ascontiguousarray(v / np.maximum(np.linalg.norm(v, axis=1, keepdims=True), 1e-12))
+
+
+class NudityReviewScorer:
+    """Review-tier margin instrument. Build once per (model, spec); score any dataset for ~0.
+
+    ``score(embeddings, images, ids) -> [{category, p, tier: review|none, subcategory}]``.
+    NEVER emits ``violation`` (that tier belongs to the Marqo head). ``calibrated`` is False:
+    ``tau_review`` is a recall-first review-QUEUE threshold in margin space, not enforcement.
+    """
+
+    category = CATEGORY
+    wants_images = False
+    model_id = "nudity-review-margin"
+    calibrated = False
+
+    def __init__(self, pos, groups, neg, platt, tau_review, model_sha=""):
+        self.pos, self.groups, self.neg = pos, groups, neg
+        self.platt = tuple(platt)
+        self.tau_review = float(tau_review)
+        self.model_sha = model_sha
+
+    @classmethod
+    def build(cls, backend, spec: dict | None = None, profile: dict | None = None) -> "NudityReviewScorer":
+        spec = _review_spec() if spec is None else spec
+        profile = profile or {}
+        subs = spec.get("review_subcategories") or {"review": list(spec.get("review") or PROMPTS_POSITIVE)}
+        templates = spec.get("templates") or ["a photo of {}.", "a close-up photo of {}.", "{}"]
+        names, groups = [], []
+        for g, cs in subs.items():
+            names += list(cs)
+            groups += [g] * len(cs)
+        neg = list(spec.get("negatives") or PROMPTS_NEGATIVE)
+        platt = spec.get("platt") or [1.0, 0.0]
+        tau = float(profile.get("nudity_tau_review") or spec.get("tau_review") or TAU_REVIEW)
+        return cls(_concept_vectors(backend, names, templates), groups,
+                   _concept_vectors(backend, neg, templates), platt, tau,
+                   getattr(backend, "model_sha", ""))
+
+    def margins(self, embs) -> tuple[np.ndarray, np.ndarray]:
+        """(margin, argmax-concept-index). margin = max(review) - max(negatives)."""
+        e = np.asarray(embs, np.float32)
+        cp = e @ self.pos.T
+        return cp.max(1) - (e @ self.neg.T).max(1), cp.argmax(1)
+
+    def probs(self, embs) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        m, best = self.margins(embs)
+        a, b = self.platt
+        return 1.0 / (1.0 + np.exp(-(a * m + b))), m, best
+
+    def score(self, embeddings, images=None, ids=None, views=None) -> list[dict]:
+        p, m, best = self.probs(embeddings)
+        return [{"category": CATEGORY, "p": round(float(pi), 4),
+                 "tier": "review" if mi >= self.tau_review else "none",
+                 "subcategory": self.groups[bi], "margin": round(float(mi), 4),
+                 "model_id": self.model_id, "calibrated": False}
+                for pi, mi, bi in zip(p, m, best)]
+
+
+def load_nudity_review_scorer(backend, profile: dict | None = None) -> NudityReviewScorer | None:
+    """The review instrument, or None if the spec/backend is unavailable.
+
+    Kept OUT of the auto-loaded runtime head (``load_nudity_head``) DELIBERATELY: separation
+    is swimwear-only (measured), so wiring it into the index-time composition is a flagged
+    next step — earned when a subcategory clears the bar or a distilled head is trained
+    (research/track-nudity.md §10). Until then it is an on-demand, calibratable instrument
+    the operator (or b-daemon's tag path) can run to elevate swimwear above the FP band."""
+    try:
+        return NudityReviewScorer.build(backend, profile=profile)
+    except Exception:
+        return None
+
+
 def load_nudity_head(profile: dict | None = None) -> NudityHead | None:
     """The ONNX head, or None when its artifact is absent — a missing track is simply not
     loaded (the dispatcher reports moderation heads by name), never a silent zero."""

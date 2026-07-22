@@ -419,3 +419,204 @@ so bikini tops out at 0.28 and the whole class sits in the 0.05–0.15 band. The
 is the better instrument for that tier, and the two compose: **violation from this head,
 swimwear-review from the tag path**. This head's own review band should be read as
 "possible nudity, look at it", not as "swimwear".
+
+---
+
+## 10. Datasets & sub-category labeling (user 2026-07-22: "no true positives and no sub-category labeling")
+
+Both gaps are real; I raised the TP one myself as honest-gap #1. They are DISTINCT problems
+and one is architectural.
+
+### 10.1 Sub-category labeling needs a second instrument — the binary head cannot do it
+
+The Marqo head is a **2-class NSFW/SFW** classifier. It emits one probability and
+**structurally cannot name a sub-category** ("exposed breast" vs "covered buttocks" vs
+"swimwear"). Sub-category labels need a detector with a body-part vocabulary. Added:
+**NudeNet v3 320n** (`deepghs/nudenet_onnx`, **Apache-2.0**, YOLOv8 @320, 12MB ONNX),
+`src/imgtag/moderation/nudity_subcat.py`. 18 anatomical classes, each exposed/covered,
+mapped to ADR-14 tiers **as data** (`CLASS_TIER`): exposed genital/anus/breast/buttocks →
+`violation`; covered-but-revealing → `review`; face/feet → `none`. NMS is ~15 lines of
+numpy (the shipped `nms-yolov8.onnx` is not needed — one fewer graph). No new runtime dep.
+
+**It is an EXPLAINER, run only on already-flagged images — NOT a standalone gate.** Two
+measured reasons:
+- **NudeNet has no concept of statue/mannequin.** On 40 CC0 nude marble sculptures it fired
+  **violation on 28%** (FEMALE_GENITALIA_EXPOSED ×7) — it detects anatomy in marble. That
+  is the ADR-14 hard-negative failure in the open. The Marqo head, by contrast, flags **0%
+  violation** on photographic statues. So the gate stays Marqo (+ its content-free guard);
+  NudeNet adds the *why* on images already flagged, and its statue-blindness is documented,
+  not shipped as a decision.
+- Running a detector on every image would break the scaling invariant (§6b). Gated behind a
+  flag, the common (unflagged) image pays only the Marqo forward.
+
+**Sub-category labeling works and is measured** on lawful non-explicit images. NudeNet on
+50 Unsplash swimwear/bikini photos: `FEMALE_BREAST_COVERED` ×7 (review), `ARMPITS_EXPOSED`,
+`BELLY_EXPOSED`, and one `MALE_GENITALIA_EXPOSED` false positive (a swimsuit at score 0.25).
+Content-free probes: **0 detections** — the detector is immune to the colour prior that
+fools the binary head (§9), so it needs no structure guard of its own.
+
+Per-image sub-category payload (`NudeNetSubcategoryHead.label`):
+`{category:"nudity", tier, subcategories:[{class,p}], detections:[{class,tier,p,box}]}` —
+`tier` composes into the same ADR-14 counts; `subcategories` is the human-readable
+explanation; `box` supports later blur/redact.
+
+### 10.2 True positives — a lawful non-explicit proxy now, the real set escalated
+
+**EVAL DATA LAW still binds: no explicit-adult corpus was fetched to this machine.** What
+was fetchable lawfully and safely: **112 CC0 public-domain works from the Met Open Access
+API** (`scripts/fetch_art_proxy.py`, reproducible) — 72 classical nudes + 40 nude
+sculptures. Adult art only, non-explicit, non-photographic. First positive-side signal on
+the nudity boundary:
+
+| set (n) | Marqo recall@0.50 | Marqo @0.10 | NudeNet violation | note |
+|---|---|---|---|---|
+| painted/sculpted nudes (72) | 17% | 42% | 10% | **weak — painting is a domain shift from photos** |
+| nude marble statues (40) | 10% | 28% | **28%** | ADR-14 = NO FLAG; NudeNet fails it, Marqo weakly fires too on explicit classical nudity |
+
+**This is a PROXY and under-reads real-photo recall** — both models trained on photographs,
+so painted nudity is out of distribution and the 17–42% is a *floor*, not the recall a
+photographic set would show. It is honest positive-side signal, not a recall claim. The
+Met statue result also sharpens ADR-14: full-frontal classical *sculpture* is exactly where
+"non-person figure = no flag" is hardest, and it is where a future statue/mannequin
+discriminator earns its place (both instruments want it).
+
+**Review-tier TRUE positives, measured on lawful data now:** the 197 Unsplash
+swimwear/bikini/lingerie/underwear/bra/panties images ARE ADR-14 review positives. Marqo's
+recall on them at τ_review=0.10 is **6.1%** — confirming quantitatively that the binary head
+is the wrong review-tier instrument and the tag path owns that tier (§7 note). NudeNet's
+`*_COVERED` classes are the better review signal and are now available.
+
+### 10.3 What still cannot be closed here — ESCALATED (ORACLE §7, rule 2)
+
+1. **Photographic violation-tier recall.** Needs a lawfully-held, labeled photographic
+   nudity set. That decision is not mine and must not be a casual fetch — the baby/child
+   slices scoring non-zero (§3) make any explicit-set fetch CSAM-adjacent and unacceptable
+   without an explicit, lawful, adult-only provenance. **Recommended path (unchanged):** the
+   operator supplies an in-house labeled sample **on the target host**, τ is fitted there,
+   and only then does `enforcement_ready` flip. Alternative: a research-DUA academic
+   benchmark, on the target host, never this Mac.
+2. **Policy boundary: is depicted (painted/drawn) nudity a `violation`, or `none` like a
+   statue?** ADR-14 rules non-person *figures* no-flag; it does not rule on art *of* people.
+   The proxy is only interpretable once this is ruled. Question routed to the user.
+
+### 10.4 Files added this round
+
+`src/imgtag/moderation/nudity_subcat.py` · `tests/test_nudity_subcat.py` (7 tests) ·
+`scripts/fetch_art_proxy.py` · `research/bench_scripts/nudity_subcat_eval.py`. NudeNet
+artifact + art proxy are gitignored (models/**/*.onnx, /data/); regen from the scripts.
+
+---
+
+## 11. Review-tier TP probe + confidence separation + ratio-threshold (track-nudity3, 2026-07-22)
+
+> Mandate: VISION-ADDENDA 13:58Z (verbatim) — *"i dont see true positives in the datasets and
+> all findings are false positives … whatever is scored now should … be at lower confidence
+> results compared to the true positive results and then we will be able to set the ratio
+> threshold for auto flagging for each track"*. This round answers the **confidence-separation
+> + ratio-threshold** half of the directive, and delivers a **real indexed TP dataset** the
+> user can feel-test. It COMPOSES with §10 (which answers the subcategory-*labeling* half via
+> the NudeNet body-part explainer) — different instruments, different halves, no runtime
+> overlap. **EVAL DATA LAW obeyed: only review-tier (non-explicit) TPs, keyword-sourced from
+> the local Unsplash corpus; violation-tier recall stays benchmark-cited, never re-measured.**
+
+### 11.1 The deliverable that directly fixes "no TPs to test": `nudityprobe`
+
+`data/nudity-probe/` — **202 local Unsplash review-tier positives, assembled PROGRAMMATICALLY
+by keyword-join (T4: no agent hand-labelling; ≤20 spot-views only)**, indexed as a real
+dataset (`imgtag index data/nudity-probe nudityprobe --wait --moderation`). Subcategories &
+counts: swimwear 77 · lingerie 16 · underwear 4 · bare-chest-male 45 (noisy `fitness` proxy) ·
+**mannequin-statue control 60** (never-flag). Symlinked, gitignored, never redistributed.
+Builder+harness: `research/bench_scripts/nudity_probe.py` (seed 20260722, re-runnable).
+
+**This reproduced the user's complaint as the honest BEFORE picture:** on a dataset that is
+100% review-tier TP, the current Marqo-only runtime flagged only **13/202 review, 0 violation**
+— and those 13 are the §9 colour-prior FPs, *not* the swimwear. The track genuinely could not
+be tested until this corpus existed.
+
+### 11.2 The review tier is a MARGIN over the index embeddings — NOT the Marqo head
+
+Confirmed, first-party, on the probe: the Marqo p **cannot separate the review tier** —
+swimwear p50 **0.056** == mannequin p50 **0.056** == the FP corpus band. So review is served
+by a prompt-ensemble margin over the pecore-s16-384 embedding the index already computed
+(TRACKS T1, ~0 extra cost): `margin = max(review concepts) − max(negatives incl. the ADR-14
+never-flag figures)`. Instrument choice was **measured**: full-negatives (mannequin/statue in
+the subtracted bank) keeps the ADR-14 control tightest — generic-only negatives raised the
+control leak 0.07→0.12, so the never-flag law wins over marginal recall.
+
+### 11.3 Confidence separation, per subcategory (FP band = 14,734 indexed safe images)
+
+FP-band review-margin: p50 **−0.021** · p90 +0.019 · p99 +0.066.
+
+| subcategory | n | margin p50 | R@fpr5% | R@fpr1% | AP (CI95) | verdict |
+|---|---|---|---|---|---|---|
+| **swimwear** | 77 | **+0.045** | **0.571** | 0.299 | 0.111 (0.063–0.18) | **SEPARATES — usable recall-first review tier** |
+| lingerie | 16 | −0.035 | 0.00 | 0.00 | 0.001 | does NOT separate on shared embedding |
+| underwear | 4 | −0.000 | 0.00 | 0.00 | 0.001 | does NOT separate (also n=4, too thin) |
+| bare-chest-male | 45 | −0.007 | 0.133 | 0.022 | 0.007 | does NOT separate (noisy `fitness` proxy) |
+| **mannequin-statue** (control) | 60 | −0.016 | 0.067 | **0.000** | — | **CONTROL PASS — below FP median, 0 flags at τ₁%** |
+
+End-to-end via the real scorer (`load_nudity_review_scorer`, reading the taxonomy from
+`moderation.json`): swimwear **22/30** review-tier vs mannequin control **2/30** — the
+elevation the Marqo-only runtime could not produce.
+
+### 11.4 Proposed ratio thresholds ("auto-flag τ"), per tier
+
+- **violation** — Marqo head, **τ=0.50** (its argmax, the only point the published 98.56%/20k
+  evaluation describes). NOT locally re-measured (EVAL DATA LAW). Honest margin: the safe-corpus
+  Marqo **p99 is 0.175**, so 0.50 sits far above the FP band. `enforcement_ready` stays false.
+- **review (swimwear)** — margin instrument, recall-first (ADR-14): **τ_review = 0.0339** (5% FP
+  band → R@5%=0.57) or **0.0658** (1% FP band → R@1%=0.30). Platt [28.96, −4.53] → confidence p.
+  Overridable per install via `profile["nudity_tau_review"]`. Dial as the operator's queue
+  budget allows.
+
+### 11.5 Honest limits (headlined per directive: "if separation fails anywhere, headline it")
+
+- **Review recall is swimwear-ONLY.** lingerie / underwear / bare-chest do **not** separate on
+  the shared pecore embedding (R@5% ≤ 0.13) — the same lesson as §4's violation-tier
+  falsification, now measured for these review subcats. Each **earns a distilled head** (TRACKS
+  T2) or a dedicated instrument; recorded as darwin item **D-nudity-review-distill**. NudeNet's
+  `*_COVERED` classes (§10) are the immediately-available better signal for these.
+- **Violation-tier recall is benchmark-cited, never locally reproduced** — and cannot be, on
+  this machine, under the EVAL DATA LAW. That honesty is the deliverable, not a gap.
+- **Small positive sets** (swimwear 77, lingerie 16, underwear 4) ⇒ wide CI; the fit is a
+  review-queue calibration, not an enforcement claim.
+- **Composition wiring is a flagged NEXT STEP, not silently shipped.** `NudityReviewScorer`
+  exists as a tested, calibratable instrument, but is deliberately kept OUT of the auto-loaded
+  `load_nudity_head` runtime composition until a subcategory clears the bar or a distilled head
+  is trained (TRACKS T2 earn-it rule). The Marqo violation path is untouched. Handoff to
+  b-engine: compose `violation←Marqo(pixels)` + `review←NudityReviewScorer(embeddings)` in the
+  index-time head when green-lit (the embeddings already flow into `score()`).
+
+### 11.6 Relationship to §10 (the parallel NudeNet round) — COMPLEMENTARY, both preserved
+
+§10 (NudeNet body-part explainer) and §11 (review-margin separation + probe + τ) were built
+concurrently by two nudity-lane agents and address **different halves** of the 13:58Z directive:
+§10 = subcategory *labels* (anatomy classes, run on already-flagged images); §11 = confidence
+*separation* + the ratio *threshold* + the indexed TP dataset. They share no runtime path
+(NudeNet uses `CLASS_TIER` constants; the margin reads `moderation.json.review_subcategories`).
+**Recommend the conductor dedupe the two subcategory taxonomies** (anatomy-region vs
+clothing-context) into one documented composition. Files added this round:
+`research/bench_scripts/nudity_probe.py` · `research/eval-nudity-probe.json` ·
+`data/nudity-probe/` (gitignored) · `moderation.json` nudity entry (taxonomy+fit) ·
+`nudity.py` (`NudityReviewScorer`) · `tests/test_nudity.py` (+5 tests).
+
+### 11.7 Violation-tier: the operator-supplied path (`nsfwprobe`)
+
+Violation-tier recall is the one number the EVAL DATA LAW forbids the agent from producing
+(no explicit corpus is ever fetched). The **sanctioned** way it gets measured first-party: the
+operator drops a **lawfully-held, adult-only** folder locally and indexes it —
+`imgtag index <folder> nsfwprobe --wait --moderation` (local-only, gitignored, never
+committed, never redistributed) — then `nudity_probe.py --nsfw-dataset nsfwprobe` measures the
+Marqo head's violation recall at τ=0.50 vs the safe-corpus FP band **unchanged**. Until that
+folder exists, τ_violation=0.50 stays benchmark-cited (98.56%/20k) and `enforcement_ready`
+stays false. The harness slot is built and waiting; the agent supplies nothing.
+
+> **WHERE I AM (2026-07-22, track-nudity3) — what's next.** DONE: `nudityprobe` (202 review-tier
+> TPs) built + indexed; review-margin separation measured (swimwear SEPARATES R@5%=0.57;
+> lingerie/underwear/bare-chest do not; mannequin control passes); τ proposed per tier;
+> taxonomy + `NudityReviewScorer` shipped as data+code; 32 tests green; `nsfwprobe` operator
+> slot wired. NEXT: (1) on ALL-CLEAR, re-verify idle; (2) if the operator supplies `nsfwprobe`,
+> run `--nsfw-dataset` to get first-party violation recall; (3) darwin item **D-nudity-review-
+> distill** — train a distilled head for lingerie/underwear/bare-chest (shared embedding
+> cannot carry them); (4) conductor to dedupe §10 (NudeNet anatomy taxonomy) with §11
+> (clothing-context taxonomy) into one composition.

@@ -1,11 +1,12 @@
 {
  "version": 2,
  "policy": "ADR-14 two-tier moderation (user ruling 2026-07-22)",
- "note": "Each category carries TWO prompt sets. `violation` = the policy breach itself (human nudity/explicit, REAL weapons, illegal drugs and paraphernalia). `review` = the look-alike a human should judge (swimwear/lingerie, toy or replica weapons, tobacco/vape). `negatives` are subtracted from BOTH and exist to kill the true false-positive class: mannequins, statues, sculptures and other non-person figures never flag. Tracks are PROMPT SETS, not tag lookups — the 2177-tag vocabulary has no nudity concept at all, only clothing, and a swimsuit is not nudity.",
+ "note": "Each category carries TWO prompt sets. `violation` = the policy breach itself (human nudity/explicit, REAL weapons, illegal drugs and paraphernalia). `review` = the look-alike a human should judge (swimwear/lingerie, toy or replica weapons, tobacco/vape). `negatives` are subtracted from BOTH and exist to kill the true false-positive class: mannequins, statues, sculptures and other non-person figures never flag. Tracks are PROMPT SETS, not tag lookups \u2014 the 2177-tag vocabulary has no nudity concept at all, only clothing, and a swimsuit is not nudity.",
  "enforcement_ready": false,
  "categories": {
   "nudity": {
    "label": "nudity / sexual content",
+   "note": "TWO INSTRUMENTS by design (research/track-nudity.md, measured 2026-07-22). VIOLATION = the Marqo NSFW head (pixels, dedicated 5.6M-param model), benchmark-cited 98.56%/20k, and NOT locally re-measurable under the EVAL DATA LAW. REVIEW = a prompt-ensemble MARGIN over the index embeddings (`review_subcategories` below), because the Marqo head scores swimwear in the SAME 0.05-0.15 band as mannequins and cannot carry the review boundary (swimwear p50 0.056 == mannequin p50 0.056, measured). The `violation` prompt list here is the offline zero-shot FALLBACK vocabulary, never the review instrument. `negatives` are subtracted from the review margin and deliberately include the ADR-14 never-flag figures (mannequin/statue) so `control_never_flag` stays below the FP band by construction.",
    "violation": [
     "a nude person",
     "a naked human being",
@@ -17,19 +18,128 @@
    "review": [
     "a person in a bikini",
     "a person in swimwear at the beach",
+    "a woman in a bikini",
+    "a man in swim trunks",
+    "a person in a swimsuit",
     "a person in lingerie",
+    "a woman in lingerie",
+    "a person wearing a bra and underwear",
+    "a person in their underwear",
+    "a person in briefs",
+    "a person in boxer shorts",
     "a shirtless man",
-    "a person in underwear"
+    "a bare-chested man",
+    "a muscular man with no shirt"
    ],
+   "review_subcategories": {
+    "swimwear": [
+     "a person in a bikini",
+     "a person in swimwear at the beach",
+     "a woman in a bikini",
+     "a man in swim trunks",
+     "a person in a swimsuit"
+    ],
+    "lingerie": [
+     "a person in lingerie",
+     "a woman in lingerie",
+     "a person wearing a bra and underwear"
+    ],
+    "underwear": [
+     "a person in their underwear",
+     "a person in briefs",
+     "a person in boxer shorts"
+    ],
+    "bare-chest-male": [
+     "a shirtless man",
+     "a bare-chested man",
+     "a muscular man with no shirt"
+    ],
+    "artistic-figure": [
+     "an artistic figure study of a body",
+     "a fine-art photograph of a bare human form"
+    ],
+    "medical-context": [
+     "a clinical medical photograph of a patient's skin",
+     "a dermatology photo of bare skin"
+    ]
+   },
    "negatives": [
+    "a landscape photograph",
+    "a photograph of food",
+    "a fully clothed person",
+    "a portrait of a person wearing clothes",
+    "an everyday object on a table",
+    "an animal",
+    "a building",
+    "a car",
+    "an indoor room",
     "a mannequin in a shop window",
     "a marble statue of a human figure",
-    "a sculpture of a body",
+    "a sculpture of a human body",
     "a plastic dummy figure",
-    "a clothed person",
-    "a portrait of a fully dressed person",
     "an anatomical model"
-   ]
+   ],
+   "control_never_flag": [
+    "mannequin-statue"
+   ],
+   "templates": [
+    "a photo of {}.",
+    "a close-up photo of {}.",
+    "{}"
+   ],
+   "scorer": "margin",
+   "platt": [
+    28.9632,
+    -4.5309
+   ],
+   "tau_violation": 0.5,
+   "tau_review": 0.0339,
+   "tau_review_1pct": 0.0658,
+   "calibration": "probe-fitted-review-swimwear-only",
+   "enforcement_ready": false,
+   "spec_sha": "bd76790c3cda6163",
+   "fit": {
+    "model": "pecore-s16-384-fp32",
+    "review_feature": "margin = max(review concepts) - max(negatives incl. mannequin/statue)",
+    "probe": "data/nudity-probe \u2014 202 local Unsplash review-tier TPs by KEYWORD-JOIN (T4, no agent hand-labelling): swimwear 77 / lingerie 16 / underwear 4 / bare-chest-male 45 (noisy `fitness` proxy) / mannequin-statue control 60",
+    "fp_band": "14,734 indexed safe images (COCO val2017 + Unsplash), probe photo-ids excluded from the negative pool",
+    "separation_by_subcat": {
+     "swimwear": {
+      "R@fpr5%": 0.571,
+      "R@fpr1%": 0.299,
+      "AP": 0.111,
+      "AP_CI95": [
+       0.063,
+       0.18
+      ],
+      "verdict": "SEPARATES (usable recall-first review tier)"
+     },
+     "lingerie": {
+      "R@fpr5%": 0.0,
+      "AP": 0.001,
+      "verdict": "DOES NOT SEPARATE on shared embedding \u2014 distilled head owed (TRACKS T2)"
+     },
+     "underwear": {
+      "R@fpr5%": 0.0,
+      "AP": 0.001,
+      "verdict": "DOES NOT SEPARATE (also n=4, too thin)"
+     },
+     "bare-chest-male": {
+      "R@fpr5%": 0.133,
+      "AP": 0.007,
+      "verdict": "DOES NOT SEPARATE (noisy fitness proxy)"
+     },
+     "mannequin-statue": {
+      "R@fpr5%": 0.067,
+      "flag@tau1%": 0.0,
+      "verdict": "CONTROL PASS (p50 -0.016, below FP median)"
+     }
+    },
+    "violation": "Marqo head, argmax tau_violation=0.50, published 98.56%/20k \u2014 NOT locally reproduced (EVAL DATA LAW). Honest margin: the safe-corpus Marqo p99 is 0.175, so 0.50 sits far above the FP band.",
+    "review": "swimwear SEPARATES (R@5%=0.57 recall-first); lingerie/underwear/bare-chest DO NOT separate on the shared pecore embedding (R@5% <= 0.13). Review recall is swimwear-only until a distilled head is trained.",
+    "caveat": "Small positive sets (swimwear 77, lingerie 16, underwear 4) => wide CI. The Marqo head CANNOT serve the review tier (swimwear p50 0.056 == mannequin p50 0.056). tau_review is a recall-first review-queue threshold, never an enforcement decision (enforcement_ready stays false)."
+   },
+   "policy_questions": 0
   },
   "weapons": {
    "label": "weapons",
@@ -309,15 +419,15 @@
    "enforcement_ready": false,
    "spec_sha": "c780d4b61005792d",
    "fit": {
-    "version": "v2 (2026-07-22) — refit after b-daemon/b-app reported 4 measured defects",
+    "version": "v2 (2026-07-22) \u2014 refit after b-daemon/b-app reported 4 measured defects",
     "model": "pecore-s16-384-fp32",
     "feature": "margin = max(positive concepts) - max(background concepts)",
-    "corpus": "15,010 real-photo negatives (COCO val2017 + Unsplash demo + Unsplash-b, deduped by photo id) — ~2x b-app's 7,790, the corpus that saturated v1.",
-    "violation": "AP 0.472 · recall .882 at 1% FP · fitted on 17 hand-verified drug images. At the shipped tau: 88% drug recall as violation, 94% surfaced (viol+review), 1.06% of negatives flagged violation — matches the fit's own FP prediction.",
-    "p_distribution": "SPREAD, not saturated: 0 negatives at p>=0.9, 1 in [0.7,0.9] (the b-app '218 at p=0.99' bug is structurally gone — evidence cap P_MAX + gentle ridge slope). Full histogram in research/eval-drugs.json.",
-    "review_band": "tau_review 0.0083 < tau 0.0100 — a band BELOW violation (fixes b-daemon defect #1). Tobacco/vape routed here by the arbitration; vape acceptance PASS.",
-    "defect_3_leaf": "the raspberry/bramble-leaf p=0.92 FP had TWO causes, both fixed: (a) it was MISLABELLED as a cannabis positive in my ground truth — removed after a full-res re-audit of all 18; (b) serrated/compound-leaf negatives added.",
-    "caveat": "17 drug positives — a wide-CI estimate, not a benchmark. Recall on cocaine/heroin/meth imagery specifically is UNMEASURED (no labelled image exists in any corpus we may use). Tobacco review-tier recall stays weak (small-object ceiling)."
+    "corpus": "15,010 real-photo negatives (COCO val2017 + Unsplash demo + Unsplash-b, deduped by photo id) \u2014 ~2x b-app's 7,790, the corpus that saturated v1.",
+    "violation": "AP 0.472 \u00b7 recall .882 at 1% FP \u00b7 fitted on 17 hand-verified drug images. At the shipped tau: 88% drug recall as violation, 94% surfaced (viol+review), 1.06% of negatives flagged violation \u2014 matches the fit's own FP prediction.",
+    "p_distribution": "SPREAD, not saturated: 0 negatives at p>=0.9, 1 in [0.7,0.9] (the b-app '218 at p=0.99' bug is structurally gone \u2014 evidence cap P_MAX + gentle ridge slope). Full histogram in research/eval-drugs.json.",
+    "review_band": "tau_review 0.0083 < tau 0.0100 \u2014 a band BELOW violation (fixes b-daemon defect #1). Tobacco/vape routed here by the arbitration; vape acceptance PASS.",
+    "defect_3_leaf": "the raspberry/bramble-leaf p=0.92 FP had TWO causes, both fixed: (a) it was MISLABELLED as a cannabis positive in my ground truth \u2014 removed after a full-res re-audit of all 18; (b) serrated/compound-leaf negatives added.",
+    "caveat": "17 drug positives \u2014 a wide-CI estimate, not a benchmark. Recall on cocaine/heroin/meth imagery specifically is UNMEASURED (no labelled image exists in any corpus we may use). Tobacco review-tier recall stays weak (small-object ceiling)."
    },
    "policy_questions": 10
   },
@@ -666,9 +776,9 @@
     "dancers performing on a stage"
    ],
    "enforcement_ready": false,
-   "note": "CONTENT track, not moderation (ADR-14 `match` tier, 13:23Z) — routed to the `content` bucket via content_track:true, never summed into violation/review. `match_labels` is parallel to `match` (same order); the argmax match concept's label rides on the flag as `label`. NEGATIVES ARE GENERIC-ONLY BY DESIGN — measured: scene hard-negatives (empty stadium, snowy mountain, beach) drop COCO AP 0.932->0.904 and recall@prec0.80 0.947->0.889 because they sit next to real sports scenes and steal the max-background term. Do NOT add hard negatives without re-measuring (research/track-sports.md §3). The 7 borderline sports (chess/hiking/fishing/darts-pool/esports/yoga/dance) are FOLDED INTO negatives so they read as `none` by default (measured: unsplash hiking 0.213 out-of-bank -> 0.000 in-bank); a site that wants them counted removes them from negatives and re-scores one sidecar column (TRACKS.md T3). τ_match lives in the per-model fitted file data/moderation/sports-<model_id>.json, never here."
+   "note": "CONTENT track, not moderation (ADR-14 `match` tier, 13:23Z) \u2014 routed to the `content` bucket via content_track:true, never summed into violation/review. `match_labels` is parallel to `match` (same order); the argmax match concept's label rides on the flag as `label`. NEGATIVES ARE GENERIC-ONLY BY DESIGN \u2014 measured: scene hard-negatives (empty stadium, snowy mountain, beach) drop COCO AP 0.932->0.904 and recall@prec0.80 0.947->0.889 because they sit next to real sports scenes and steal the max-background term. Do NOT add hard negatives without re-measuring (research/track-sports.md \u00a73). The 7 borderline sports (chess/hiking/fishing/darts-pool/esports/yoga/dance) are FOLDED INTO negatives so they read as `none` by default (measured: unsplash hiking 0.213 out-of-bank -> 0.000 in-bank); a site that wants them counted removes them from negatives and re-scores one sidecar column (TRACKS.md T3). \u03c4_match lives in the per-model fitted file data/moderation/sports-<model_id>.json, never here."
   }
  },
- "note_drugs": "drugs: `policy_neighbours` are scored for EXPLANATION ONLY and must never be subtracted — measured, subtracting them collapses AP 0.58 to 0.04 (a clinical syringe is visually identical to a drug syringe). See research/track-drugs.md.",
+ "note_drugs": "drugs: `policy_neighbours` are scored for EXPLANATION ONLY and must never be subtracted \u2014 measured, subtracting them collapses AP 0.58 to 0.04 (a clinical syringe is visually identical to a drug syringe). See research/track-drugs.md.",
  "note_tiers": "Tier vocabulary is DATA: a category's prompt-set keys are its tiers, ordered alert > violation > review (moderation) and `match` (content, never counted as moderation). Adding a track = adding a spec entry; the reader needs no change. Owning lanes add their own categories."
 }

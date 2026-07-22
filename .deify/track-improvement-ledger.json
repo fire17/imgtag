@@ -52,6 +52,111 @@
    "tokens_est": 145000,
    "wall_min": 30,
    "brief_version": 1
+  },
+  {
+   "ts": "2026-07-22T17:35Z",
+   "track": "nudity",
+   "rounds": 1,
+   "invocation": "track-nudity3 (user directive 13:58Z: TP probe + subcategory taxonomy + ratio threshold)",
+   "before": {
+    "tp_probe_dataset": null,
+    "review_tier_instrument": "Marqo head only (a VIOLATION detector) \u2014 scored swimwear in the SAME 0.05-0.15 band as mannequins; on a 202-image all-TP probe it flagged 13/202 review (colour-prior FPs, not the swimwear) and 0 violation",
+    "tp_vs_fp_separation": null,
+    "measured_ratio_threshold": null,
+    "note": "no review-tier TP imagery indexed; the track could not be tested for TP-vs-FP separation. Marqo p cannot separate the review tier (swimwear p50 0.056 == mannequin p50 0.056, measured)."
+   },
+   "after": {
+    "tp_probe_dataset": "nudityprobe (202 local Unsplash review-tier TPs by keyword-join, T4-compliant, indexed into the gallery): swimwear 77 / lingerie 16 / underwear 4 / bare-chest 45 / mannequin-control 60",
+    "taxonomy": "moderation.json nudity.review_subcategories (6 subcats: swimwear/lingerie/underwear/bare-chest-male/artistic-figure/medical-context) + control_never_flag=[mannequin-statue], as versioned DATA",
+    "review_instrument": "NudityReviewScorer \u2014 prompt-ensemble margin over pecore-s16-384 embeddings (TRACKS T1, ~0 cost); NOT auto-wired into runtime yet (earn-it, TRACKS T2)",
+    "fp_band_n": 14734,
+    "fp_band_margin_p50": -0.0214,
+    "fp_band_margin_p99": 0.0658,
+    "swimwear_tp_margin_p50": 0.0447,
+    "swimwear_AP": 0.111,
+    "swimwear_AP_CI95": [
+     0.063,
+     0.18
+    ],
+    "swimwear_R_at_fpr5pct": 0.571,
+    "swimwear_R_at_fpr1pct": 0.299,
+    "mannequin_control_flag_at_tau1pct": 0.0,
+    "proposed_tau_review_5pct": 0.0339,
+    "proposed_tau_review_1pct": 0.0658,
+    "proposed_tau_violation": 0.5,
+    "tau_violation_basis": "Marqo argmax; published 98.56%/20k; NOT locally reproduced (EVAL DATA LAW); safe-corpus Marqo p99=0.175 << 0.50",
+    "platt": [
+     28.9632,
+     -4.5309
+    ],
+    "weak_subcategories": [
+     "lingerie (R@5% 0.00)",
+     "underwear (R@5% 0.00, n=4)",
+     "bare-chest-male (R@5% 0.13, noisy fitness proxy)"
+    ],
+    "head_retrained": false
+   },
+   "delta": "Built the review-tier TP probe + separation measurement that did not exist. SWIMWEAR SEPARATES (AP 0.111 CI 0.063-0.18; R@5%=0.57 recall-first) and the mannequin never-flag control PASSES (0 flags at tau). Proposed per-tier ratio thresholds (review margin tau 0.0339@5%FP / 0.0658@1%FP; violation Marqo 0.50 benchmark-cited). Added the subcategory taxonomy as versioned DATA + a live calibratable review instrument. HEADLINED the honest failure: lingerie/underwear/bare-chest do NOT separate on the shared embedding (distilled head owed, D-nudity-review-distill); violation recall stays benchmark-cited, un-reproducible under EVAL DATA LAW. Complementary to the parallel \u00a710 NudeNet round (both preserved; recommend taxonomy dedupe).",
+   "artifacts": [
+    "research/bench_scripts/nudity_probe.py",
+    "research/eval-nudity-probe.json",
+    "data/nudity-probe/ (202 symlinks, gitignored)",
+    "nudityprobe indexed dataset (~/.imgtag/datasets/nudityprobe)",
+    "src/imgtag/data/moderation.json nudity entry (taxonomy + platt + tau + fit)",
+    "src/imgtag/moderation/nudity.py (NudityReviewScorer + load_nudity_review_scorer)",
+    "research/track-nudity.md \u00a711",
+    "tests/test_nudity.py (+5 tests)"
+   ],
+   "tokens_est": 120000,
+   "wall_min": 28,
+   "brief_version": 1
+  },
+  {
+   "ts": "2026-07-22T18:05Z",
+   "track": "safety",
+   "rounds": 1,
+   "invocation": "track-safety (sole owner after predecessor/successor consolidation; user directive 13:20Z person-down + danger escalation, 13:58Z TP-probe law)",
+   "before": {
+    "track_exists": false,
+    "instrument": null,
+    "ground_truth": null,
+    "note": "no safety track; 'people lying down + danger escalation' unbuilt and unmeasured."
+   },
+   "after": {
+    "instrument": "embedding-space two-margin scorer (LYING x DANGER) over pecore-s16-384, ~0 extra FLOPs; no pose model (justified vs measured gap, ADR-10)",
+    "ground_truth": "COCO val2017 keypoint-geometry (torso<=30deg AND leg<=45deg) INTERSECT human-caption consensus (>=2 of 5 captions, animal-guarded) = 41 lying pos vs 4058 doubly-verified neg; chance AP 0.010",
+    "lying_ap_range": "0.453 (no animal negs) - 0.534 (with); NOT fold-stable at n=41 - range reported, never 0.53 alone",
+    "lying_recall_at_1_2_5_10_pct_fp": [0.659, 0.780, 0.829, 0.878],
+    "shipped_tau_review": 0.0695,
+    "occlusion_recall_visible_ambiguous_hidden_at_shipped_tau": [0.923, 0.643, 0.786],
+    "occlusion_hidden_at_5pct_fp": 0.929,
+    "occlusion_headline": "heavily-occluded (no usable keypoints) stratum is NOT the worst case (>= geometry-ambiguous); a keypoint pose model = ~0 here by construction",
+    "danger_ap": 0.144,
+    "danger_recall_at_2_5_10_pct_fp": [0.316, 0.421, 0.526],
+    "shipped_tau_danger": 0.0076,
+    "platt_lying": [99.3941, -5.2050],
+    "platt_danger": [37.8043, -5.3679],
+    "alert_measurable": "n=1 in all of COCO val2017 (000000354307 injured man) - scorer DOES tier it alert; sanity check, NOT a metric",
+    "tp_probe_dataset": "data/safety-probe (797 Unsplash policy-safe imgs; successor labels.json: 57 alert_tp + 118 person_down + 72 injury + 25 danger + 517 destruction + 8 sunbathing) - indexing HELD for quiet-window ALL-CLEAR",
+    "moderation_json": "STAGED via track_spec() (reader-compat: ALERT_PHRASES combined person-down+danger, GROUND_LEVEL_FP negatives kill b-daemon boots-on-ice class) but WITHHELD from data/moderation.json until alert separation proven (b-daemon withhold stands)",
+    "head_retrained": false
+   },
+   "delta": "Built the safety track from zero: two-margin embedding scorer + real COCO ground truth from keypoint-geometry INTERSECT caption-consensus (41 pos). MEASURED lying AP 0.45-0.53 and the requirement's hardest clause - OCCLUSION robustness - as the strongest result (hidden stratum 0.79-0.93, >= ambiguous, where a pose model is ~0 by construction). Ablation recorded against ego: prompt ADDITIONS made AP slightly worse (0.453->0.433); all real gain came from fixing LABELS (geometry-only -> human-consensus), not more prompts. Danger weak+said-so (AP 0.144, n=19). Alert essentially unmeasurable (n=1, caught). Reconciled predecessor+successor lanes: corrected alert 0->1 and occlusion numbers in FIT+report; preserved the successor's WITHHOLD + labels.json. Coordinated alert boundary with track-violence and the danger regex with b-daemon. Spec staged-not-shipped per the standing withhold.",
+   "artifacts": [
+    "src/imgtag/moderation/safety.py (SafetyScorer + SafetyHead + track_spec, seam-conformant)",
+    "scripts/eval_safety.py (ground-truth builder + measured harness)",
+    "tests/test_safety.py (+12 unit/contract/six-scene-acceptance tests)",
+    "research/track-safety.md (consolidated report + corrections)",
+    "data/safety-probe/ (797 imgs; labels.json from successor, preserved)"
+   ],
+   "blocked": [
+    "index safetyprobe + measure alert TP-vs-benign-FP separation per subcategory (quiet window)",
+    "fit precision-first tau_alert + recall-first tau_review with bootstrap CI (same block)",
+    "ship categories.safety to moderation.json only if separation beats the benign-FP band"
+   ],
+   "tokens_est": 110000,
+   "wall_min": 35,
+   "brief_version": 1
   }
  ]
 }

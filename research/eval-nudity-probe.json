@@ -1,0 +1,131 @@
+{
+ "model": "pecore-s16-384-fp32",
+ "seed": 20260722,
+ "negative_pool": "cocoval2017,unsplash-demo,unsplashb",
+ "fp_band": {
+  "n": 14734,
+  "margin_p50": -0.0214,
+  "margin_p90": 0.0187,
+  "margin_p99": 0.0658,
+  "margin_max": 0.1086
+ },
+ "subcats": {
+  "swimwear": {
+   "n": 77,
+   "margin_p10": -0.0239,
+   "margin_p50": 0.0447,
+   "margin_p90": 0.0872,
+   "AP_vs_fp": 0.111,
+   "AP_CI95": [
+    0.063,
+    0.18
+   ],
+   "R@fpr1%": 0.299,
+   "R@fpr5%": 0.571,
+   "flag_rate@tau": 0.299,
+   "verdict": "SEPARATES (usable recall-first review tier)"
+  },
+  "lingerie": {
+   "n": 16,
+   "margin_p10": -0.048,
+   "margin_p50": -0.035,
+   "margin_p90": 0.0097,
+   "AP_vs_fp": 0.001,
+   "AP_CI95": [
+    0.001,
+    0.002
+   ],
+   "R@fpr1%": 0.0,
+   "R@fpr5%": 0.0,
+   "flag_rate@tau": 0.0,
+   "verdict": "DOES NOT SEPARATE on shared embedding \u2014 needs distilled head (TRACKS T2)"
+  },
+  "underwear": {
+   "n": 4,
+   "margin_p10": -0.0252,
+   "margin_p50": -0.0003,
+   "margin_p90": 0.0113,
+   "AP_vs_fp": 0.0006,
+   "AP_CI95": [
+    0.0,
+    0.001
+   ],
+   "R@fpr1%": 0.0,
+   "R@fpr5%": 0.0,
+   "flag_rate@tau": 0.0,
+   "verdict": "DOES NOT SEPARATE on shared embedding \u2014 needs distilled head (TRACKS T2)"
+  },
+  "bare-chest-male": {
+   "n": 45,
+   "margin_p10": -0.0397,
+   "margin_p50": -0.0073,
+   "margin_p90": 0.0445,
+   "AP_vs_fp": 0.007,
+   "AP_CI95": [
+    0.004,
+    0.016
+   ],
+   "R@fpr1%": 0.022,
+   "R@fpr5%": 0.133,
+   "flag_rate@tau": 0.022,
+   "verdict": "DOES NOT SEPARATE on shared embedding \u2014 needs distilled head (TRACKS T2)"
+  },
+  "mannequin-statue": {
+   "n": 60,
+   "margin_p10": -0.0431,
+   "margin_p50": -0.0158,
+   "margin_p90": 0.0113,
+   "AP_vs_fp": 0.0045,
+   "AP_CI95": [
+    0.003,
+    0.006
+   ],
+   "R@fpr1%": 0.0,
+   "R@fpr5%": 0.067,
+   "flag_rate@tau": 0.0,
+   "verdict": "CONTROL PASS (stays below FP band)"
+  }
+ },
+ "review_fit": {
+  "feature": "margin = max(review concepts) - max(negatives incl. mannequin/statue)",
+  "instrument_choice": "full-negatives margin \u2014 measured to keep the ADR-14 mannequin control tightest (generic-only neg raised control leak 0.07->0.12)",
+  "platt": [
+   28.9632,
+   -4.5309
+  ],
+  "tau_margin_1pct": 0.0658,
+  "tau_margin_5pct": 0.0339,
+  "tau_review_p_1pct": 0.0676,
+  "tau_review_p_5pct": 0.0279,
+  "operating_point_law": "recall-first (ADR-14) \u2014 5% FP is the recall-first review point",
+  "AP_all_TP": 0.0779,
+  "AP_CI95": [
+   0.048,
+   0.123
+  ],
+  "R@fpr1%": 0.169,
+  "R@fpr5%": 0.352,
+  "tp_p_p50": 0.0135,
+  "fp_p_p99": 0.0676,
+  "n_tp": 142,
+  "n_fp": 14734
+ },
+ "marqo_p_on_review_TP": {
+  "swimwear": {
+   "p50": 0.0558,
+   "p90": 0.0857,
+   "flag@0.10": 0.065
+  },
+  "lingerie": {
+   "p50": 0.0526,
+   "p90": 0.0583,
+   "flag@0.10": 0.0
+  },
+  "mannequin-statue": {
+   "p50": 0.0565,
+   "p90": 0.0699,
+   "flag@0.10": 0.05
+  }
+ },
+ "marqo_note": "Marqo p does NOT separate the review tier \u2014 swimwear sits in the same 0.05-0.15 band as the FP corpus. This is WHY review is served by the margin instrument. Violation-tier recall stays benchmark-cited (98.56%/20k), never re-measured."
+}
