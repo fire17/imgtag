@@ -301,3 +301,56 @@ def test_all_outranks_a_higher_probability_any(home):
     assert top["why"]["tags_matched"] == 2 and top["why"]["spectrum"] == "all"
     assert rest and max(h["p"] for h in rest) > top["p"]  # a lower-ranked row scores HIGHER
     assert all(h["why"]["tags_matched"] == 1 for h in rest)
+
+
+# ---------------------------------------------------------- multi-term wire shape
+
+
+def test_terms_payload_shape(home):
+    """The wire shape b-app renders: per-hit terms{matched,missed,m,n,mean_p} + top echo."""
+    be = build(home, "d1", ["cat dog", "cat", "dog", "misc", "misc", "misc"])
+    write_tags(home, be.model_sha, ["cat", "dog"], ["calibrated"] * 2, [[-12.0, 6.0]] * 2, [0.5] * 2)
+    r = searcher(home, be).search("cat dog", "d1", k=6)
+    assert r["terms"] == ["cat", "dog"]  # bare array, quoted spans would be one element
+    assert r["calibration"] in ("fitted", "measured-default")
+    ms = [h["why"]["terms"]["m"] for h in r["hits"]]
+    assert ms == sorted(ms, reverse=True)  # tiers contiguous: b-app renders bands in order
+    top = r["hits"][0]["why"]["terms"]
+    assert top == {"matched": ["cat", "dog"], "missed": [], "m": 2, "n": 2,
+                   "mean_p": top["mean_p"]}
+    assert 0.0 < top["mean_p"] <= 1.0
+    for h in r["hits"][1:]:
+        t = h["why"]["terms"]
+        assert len(t["matched"]) == t["m"] and len(t["missed"]) == t["n"] - t["m"]
+
+
+def test_single_term_query_has_no_terms_key(home):
+    """n == 1 behaves exactly as before — b-app suppresses the badge on absence."""
+    be = build(home, "d1", ["cat"] * 3 + ["misc"] * 20)
+    write_tags(home, be.model_sha, ["cat"], ["calibrated"], [[-12.0, 6.0]], [0.5])
+    r = searcher(home, be).search("cat", "d1", k=3)
+    assert "terms" not in r and r["hits"]
+    assert all("terms" not in h["why"] for h in r["hits"])
+
+
+def test_quoted_phrase_stays_one_term(home):
+    assert S.split_terms('"night sky" dog') == [("night sky", True), ("dog", False)]
+    assert S.split_terms("of the in") == [("of the in", True)]  # all stopwords -> one phrase
+    assert S.split_terms("dog beach") == [("dog", False), ("beach", False)]
+    be = build(home, "d1", ["cat dog"] * 2 + ["misc"] * 10)
+    write_tags(home, be.model_sha, ["cat dog", "cat"], ["calibrated"] * 2,
+               [[-12.0, 6.0]] * 2, [0.5] * 2)
+    s = searcher(home, be)
+    # the quoted span is looked up as ONE tag, never split into "cat" + "dog"
+    assert [t for t, _ in s.concepts(s.tags(s.snapshot("d1").manifest), '"cat dog" cat')] == [
+        "cat dog", "cat"]
+
+
+def test_matched_terms_are_the_users_words_with_via_for_expansion(home):
+    """Chips print the user's word; the hypernym it actually matched rides in `via`."""
+    be = build(home, "d1", ["cat"] * 2 + ["misc"] * 20)
+    write_tags(home, be.model_sha, ["cat", "dog"], ["calibrated"] * 2, [[-12.0, 6.0]] * 2, [0.5] * 2)
+    s = searcher(home, be)
+    r = s.search("animal misc", "d1", k=3)  # "animal" is a hypernym: expands to cat/dog
+    if r.get("terms"):
+        assert "animal" in r["terms"]  # the user's word, never the internal tag name

@@ -36,13 +36,21 @@ from .store import (
 
 # -- calibration constants (ADR-3). PROVISIONAL until b-bench's fit lands; every one of
 # them is overridable per-model by tags.json so the fitted values win automatically.
-TEXT_A, TEXT_B = 1.6, -4.0  # p_text = sigmoid(A*x + B); x is TEXT_FEATURE
-TEXT_FEATURE = "z"  # "z" = per-query corpus z-score (ADR-3 as written) | "cos" = raw cosine.
-# MEASURED 2026-07-22 on unsplash-demo (N=2000, pecore-s16-384-fp32), 15 real vs 15 nonsense
-# queries: best single threshold separates at 77% on "cos" but only 60% on "z" (chance = 50%)
-# — nonsense max-z (med 4.16) actually EXCEEDS real max-z (med 3.81), so no (A,B) on the z
-# feature can produce an honest no-match. Escalated; the default stays ADR-3's "z" until the
-# conductor rules and b-bench fits the winner on CAL-SET. Both are shipped, tags.json picks.
+TEXT_FEATURE = "cos"  # "cos" = raw cosine | "z" = per-query corpus z-score.
+# ADR-3 §2 was RE-RULED 2026-07-22 on this lane's measurement: on unsplash-demo (N=2000,
+# pecore-s16-384-fp32), 15 real vs 15 nonsense queries, the best single threshold separates
+# 77% on "cos" but only 60% on "z" (chance = 50%) — nonsense max-z (med 4.16) EXCEEDS real
+# max-z (med 3.81), so no (A,B) on z can produce an honest no-match.
+TEXT_A, TEXT_B = 60.0, -17.6  # p_text = sigmoid(A*x + B); x is TEXT_FEATURE
+# (A,B) place p=0.5 at cos 0.2934 — the measured best-separating threshold above — with a
+# slope that spans the measured real/nonsense gap (real med 0.300 vs nonsense med 0.277).
+# MODEL-SPECIFIC and PROVISIONAL: cosine scale differs per model, so these hold only for
+# pecore-s16-384 until b-bench's CAL-SET fit lands in tags.json per model_sha. Any result
+# scored this way is labeled `"calibration": "measured-default"` — never "fitted".
+Z_A, Z_B = 1.6, -4.0  # the Z-SCALE pair: p = sigmoid(Z_A*z + Z_B). Used by the dataset
+# layer (an unfitted tag's own score distribution over this corpus) and by the "z" text
+# feature. Kept SEPARATE from (TEXT_A, TEXT_B) because the two features live on different
+# scales — feeding a z-score through the cosine pair saturates every probability to 1.0.
 TAU = 0.5  # probability floor for "this is a match"
 THETA_SYN = 0.90  # near-tag rule: inherit a tag's calibration only at cos >= theta_syn
 K_STD = 3.0  # dataset-layer effective tau = max(tau_tag, mean + K_STD*std)
@@ -63,9 +71,12 @@ class CalibrationMismatchError(RuntimeError):
 
 
 def _order(h: dict) -> tuple:
-    """Result order: more query tags matched first (ALL > SOME > ANY), then probability,
-    then image id — the id tiebreak is what makes a result list byte-identical (B18e)."""
-    return (-int((h.get("why") or {}).get("tags_matched", 0)), -h["p"], h["image_id"])
+    """Result order: coverage tier first (ALL > SOME > ANY), then the MEAN probability over
+    the matched terms, then probability, then image id. Tiers therefore arrive contiguous
+    in the payload (b-app renders them as bands) and the id tiebreak keeps a result list
+    byte-identical across runs (B18e)."""
+    t = (h.get("why") or {}).get("terms") or {}
+    return (-int(t.get("m", 0)), -float(t.get("mean_p", 0.0)), -h["p"], h["image_id"])
 
 
 def _sigmoid(x) -> np.ndarray:
@@ -83,6 +94,30 @@ _STOP = {
 
 def content_tokens(q: str) -> list[str]:
     return [t for t in re.findall(r"[a-z0-9]+", q.lower()) if t not in _STOP]
+
+
+_QUOTED = re.compile(r'"([^"]*)"')
+
+
+def split_terms(query: str) -> list[tuple[str, bool]]:
+    """Split a query into (text, is_quoted) segments for multi-term search.
+
+    Double-quoted spans survive whole ("night city" stays one term); everything else
+    splits on whitespace with stopwords dropped. A query made ENTIRELY of stopwords (or
+    of one quoted span) yields a single phrase segment, so it can never be shredded.
+    """
+    segs: list[tuple[str, bool]] = []
+    pos = 0
+    for m in _QUOTED.finditer(query):
+        segs += [(t, False) for t in content_tokens(query[pos : m.start()])]
+        phrase = " ".join(m.group(1).lower().split())
+        if phrase:
+            segs.append((phrase, True))
+        pos = m.end()
+    segs += [(t, False) for t in content_tokens(query[pos:])]
+    if not segs:
+        return [(" ".join(query.lower().split()), True)]
+    return segs
 
 
 def is_compound(q: str) -> bool:
@@ -141,6 +176,7 @@ class TagTable:
         self.theta_syn = float(meta.get("theta_syn", THETA_SYN))
         self.text_logistic = tuple(meta.get("text_logistic") or (TEXT_A, TEXT_B))
         self.text_feature = meta.get("text_feature", TEXT_FEATURE)
+        self.z_logistic = tuple(meta.get("z_logistic") or (Z_A, Z_B))
         self.emb = np.memmap(d / "tags.f32", np.float32, "r", shape=(n, self.dim))
         self.index = {name: i for i, name in enumerate(self.names)}
 
@@ -268,16 +304,27 @@ class Searcher:
         path and never inherits `dog`'s threshold — while "dog beach sunset" is three
         exact tag names and is scored as three concepts.
         """
-        toks = content_tokens(query)
-        if len(toks) < 2:
+        segs = split_terms(query)
+        if len(segs) < 2:
             return []
         out: list[tuple[str, list[int]]] = []
         i = 0
-        while i < len(toks):
-            # greedy longest match first: the vocabulary has multi-word tags ("ocean wave",
-            # "night sky"), so "ocean wave sunset" is TWO concepts, not three unknown words.
-            for span in range(min(NGRAM, len(toks) - i), 0, -1):
-                term = " ".join(toks[i : i + span])
+        while i < len(segs):
+            text, quoted = segs[i]
+            if quoted:  # a quoted span is ONE term, verbatim — never merged or split
+                idxs = [table.index[n] for n in expand(text) if n in table.index]
+                if not idxs:
+                    return []
+                out.append((text, idxs[:MAX_TAGS]))
+                i += 1
+                continue
+            # unquoted: greedy longest match first, because the vocabulary has multi-word
+            # tags ("ocean wave", "night sky") — "ocean wave sunset" is TWO terms, not three.
+            span_max = 0
+            while span_max < NGRAM and i + span_max < len(segs) and not segs[i + span_max][1]:
+                span_max += 1
+            for span in range(span_max, 0, -1):
+                term = " ".join(t for t, _ in segs[i : i + span])
                 idxs = [table.index[n] for n in expand(term) if n in table.index]
                 if idxs:
                     out.append((term, idxs[:MAX_TAGS]))
@@ -328,7 +375,7 @@ class Searcher:
 
         T = np.ascontiguousarray(np.asarray(table.emb)[idx].T, np.float32)  # [D, C]
         cos = np.asarray(snap.emb @ T, np.float32).reshape(len(snap.ids), len(idx))
-        a, b = table.text_logistic
+        za, zb = table.z_logistic  # the dataset layer is ALWAYS a z-score, never a cosine
         stats = manifest.get("tag_stats") or {}
         P = np.empty_like(cos)
         eff = np.empty(len(idx), np.float32)
@@ -344,9 +391,9 @@ class Searcher:
             else:  # dataset layer alone
                 mu = float(st["mean"]) if "mean" in st else float(cos[:, j].mean())
                 sd = float(st["std"]) if "std" in st else float(cos[:, j].std())
-                P[:, j] = _sigmoid(a * ((cos[:, j] - mu) / max(sd, 1e-6)) + b)
-                eff[j] = float(_sigmoid(a * K_STD + b))
-                present[j] = float(_sigmoid(a * SPECTRUM_K + b))
+                P[:, j] = _sigmoid(za * ((cos[:, j] - mu) / max(sd, 1e-6)) + zb)
+                eff[j] = float(_sigmoid(za * K_STD + zb))
+                present[j] = float(_sigmoid(za * SPECTRUM_K + zb))
         return P, eff, cos, present
 
     # -- the query -------------------------------------------------
@@ -367,7 +414,8 @@ class Searcher:
         n = len(snap.ids)
         if n == 0:
             return {"hits": [], "gated": False, "indexed": 0, "best_p_text": 0.0,
-                    "text_tower": "skipped", "load_ms": 0.0}
+                    "text_tower": "skipped", "load_ms": 0.0, "terms": [],
+                    "calibration": "measured-default"}
         table = self.tags(man)
         cands = self._name_candidates(table, query) if table is not None else []
         groups = self.concepts(table, query) if table is not None else []
@@ -388,7 +436,11 @@ class Searcher:
             a, b = table.text_logistic if table else (TEXT_A, TEXT_B)
             z = (s - s.mean()) / max(float(s.std()), 1e-6)
             feature = table.text_feature if table else TEXT_FEATURE
-            p_text = _sigmoid(a * (s if feature == "cos" else z) + b)
+            if feature == "cos":
+                p_text = _sigmoid(a * s + b)
+            else:
+                za, zb = table.z_logistic if table else (Z_A, Z_B)
+                p_text = _sigmoid(za * z + zb)
             if table is not None:
                 cands = sorted(dict(cands + self._near_candidates(table, query, q)).items())[:MAX_TAGS]
 
@@ -396,7 +448,8 @@ class Searcher:
         col = np.full(n, -1, np.int32)  # winning tag column per row, -1 = no tag path
         gated = False  # a CALIBRATED tag cleared its effective tau somewhere
         tag_cos = None
-        matched = np.zeros(n, np.int32)  # ALL-SOME-ANY: how many query tags this row has
+        matched = np.zeros(n, np.int32)  # ALL-SOME-ANY: how many query terms this row has
+        mean_p = np.zeros(n, np.float32)  # mean p over the MATCHED terms (secondary sort)
         n_concepts = len(groups)
         if cands:
             idx = [i for i, _ in cands]
@@ -406,12 +459,24 @@ class Searcher:
             calib = np.asarray([table.calibrated(i) for i in idx])
             if calib.any():
                 gated = bool((P[:, calib] >= eff[calib]).any())
-            if n_concepts:  # rank by ALL first, then n/m descending, then ANY
+            if n_concepts:  # rank by ALL first, then m/n descending, then ANY
                 pos = {i: j for j, i in enumerate(idx)}
-                for _, tag_idxs in groups:
+                term_hit = np.zeros((n, n_concepts), bool)
+                term_p = np.zeros((n, n_concepts), np.float32)
+                term_via: list[dict] = []
+                for gi, (term, tag_idxs) in enumerate(groups):
                     cols = [pos[i] for i in tag_idxs if i in pos]
-                    if cols:
-                        matched += (P[:, cols] >= present[cols]).any(1)
+                    if not cols:
+                        term_via.append({})
+                        continue
+                    best = P[:, cols].argmax(1)
+                    term_p[:, gi] = P[np.arange(n), [cols[b] for b in best]]
+                    term_hit[:, gi] = (P[:, cols] >= present[cols]).any(1)
+                    names = {table.names[idx[c]] for c in cols}
+                    term_via.append({} if term in names else {"via": sorted(names)[:4]})
+                matched = term_hit.sum(1).astype(np.int32)
+                mean_p = np.where(matched > 0,
+                                  (term_p * term_hit).sum(1) / np.maximum(matched, 1), 0.0)
             if strict:  # --strict: calibrated tags become a hard AND
                 keep = np.ones(n, bool)
                 for j, i in enumerate(idx):
@@ -423,7 +488,7 @@ class Searcher:
         p = np.maximum(p_tag, p_text)
         # ALL-SOME-ANY ordering (VISION-ADDENDA): tag-count is the PRIMARY key, probability
         # the tiebreak. p is in [0,1), so `matched + p` orders both in one pass.
-        rank = matched.astype(np.float32) + p
+        rank = matched.astype(np.float32) + (mean_p if n_concepts else p)
         top = np.argpartition(-rank, min(k, n) - 1)[:k] if k < n else np.arange(n)
         hits = []
         for i in top:
@@ -441,7 +506,16 @@ class Searcher:
                 score = float(s[i])
             why.update(p_tag=round(float(p_tag[i]), 4), p_text=round(float(p_text[i]), 4), z=round(float(z[i]), 3))
             if n_concepts:
-                why.update(tags_matched=int(matched[i]), tags_total=n_concepts,
+                terms_hit = [groups[g][0] for g in range(n_concepts) if term_hit[i, g]]
+                terms_missed = [groups[g][0] for g in range(n_concepts) if not term_hit[i, g]]
+                payload = {"matched": terms_hit, "missed": terms_missed,
+                           "m": int(matched[i]), "n": n_concepts,
+                           "mean_p": round(float(mean_p[i]), 4)}
+                via = {groups[g][0]: term_via[g]["via"] for g in range(n_concepts)
+                       if term_hit[i, g] and term_via[g].get("via")}
+                if via:  # the user's word matched through a hypernym/synonym: show which
+                    payload["via"] = via
+                why.update(terms=payload, tags_matched=int(matched[i]), tags_total=n_concepts,
                            spectrum="all" if matched[i] == n_concepts else
                                     ("some" if matched[i] > 1 else "any"))
             hits.append(
@@ -458,7 +532,9 @@ class Searcher:
         hits.sort(key=_order)  # ALL-SOME-ANY, then p, then image id (B18e determinism)
         return {"hits": hits[:k], "gated": gated, "indexed": n, "best_p_text": float(p_text.max()),
                 "text_tower": ("loaded" if load_ms else "warm") if use_text else "skipped",
-                "load_ms": load_ms}
+                "load_ms": load_ms, "terms": [t for t, _ in groups],
+                "calibration": "fitted" if (table and any(table.calibrated(i) for i, _ in cands))
+                               else "measured-default"}
 
     def search(self, query: str, dataset: str | None = None, k: int = 50, strict: bool = False,
                text: str = "auto") -> dict:
@@ -468,7 +544,7 @@ class Searcher:
         names = [dataset] if dataset else list_datasets(self.home)
         hits: list[dict] = []
         indexed, gated, best_text, load_ms = 0, False, 0.0, 0.0
-        tower = "skipped"
+        tower, terms, calibration = "skipped", [], "measured-default"
         for name in names:
             r = self.search_one(query, name, k=k, strict=strict, text=text)
             hits += r["hits"]
@@ -477,6 +553,8 @@ class Searcher:
             best_text = max(best_text, r["best_p_text"])
             load_ms += r["load_ms"]
             tower = r["text_tower"] if tower == "skipped" else tower
+            terms = terms or r["terms"]
+            calibration = "fitted" if r["calibration"] == "fitted" else calibration
         hits.sort(key=_order)
         return {
             "query": query,
@@ -485,8 +563,13 @@ class Searcher:
             # budget (B3) can exclude it instead of silently absorbing a B13-shaped cost.
             "text_tower": tower,
             "text_tower_load_ms": round(load_ms, 2),
+            # how the probabilities were produced: a CAL-SET fit, or this build's measured
+            # defaults. Never let a caller mistake one for the other.
+            "calibration": calibration,
             "coverage": {"indexed": indexed, "total": total_expected(names, indexed, self.home)},
             "datasets": names,
+            # parsed multi-term query (quoted spans stay ONE element); absent when n < 2
+            **({"terms": terms} if terms else {}),
             "hits": hits[:k],
             # honest no-match: no calibrated tag cleared its tau AND nothing cleared the
             # free-text floor. Uncalibrated tags may never veto (ADR-3 tiers).

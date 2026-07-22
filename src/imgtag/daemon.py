@@ -175,11 +175,18 @@ class Daemon:
     def datasets(self) -> list[dict]:
         """Fleet view: exactly the datasets on disk, counts straight from their manifests."""
         out = []
+        jobs = list_jobs(self.home)
         for name in list_datasets(self.home):
             try:
                 m = read_manifest(name, self.home)
             except UnknownDatasetError:
                 continue
+            nbytes = sum(sh.get("emb_bytes", 0) + sh.get("ids_bytes", 0) for sh in m.get("shards", []))
+            mine = [j for j in jobs if j.get("dataset") == name]
+            last = max(mine, key=lambda j: float(j.get("started") or 0), default=None)
+            # `total` = files the last job SAW on disk; `count` = rows durably indexed. They
+            # differ exactly when a job is running or something failed — which is the point.
+            total = max(int((last or {}).get("total") or 0), int(m.get("count", 0)))
             out.append(
                 {
                     "dataset": name,
@@ -187,15 +194,25 @@ class Daemon:
                     "model_id": m.get("model_id"),
                     "model_sha": m.get("model_sha"),
                     "dim": m.get("dim"),
+                    "total": total,
                     "shards": len(m.get("shards", [])),
-                    "bytes": sum(sh.get("emb_bytes", 0) + sh.get("ids_bytes", 0)
-                                 for sh in m.get("shards", [])),
+                    "bytes": nbytes,
+                    "index_bytes": nbytes,
+                    "root_path": m.get("root") or (last or {}).get("source") or self.root_of(name),
                     "calibrated": bool(m.get("calib_sha")),
                     "created": m.get("created"),
                     "updated": m.get("updated"),
                 }
             )
         return out
+
+    def root_of(self, dataset: str) -> str:
+        """Common parent of the indexed files — the dataset's root as the app shows it."""
+        try:
+            paths = [r["path"] for r in self.searcher.snapshot(dataset).ids[:200]]
+        except Exception:
+            return ""
+        return os.path.commonpath(paths) if paths else ""
 
     def jobs(self) -> list[dict]:
         """Job list with mirrored engine records folded away — one row per real job."""
@@ -211,6 +228,8 @@ class Daemon:
             "uptime_s": round(time.time() - self.started, 1),
             "rss": int(mb * 1024 * 1024), "rss_mb": round(mb, 1),
             "text_tower": "loaded" if self.searcher.text_loaded else "unloaded",
+            "text_tower_resident": bool(self.searcher.text_loaded),
+            "models_loaded": sorted(self.model_shas()),
             "text_ttl_s": self.text_ttl, "rss_watermark_mb": self.watermark_mb,
             "datasets": self.datasets(), "jobs": len(self.jobs()),
         }
@@ -221,12 +240,17 @@ class Daemon:
         snap = self.searcher.snapshot(dataset)
         ids = snap.ids[offset : offset + limit]
         return {
-            "dataset": dataset, "total": len(snap.ids), "offset": offset, "limit": limit,
+            # total is the DURABLE manifest count (ADR-6 progress authority), so a gallery
+            # scrollbar never disagrees with the coverage banner.
+            "dataset": dataset, "total": int(snap.manifest.get("count", len(snap.ids))),
+            "offset": offset, "limit": limit,
             "items": [
                 {"image_id": r["image_id"], "path": r["path"],
                  "dataset": r.get("dataset") or dataset,          # B18: never null
                  "dataset_slug": r.get("dataset") or dataset,
-                 "w": r.get("w"), "h": r.get("h")}
+                 "w": r.get("w"), "h": r.get("h"),
+                 # B18(b): a moved/deleted file is TOMBSTONED, never a 404 in the grid
+                 "exists": os.path.exists(r["path"])}
                 for r in ids
             ],
         }
@@ -354,7 +378,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not ds:
                     raise ValueError("dataset is required")
                 self.json(d.images(ds, max(0, int((q.get("offset") or [0])[0])),
-                                   max(1, min(2000, int((q.get("limit") or [300])[0])))))
+                                   max(1, min(500, int((q.get("limit") or [300])[0])))))
             elif u.path == "/api/datasets":
                 self.json({"datasets": d.datasets()})
             elif u.path == "/api/jobs":
@@ -363,8 +387,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.events()
             elif u.path.startswith("/api/thumb/"):
                 self.thumb(u.path, q)
-            elif u.path in ("/", "/index.html") or u.path.startswith("/app/"):
-                self.static(u.path)
+            elif u.path == "/" or (APP_DIR / u.path.lstrip("/")).is_file() or u.path.startswith("/app/"):
+                self.static(u.path)  # assets resolve at BOTH / and /app/ (b-app relative refs)
             else:
                 self.json({"error": f"no route {u.path}", "code": "NotFound", "exit_code": 1}, 404)
         except BrokenPipeError:
@@ -429,7 +453,7 @@ class Handler(BaseHTTPRequestHandler):
             time.sleep(EVENT_POLL_S)
 
     def static(self, path: str) -> None:
-        rel = "index.html" if path in ("/", "/index.html") else path[len("/app/"):]
+        rel = "index.html" if path == "/" else path[len("/app/"):] if path.startswith("/app/") else path.lstrip("/")
         f = (APP_DIR / rel).resolve()
         if not str(f).startswith(str(APP_DIR.resolve())) or not f.is_file():
             raise FileNotFoundError(f"no app file {rel!r} (b-app has not landed it yet)")

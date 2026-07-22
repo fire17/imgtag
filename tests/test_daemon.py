@@ -279,7 +279,7 @@ def test_named_tag_query_never_wakes_the_text_tower(live):
     _np.stack([be._vec("cat")]).astype(_np.float32).tofile(d / "tags.f32")
     (d / "tags.json").write_text(_json.dumps({"names": ["cat"], "dim": DIM,
                                               "model_sha": be.model_sha, "tier": ["calibrated"],
-                                              "tau": [0.5], "platt": [[12.0, -6.0]]}))
+                                              "tau": [0.5], "platt": [[-12.0, 6.0]]}))
     s = D.Handler.daemon.searcher
     s._tags.clear()
     boom = []
@@ -314,3 +314,35 @@ def test_status_and_images_endpoints(live):
     assert st == 400 and r["exit_code"] == 1
     st, r = get(live, "/api/images?dataset=ghost")
     assert st == 404 and r["exit_code"] == 4
+
+
+def test_images_contract(live):
+    """b-app's gallery source: stable manifest order, durable total, exists flag, cap 500."""
+    st, r = get(live, "/api/images?dataset=d1&offset=0&limit=999")
+    assert st == 200 and r["limit"] == 500 and r["total"] == 30
+    first5 = [i["image_id"] for i in r["items"][:5]]
+    st, r2 = get(live, "/api/images?dataset=d1&offset=2&limit=3")
+    assert [i["image_id"] for i in r2["items"]] == first5[2:5]  # stable, deterministic paging
+    it = r2["items"][0]
+    assert set(it) >= {"image_id", "path", "dataset", "w", "h", "exists"}
+    assert it["exists"] is True
+    st, r3 = get(live, "/api/images?dataset=d1&offset=0&limit=1")
+    assert r3["items"][0]["exists"] is True
+
+
+def test_datasets_and_status_contract(live):
+    st, r = get(live, "/api/datasets")
+    d = r["datasets"][0]
+    assert d["index_bytes"] > 0 and d["index_bytes"] == d["bytes"]
+    assert d["total"] >= d["count"] == 30
+    assert d["root_path"]  # common parent of the indexed files
+    st, r = get(live, "/api/status")
+    assert {"rss_mb", "uptime_s", "models_loaded", "text_tower_resident"} <= set(r)
+    assert isinstance(r["models_loaded"], list) and isinstance(r["text_tower_resident"], bool)
+
+
+def test_app_assets_resolve_at_root_and_under_app(live):
+    """b-app may reference assets relatively (/app.js) or absolutely (/app/app.js)."""
+    for path in ("/", "/app/app.js", "/app.js", "/app.css"):
+        st, body = D.request("GET", path, home=live)
+        assert st == 200 and body, path
