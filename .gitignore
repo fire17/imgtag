@@ -12,3 +12,4 @@ models/**/tokenizer.json
 .scratch/
 models/**/*.sha256
 models/*.sha256
+bench/cache/

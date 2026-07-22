@@ -19,18 +19,42 @@ import numpy as np
 RECIPE = dict(op_types_to_quantize=["MatMul"], per_channel=False,
               extra_options={"MatMulConstBOnly": True})
 
+# ADR-7: `onnx` is EXPORT TOOLING, never a runtime dep — so quantization runs in the
+# offline export venv when the product venv (correctly) lacks it. No pyproject change.
+EXPORT_PY = os.environ.get(
+    "IMGTAG_EXPORT_PY",
+    os.path.expanduser("~/Creations/ImgTag/.scratch/pecore/.venv/bin/python"))
+
+_CODE = """
+import sys
+from onnxruntime.quantization import quantize_dynamic, QuantType
+quantize_dynamic(sys.argv[1], sys.argv[2], weight_type=QuantType.QUInt8,
+                 op_types_to_quantize=['MatMul'], per_channel=False,
+                 extra_options={'MatMulConstBOnly': True})
+"""
+
 
 def quantize_weight_only(src: str, dst: str, force: bool = False) -> dict:
     """ADR-4 recipe. Returns {ok, seconds, mb, error?}. Idempotent unless force."""
-    from onnxruntime.quantization import QuantType, quantize_dynamic
-
     if os.path.exists(dst) and not force:
-        return {"ok": True, "cached": True, "mb": os.path.getsize(dst) / 1e6, "seconds": 0.0}
+        return {"ok": True, "cached": True, "mb": round(os.path.getsize(dst) / 1e6, 1),
+                "seconds": 0.0}
+    if not os.path.exists(src):
+        return {"ok": False, "error": f"source missing: {src}"}
     t = time.perf_counter()
     try:
-        quantize_dynamic(src, dst, weight_type=QuantType.QUInt8, **RECIPE)
+        try:
+            from onnxruntime.quantization import QuantType, quantize_dynamic
+
+            quantize_dynamic(src, dst, weight_type=QuantType.QUInt8, **RECIPE)
+        except ImportError:
+            import subprocess
+
+            subprocess.run([EXPORT_PY, "-c", _CODE, src, dst], check=True,
+                           capture_output=True, timeout=1800)
     except Exception as e:  # noqa: BLE001 — a failed candidate is a row, not a crash
-        return {"ok": False, "error": f"{type(e).__name__}: {e}"[:300]}
+        detail = getattr(e, "stderr", b"") or b""
+        return {"ok": False, "error": f"{type(e).__name__}: {e} {detail[-300:]!r}"[:400]}
     return {"ok": True, "cached": False, "seconds": round(time.perf_counter() - t, 1),
             "mb": round(os.path.getsize(dst) / 1e6, 1)}
 
@@ -40,7 +64,14 @@ GATE = {"mean_cos": 0.995, "min_cos": 0.97, "nn_agree": 0.90}
 
 
 def fidelity(ref: np.ndarray, cand: np.ndarray) -> dict:
-    """Per-image cosine + top-1 NN ranking agreement between two L2-normed embed sets."""
+    """Per-image cosine + top-1 NN ranking agreement between two L2-normed embed sets.
+
+    ⚠️ POOL-SIZE LAW (measured 2026-07-22, b-bench): `nn_agree` is computed against the
+    OTHER N-1 images, so it falls as N grows — the same ViT-B/32 int8 artifact scores
+    ~0.96 over a 24-image pool (research/runtime.md) and 0.815 over 200. A B24 number is
+    therefore meaningless without its pool size; `n` is recorded on every row and the gate
+    is defined at n=200.
+    """
     cos = (ref * cand).sum(1)
     Sr, Sc = ref @ ref.T, cand @ cand.T
     np.fill_diagonal(Sr, -9.0)

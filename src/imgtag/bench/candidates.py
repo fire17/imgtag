@@ -83,7 +83,11 @@ CANDIDATES: dict[str, Candidate] = {
             id="pecore-t16-384", res=384, dim=512,
             vision={"fp32": _m("pecore-t16-384-vision.onnx"),
                     "int8": _m("pecore-t16-384-vision-int8-wo.onnx")},
-            text={"fp32": _m("pecore-t16-384-text.onnx")},
+            # text int8 = FULL-graph quant: 64MB vs the weight-only recipe's 140MB, and
+            # the text tower is the SAFE one to quantize (spike-pecore: cos 0.988 vs torch,
+            # where the vision tower managed only 0.94).
+            text={"fp32": _m("pecore-t16-384-text.onnx"),
+                  "int8": _m("pecore-t16-384-text-int8-full.onnx")},
             note="edge tier ~10M params",
         ),
         Candidate(
