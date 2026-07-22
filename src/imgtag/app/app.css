@@ -369,6 +369,30 @@ tr:hover td { background: var(--surface); }
 .kv { display: grid; gap: 2px; }
 .kv dt { color: var(--ink-mute); font-size: var(--t-xs); }
 .kv dd { margin: 0; font: 400 var(--t-sm)/1.4 var(--mono); word-break: break-all; }
+/* ranked per-image track confidences (VISION-ADDENDA 14:16Z) */
+.tracks { margin-top: var(--sp-2); border-top: 1px solid var(--line); padding-top: var(--sp-3); }
+.tracks__head { display: flex; align-items: baseline; gap: var(--sp-2); margin-bottom: var(--sp-2); }
+.tracks h3 { font: 600 var(--t-sm)/1 var(--font); margin: 0; color: var(--ink); }
+.trk {
+  display: grid; grid-template-columns: 1fr 64px 34px; grid-template-rows: auto auto;
+  gap: 1px var(--sp-2); align-items: center;
+  padding: 5px 6px; border-radius: var(--r-1);
+}
+.trk--top { background: var(--surface-2); }
+.trk__name { font: 500 var(--t-sm)/1.2 var(--font); color: var(--ink-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trk__bar { height: 4px; background: var(--line-soft); border-radius: 2px; overflow: hidden; }
+.trk__bar i { display: block; height: 100%; background: var(--ink-mute); }
+.trk__p { font: 600 var(--t-xs)/1 var(--mono); font-variant-numeric: tabular-nums; text-align: right; color: var(--ink-dim); }
+.trk__note { grid-column: 1 / -1; font: 400 var(--t-xs)/1.2 var(--mono); color: var(--ink-mute); }
+/* tier drives the bar colour — same vocabulary as the flag chips, alert strongest */
+.trk--alert .trk__bar i { background: var(--bad); }
+.trk--alert .trk__name { color: var(--ink); }
+.trk--violation .trk__bar i { background: var(--bad); }
+.trk--review .trk__bar i { background: var(--warn); }
+.trk--content .trk__bar i { background: var(--accent); }
+.trk--none .trk__bar i { background: var(--ink-mute); }
+.trk--alert .trk__p { color: var(--bad); }
+
 .detail__close {
   align-self: flex-start; margin-top: auto;
   font: 500 var(--t-sm)/1 var(--font); color: var(--ink-dim);

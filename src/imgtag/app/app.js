@@ -116,6 +116,18 @@ const API = {
     const qs = p.toString();
     return this.get(`/api/moderation${qs ? `?${qs}` : ''}`);
   },
+  // every track's confidence for ONE image, on demand when the detail overlay opens
+  // (VISION-ADDENDA 14:16Z). Returns null if the endpoint is not on this build — the caller
+  // then falls back to whatever flags the hit already carries.
+  async imageTracks(dataset, id, { signal } = {}) {
+    try {
+      const j = await this.get(`/api/image/${encodeURIComponent(dataset)}/${encodeURIComponent(id)}/tracks`, { signal });
+      return (j.tracks || j || []).map(normTrackScore);
+    } catch (e) {
+      if (e.status === 404 || e.status === 501) return null;
+      throw e;
+    }
+  },
   async track(category, { tier, k = 300, signal } = {}) {
     const p = new URLSearchParams({ track: category, k: String(k) });
     if (tier) p.set('tier', tier);
@@ -195,6 +207,21 @@ function normFlags(h) {
     category: f.category, tier: f.tier || 'review', p: f.p ?? null,
     kind: f.kind || (f.tier === 'match' ? 'content' : 'moderation'),
   })) : null;
+}
+// one track's confidence for one image. `scored:false` (or missing p) = head not warm / no
+// sidecar → "score pending", NOT a real zero. tier null = scored but below every threshold.
+function normTrackScore(t) {
+  const scored = t.scored !== false && Number.isFinite(t.p);
+  return {
+    category: t.category, label: t.label || t.category,
+    kind: t.kind || (t.tier === 'match' ? 'content' : 'moderation'),
+    p: scored ? t.p : null,
+    tier: t.tier || null,
+    scored,
+    calibration: t.calibration || null,
+    specCalibration: t.spec_calibration || null,
+    via: t.via || null,
+  };
 }
 function normStoredFlags(f) {
   if (Array.isArray(f)) return f.map((x) => ({ category: x.category, tier: x.tier || null, p: x.p ?? null }));
@@ -531,8 +558,66 @@ class VirtualGrid {
 
 // ── detail overlay (native <dialog>) ───────────────────────────────────────
 const dlg = $('#detail');
+let detailSeq = 0;   // guards the async track fetch against a fast image-switch
+
+// The ranked track-confidence panel (VISION-ADDENDA 14:16Z): ALL tracks for one image,
+// ranked p DESC, coloured by tier (alert > violation > review > match/content > none),
+// bar width = p. Unfitted p is labelled, never dressed as authoritative; a head that is
+// not warm shows "score pending", never a fake 0.
+function trackPanel(tracks, { partial } = {}) {
+  const panel = el('div', { className: 'tracks' });
+  panel.append(el('div', { className: 'tracks__head' },
+    el('h3', { textContent: 'Track confidences' }),
+    partial ? el('span', { className: 'sub', textContent: 'from this result — loading the full set…' }) : null));
+  if (!tracks.length) {
+    panel.append(el('p', { className: 'sub', textContent: 'No tracks are defined.' }));
+    return panel;
+  }
+  // rank: scored before pending; within scored, p DESC; ties by tier severity
+  const ranked = tracks.slice().sort((a, b) =>
+    (b.scored - a.scored) || ((b.p ?? -1) - (a.p ?? -1)) || (tierRank(a.tier) - tierRank(b.tier)));
+  const top = ranked.find((t) => t.scored && t.tier);   // highlight the strongest firing track
+  for (const t of ranked) {
+    const tier = t.kind === 'content' ? 'content' : (t.tier || 'none');
+    const row = el('div', { className: `trk trk--${tier}${t === top ? ' trk--top' : ''}` });
+    row.append(el('span', { className: 'trk__name', textContent: t.label }));
+    const bar = el('span', { className: 'trk__bar' });
+    if (t.scored) bar.append(el('i', { style: `width:${Math.round(t.p * 100)}%` }));
+    row.append(bar);
+    row.append(el('span', { className: 'trk__p', textContent: t.scored ? t.p.toFixed(2) : 'pending' }));
+    // tier / maturity annotation — honest about unfitted thresholds
+    const notes = [];
+    if (t.tier) notes.push(TIER_LABEL[t.tier] || t.tier);
+    if (t.scored && t.calibration && t.calibration !== 'fitted') notes.push(t.calibration);
+    if (!t.scored) notes.push('not scored yet');
+    row.append(el('span', { className: 'trk__note', textContent: notes.join(' · ') }));
+    row.title = t.scored
+      ? `${t.label}: p=${t.p.toFixed(3)}${t.tier ? ` (${t.tier})` : ' — below every threshold'}`
+        + `${t.calibration && t.calibration !== 'fitted' ? ` · ${t.calibration}, not authoritative` : ''}`
+      : `${t.label}: score pending — the head for this track is not warm`;
+    panel.append(row);
+  }
+  const anyUnfitted = ranked.some((t) => t.scored && t.calibration && t.calibration !== 'fitted');
+  if (anyUnfitted) {
+    panel.append(el('p', { className: 'hint hint--caveat', style: 'margin:8px 0 0' },
+      'Scores are unfitted: a high confidence means the image resembled that track’s prompt set, not a verified finding.'));
+  }
+  return panel;
+}
+// provisional tracks built from the flags a hit already carries, so the panel is never empty
+// while the full set loads (or if the endpoint is absent on this build)
+function tracksFromHit(item) {
+  const out = [];
+  for (const f of (item.flags || [])) {
+    out.push({ category: f.category, label: f.category, kind: f.kind,
+      p: f.p, tier: f.tier, scored: f.p != null, calibration: S.calibration, via: null });
+  }
+  return out;
+}
+
 function openDetail(item) {
   if (!item) return;
+  const seq = ++detailSeq;
   const side = el('div', { className: 'detail__side' });
   const kv = (k, v, mono = true) => el('dl', { className: 'kv' },
     el('dt', { textContent: k }), el('dd', { textContent: v, style: mono ? '' : 'font-family:var(--font)' }));
@@ -569,6 +654,17 @@ function openDetail(item) {
       item.alsoIn.map((a) => `${a.dataset} · ${a.path}`).join('\n')));
   }
   if (item.exists === false) side.append(kv('status', 'indexed, but the file is no longer on disk'));
+
+  // ranked track-confidence panel — provisional from the hit's flags now, full set on load
+  const seed = tracksFromHit(item);
+  const tracksSlot = trackPanel(seed, { partial: true });
+  side.append(tracksSlot);
+  API.imageTracks(item.dataset, item.id).then((tracks) => {
+    if (seq !== detailSeq) return;                 // user moved on — don't paint stale
+    if (tracks && tracks.length) tracksSlot.replaceWith(trackPanel(tracks));
+    else tracksSlot.replaceWith(trackPanel(seed));  // endpoint absent: keep the provisional, drop "loading"
+  }).catch(() => { if (seq === detailSeq) tracksSlot.replaceWith(trackPanel(seed)); });
+
   const close = el('button', { className: 'detail__close', textContent: 'Close  ·  Esc', type: 'button' });
   close.addEventListener('click', () => dlg.close());
   side.append(close);
@@ -1387,9 +1483,10 @@ function route() {
   const [path, qs] = h.split('?');
   const p = new URLSearchParams(qs || '');
   for (const a of document.querySelectorAll('.nav a')) a.removeAttribute('aria-current');
+  // the coverage hairline belongs to the search field only — never leave it stale on another view
+  if (path !== '/search') $('#qCov').hidden = true;
   if (path === '/' || path === '') {
     $('[data-nav="fleet"]').setAttribute('aria-current', 'page');
-    $('#qCov').hidden = true;
     viewFleet();
   } else if (path === '/search') {
     viewSearch((p.get('q') || '').trim(), p.get('d') || '');
