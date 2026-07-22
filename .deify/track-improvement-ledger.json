@@ -1,1 +1,57 @@
-{"version": 1, "entries": []}
+{
+ "version": 1,
+ "entries": [
+  {
+   "ts": "2026-07-22T17:20Z",
+   "track": "weapons",
+   "rounds": 1,
+   "invocation": "track-weapons3 (user directive 13:58Z: TP probe + subcategory taxonomy + ratio threshold)",
+   "before": {
+    "tp_probe_dataset": null,
+    "tp_vs_userfp_separation_ap": null,
+    "measured_ratio_threshold": null,
+    "note": "no true-positive imagery indexed; every flag in user datasets was FP-or-toy and the track could not be tested for TP-vs-FP separation."
+   },
+   "after": {
+    "tp_probe_dataset": "weaponprobe (166 held-out OI-validation weapon images, 8 subcategories + 1 gap, indexed into the gallery)",
+    "taxonomy": "data/weapon-probe/taxonomy.json + moderation.json weapons.subcategories (10 subcats)",
+    "moderation_json_violation_prompts": "6 -> 47",
+    "fp_band_n": 14933,
+    "fp_band_median": 0.0076,
+    "fp_band_p99": 0.1891,
+    "fp_band_p999": 0.524,
+    "tp_median": 0.9289,
+    "tp_vs_userfp_separation_ap": 0.9379,
+    "shipped_tau_v": 0.8114,
+    "shipped_tau_r": 0.0872,
+    "proposed_tau_v": 0.524,
+    "proposed_tau_r": 0.1891,
+    "proposed_tau_v_fp_rate": "15/14933 (0.10%)",
+    "firearms_ap_range": "0.954-1.000 (handguns/rifles/shotguns dominate)",
+    "weak_subcategories": [
+     "heavy_ordnance (AP 0.742)",
+     "generic_display (AP 0.701)"
+    ],
+    "gaps": [
+     "explosives_grenades (0 held-out OI Bomb images)",
+     "submachine/automatic + crossbow (no distinct OI label)"
+    ],
+    "head_retrained": false
+   },
+   "delta": "Established the TP-vs-user-FP separation measurement that did not exist (overall AP 0.938; firearms clean). Proposed the per-tier ratio threshold with 95% Wilson CI. Deepened the subcategory taxonomy as versioned DATA (+41 violation prompts). Surfaced 2 headline weak subcategories (ordnance/generic = representation limit, not threshold bug) + 1 untestable gap. No retrain: measured failures are not spec/threshold-fixable and firearms already pass.",
+   "artifacts": [
+    "scripts/build_weapons_probe.py",
+    "scripts/eval_weapons.py",
+    "scripts/patch_weapons_spec.py",
+    "data/weapon-probe/taxonomy.json",
+    "research/eval-weapons.json",
+    "research/track-weapons.md \u00a710",
+    "src/imgtag/data/moderation.json weapons entry",
+    "tests/test_weapons.py (+3 tests)"
+   ],
+   "tokens_est": 145000,
+   "wall_min": 30,
+   "brief_version": 1
+  }
+ ]
+}
