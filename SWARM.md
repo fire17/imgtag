@@ -24,8 +24,10 @@
 | 12 | b-skill | build (ponytail) | opus | B | global agent skill (~/.claude/skills/imgtag) |
 | 13 | b-showcase | build (impeccable) | opus | C | showcase + dev-showcase sites |
 | 14 | l-logistics | logistics | haiku | B | model-file fetches w/ sha256 (escalation clause armed) |
+| 15 | editor-reviews | revalidation | opus | A2 ✅sp | apply 50 IMPORTANT/MINOR review fixes under ADJUDICATION law |
+| 16 | b-corpus | build | opus | A2 ✅sp | CORPUS-B/B12/D/CAL-SET builder (bench foundation) |
 
-Wave A now (5 parallel, independent). Wave B after A's verdicts fold into briefs.
+Wave A done (3 reviews in, 22 CRITICALs applied — ADJUDICATION.md). Wave A2 running: editor-reviews + b-corpus + spikes finishing. Wave B after A2.
 Wave C after the engine works. Darwin loop agents (Phase 7) spawn post-delivery.
 
 > 2026-07-22: Wave A spawned. Zenith downgrade logged (flag for final report).
