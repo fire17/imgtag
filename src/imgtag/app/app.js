@@ -220,6 +220,7 @@ function normTrackScore(t) {
     scored,
     calibration: t.calibration || null,
     specCalibration: t.spec_calibration || null,
+    labelValue: t.label_value || null,   // the argmax concept: "handgun", "tennis"
     via: t.via || null,
   };
 }
@@ -573,26 +574,38 @@ function trackPanel(tracks, { partial } = {}) {
     panel.append(el('p', { className: 'sub', textContent: 'No tracks are defined.' }));
     return panel;
   }
-  // rank: scored before pending; within scored, p DESC; ties by tier severity
+  // a real fired tier — NOT "none" (below threshold) and NOT null (not scored)
+  const fired = (t) => t.tier && t.tier !== 'none';
+  // Rank WITHIN kind, never across (b-daemon: moderation p is a margin scale, content p is
+  // cosine — cross-kind comparison is a lie). Moderation group first (it answers "is this a
+  // problem"), content second; inside each: scored before pending, fired-severity, then p DESC.
+  const kindOrder = (t) => (t.kind === 'content' ? 1 : 0);
   const ranked = tracks.slice().sort((a, b) =>
-    (b.scored - a.scored) || ((b.p ?? -1) - (a.p ?? -1)) || (tierRank(a.tier) - tierRank(b.tier)));
-  const top = ranked.find((t) => t.scored && t.tier);   // highlight the strongest firing track
+    (kindOrder(a) - kindOrder(b))
+    || (b.scored - a.scored)
+    || (tierRank(a.tier) - tierRank(b.tier))
+    || ((b.p ?? -1) - (a.p ?? -1)));
+  const top = ranked.find(fired);   // highlight the strongest FIRING track (never a "none")
   for (const t of ranked) {
-    const tier = t.kind === 'content' ? 'content' : (t.tier || 'none');
+    const tier = t.kind === 'content' ? 'content' : (fired(t) ? t.tier : 'none');
     const row = el('div', { className: `trk trk--${tier}${t === top ? ' trk--top' : ''}` });
-    row.append(el('span', { className: 'trk__name', textContent: t.label }));
+    // the concrete matched concept (handgun / tennis) rides alongside the track name
+    row.append(el('span', { className: 'trk__name' },
+      el('span', { textContent: t.label }),
+      t.labelValue ? el('em', { className: 'trk__val', textContent: t.labelValue }) : null));
     const bar = el('span', { className: 'trk__bar' });
-    if (t.scored) bar.append(el('i', { style: `width:${Math.round(t.p * 100)}%` }));
+    if (t.scored) bar.append(el('i', { style: `width:${Math.round(Math.max(0, Math.min(1, t.p)) * 100)}%` }));
     row.append(bar);
     row.append(el('span', { className: 'trk__p', textContent: t.scored ? t.p.toFixed(2) : 'pending' }));
-    // tier / maturity annotation — honest about unfitted thresholds
+    // tier / maturity annotation — honest about unfitted thresholds, quiet about "none"
     const notes = [];
-    if (t.tier) notes.push(TIER_LABEL[t.tier] || t.tier);
+    if (fired(t)) notes.push(TIER_LABEL[t.tier] || t.tier);
+    else if (t.scored) notes.push('below threshold');
+    else notes.push('not scored yet');
     if (t.scored && t.calibration && t.calibration !== 'fitted') notes.push(t.calibration);
-    if (!t.scored) notes.push('not scored yet');
     row.append(el('span', { className: 'trk__note', textContent: notes.join(' · ') }));
     row.title = t.scored
-      ? `${t.label}: p=${t.p.toFixed(3)}${t.tier ? ` (${t.tier})` : ' — below every threshold'}`
+      ? `${t.label}: p=${t.p.toFixed(3)} ${fired(t) ? `(${t.tier})` : '— below every threshold'}`
         + `${t.calibration && t.calibration !== 'fitted' ? ` · ${t.calibration}, not authoritative` : ''}`
       : `${t.label}: score pending — the head for this track is not warm`;
     panel.append(row);

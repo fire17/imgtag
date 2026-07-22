@@ -118,12 +118,11 @@ def test_acceptance_sketch_six_scenes(scorer):
 
 def test_alert_requires_person_down_not_danger_alone(scorer):
     """The boundary agreed with track-violence: safety.alert NEVER fires on danger/gore
-    without a person down. Danger alone must not reach alert."""
-    b = FakeBackend()
-    danger_only = _img(b, ["a burning building on fire", "a scene of destruction and debris"])
-    # force high danger, minimal lying by construction; assert tier is not 'alert'
-    out = scorer.per_image(danger_only[None], 0)
-    assert out["tier"] != "alert" or out["p"] >= scorer.pol["tau"], \
+    without a person down. Maximal danger with sub-tau lying must NOT reach alert —
+    deterministic on tiers(), the real contract (gore-without-a-body is violence's lane)."""
+    pl = np.array([0.0, scorer.pol["tau"] * 0.99])   # both below the person-down gate
+    pd = np.array([1.0, 1.0])                          # danger maxed
+    assert list(scorer.tiers(pl, pd)) == ["none", "none"], \
         "alert fired without person-down probability clearing tau"
 
 

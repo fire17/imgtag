@@ -380,6 +380,8 @@ tr:hover td { background: var(--surface); }
 }
 .trk--top { background: var(--surface-2); }
 .trk__name { font: 500 var(--t-sm)/1.2 var(--font); color: var(--ink-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trk__val { font-style: normal; color: var(--ink); margin-left: 6px; }
+.trk__val::before { content: "· "; color: var(--ink-mute); }
 .trk__bar { height: 4px; background: var(--line-soft); border-radius: 2px; overflow: hidden; }
 .trk__bar i { display: block; height: 100%; background: var(--ink-mute); }
 .trk__p { font: 600 var(--t-xs)/1 var(--mono); font-variant-numeric: tabular-nums; text-align: right; color: var(--ink-dim); }
