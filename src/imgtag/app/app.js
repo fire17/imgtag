@@ -214,6 +214,8 @@ function normHit(h) {
     p: Number.isFinite(h.p) ? h.p : null,
     exists: h.exists !== false,
     paths: Array.isArray(h.paths) && h.paths.length > 1 ? h.paths : null,  // same bytes, many files
+    // same content hash living in OTHER datasets, folded to one hit (B18-safe cross-dataset collapse)
+    alsoIn: Array.isArray(h.also_in) && h.also_in.length ? h.also_in : null,
     why: h.why || null,
     w: h.w ?? null, h: h.h ?? null,
   };
@@ -448,6 +450,12 @@ class VirtualGrid {
       dir && !this.hideDataset ? el('span', { className: 'tile__dir', textContent: dir }) : null,
       el('span', { className: 'tile__file', textContent: file || item.id }),
       this.hideDataset ? el('span', { className: 'tile__id', textContent: shortId }) : null));
+    // one photo indexed into more than one dataset folded to a single hit — name the others
+    if (item.alsoIn) {
+      cap.append(el('div', { className: 'tile__also' },
+        el('span', { textContent: `also in ${item.alsoIn.map((a) => a.dataset).join(', ')}`,
+          title: item.alsoIn.map((a) => `${a.dataset} · ${a.path}`).join('\n') })));
+    }
     // flag chips: violation and review are visually distinct because they mean different
     // things — review is "a human should look", never "this is bad"
     if (item.flags || item.flagsStored) {
@@ -554,6 +562,11 @@ function openDetail(item) {
   if (item.paths) {
     side.append(kv(`also on disk at ${item.paths.length - 1} other path${item.paths.length > 2 ? 's' : ''}`,
       item.paths.slice(1).join('\n')));
+  }
+  if (item.alsoIn) {
+    // same content hash, different dataset — provenance genuinely differs, so it is listed
+    side.append(kv(`also indexed in ${item.alsoIn.length} other dataset${item.alsoIn.length > 1 ? 's' : ''}`,
+      item.alsoIn.map((a) => `${a.dataset} · ${a.path}`).join('\n')));
   }
   if (item.exists === false) side.append(kv('status', 'indexed, but the file is no longer on disk'));
   const close = el('button', { className: 'detail__close', textContent: 'Close  ·  Esc', type: 'button' });
@@ -883,8 +896,11 @@ async function viewSearch(q, dataset) {
   } else {
     gridMount.classList.add('grid');
     // one extra caption line when any hit carries moderation flags — rows stay uniform
-    const capH = res.hits.some((h) => h.flags || h.flagsStored) ? 78 : 60;
-    grid = new VirtualGrid(root, gridMount, { onOpen: openDetail, cap: capH });
+    // caption height scales to the tallest caption in the set so rows stay uniform: base 3
+    // lines, +1 for a flag row, +1 for an also-in line
+    const extra = (res.hits.some((h) => h.flags || h.flagsStored) ? 18 : 0)
+      + (res.hits.some((h) => h.alsoIn) ? 16 : 0);
+    grid = new VirtualGrid(root, gridMount, { onOpen: openDetail, cap: 60 + extra });
     ctl.grid = grid;
     const groups = groupByCoverage(res);
     if (groups) grid.setGroups(groups); else grid.setItems(res.hits);

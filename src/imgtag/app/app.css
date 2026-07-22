@@ -208,6 +208,8 @@ h2 { font: 600 var(--t-lg)/1.25 var(--font); margin: 0; text-wrap: balance; }
 .tile__file { color: var(--ink-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 0 0 auto; max-width: 100%; }
 .tile__id { color: var(--ink-mute); flex: none; }   /* full opacity: 5.7:1 on --bg */
 .tile__why { color: var(--ink-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tile__also { color: var(--ink-mute); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tile__also span::before { content: "⧉ "; }   /* same bytes, another dataset */
 
 /* ── ALL → SOME → ANY coverage (VISION-ADDENDA 12:12Z) ───────────────────
    Tier is carried by ink weight and one badge, never by a banner: full-strength
