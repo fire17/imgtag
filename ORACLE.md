@@ -512,6 +512,12 @@ label, or to compare a dev-machine number against a target-profile (🐧) budget
   lane complete-via-cross-checks in the gap. Lesson: disk truth led message truth by 20
   minutes — check the file BEFORE pinging, and re-check before declaring a lane missing.
 
+- 2026-07-22 11:40Z · Isolated RSS probes (contention-immune): tokenizer.json 551MB
+  resident, SigLIP2 int8 text 757MB, PE-Core int8 text 154MB. ADR-5 premise falsified as
+  written → revised same hour (resident set = tag table + binary tokenizer; text tower
+  lazy+TTL). Resident-daemon-as-designed was 1.51GB before decoding one image; tokenizer
+  fix alone → ~0.97GB. Lesson: RSS is a property of the RUNTIME representation, not the
+  file — 16× and 2.7× amplifications hid in "load the file".
 - 2026-07-22 11:35Z · CONTENTION EVENT + honored escalation: spike-siglip2 STOPPED per
   §7(b)/(f) rather than publish img/s from a box at load 32.6/16 cores (two sibling lanes
   ~735% CPU; its matrix process was also killed externally at 19/45). ALL its img/s
