@@ -310,14 +310,18 @@ highest-bar protocol — verbatim vision, budgets as tests, honest verification,
 ## 3. Dead ends (do not rediscover)
 
 - **fp16 ONNX on the ORT CPU EP — dead across the board** (measured 2026-07-22, clean
-  method): CPU EP has no native fp16 kernels — casts to fp32 and pays for it (fp16 4.28
-  vs fp32 4.89 img/s at intra=2); official SigLIP2 fp16 export additionally FAILS TO LOAD
+  method): CPU EP has no native fp16 kernels — casts to fp32 and pays for it (no native
+  fp16 kernels — the slower-than-fp32 samples were contended and are downgraded to
+  expected-unproven; the LOADER BUG is timing-independent and stands); official SigLIP2 fp16 export additionally FAILS TO LOAD
   at ORT_ENABLE_ALL (SimplifiedLayerNormFusion bug; loads at ENABLE_EXTENDED). fp16 is a
   GPU/ANE format. Do not spend bench slots on it.
-- **Batch>1 for CLIP-class vision on CPU at low thread counts** — monotonically HURTS
-  (int8 intra=2: 13.14→12.95→11.18 img/s for b=1→8→32; independently, pecore b8 ≈ b1
-  with 2× RSS). Batch=1/2 streaming + per-image process parallelism is the law; a batch-32
-  design is a regression on two axes. (2 model families, clean method, 2026-07-22.)
+- **Batch>1 for CLIP-class vision on CPU** — batch=1/2 streaming is the DEFAULT, justified
+  by the contention-immune half of the evidence: batching ~doubles peak RSS on both measured
+  families (pecore int8 b1 188MB → b8 412MB) for no demonstrated throughput gain. The
+  "batching HURTS throughput" claim is DOWNGRADED to plausible-unproven — every img/s
+  sample behind it was taken on a contended box (load 23–131; see field log 11:35Z) and
+  was retracted by its own measurer. The quiet-window bench decides the throughput half;
+  RSS alone already forbids batch-32 on the 8GB target.
 - ggml/clip.cpp path — dormant, slower on CPU than ORT MLAS, quant regresses on x86.
 - ORT CoreML EP — partition thrash (14 round-trips on Pad-reflect), silent fp16, minutes
   of recompile without ModelCacheDirectory. Even the accel lane should use coremltools.
@@ -506,6 +510,14 @@ label, or to compare a dev-machine number against a target-profile (🐧) budget
   lane complete-via-cross-checks in the gap. Lesson: disk truth led message truth by 20
   minutes — check the file BEFORE pinging, and re-check before declaring a lane missing.
 
+- 2026-07-22 11:35Z · CONTENTION EVENT + honored escalation: spike-siglip2 STOPPED per
+  §7(b)/(f) rather than publish img/s from a box at load 32.6/16 cores (two sibling lanes
+  ~735% CPU; its matrix process was also killed externally at 19/45). ALL its img/s
+  retracted incl. "clean" rounds; parity/recall/RSS/loadability stand (contention-immune).
+  RULING: throughput measurement is CONSOLIDATED under b-bench as sole owner, timed runs
+  only inside DECLARED QUIET WINDOWS (conductor pauses CPU-heavy lanes; loadavg gate
+  refuses > cores×0.6, recorded per row). The bench-noise risk row predicted this on day
+  one; the system worked — a false B1 projection never reached BUDGETS.
 - 2026-07-22 11:25Z · l-logistics spawned as haiku reported MODEL: claude-opus-4-8 —
   model-line tripwire caught a spawn-vs-actual mismatch (non-Fable either way; rule 4
   intact). All 4 model repos fetched + validated (rclip 2.1.6; uform ONNX lives in the
