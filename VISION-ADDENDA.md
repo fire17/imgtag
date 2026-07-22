@@ -95,3 +95,19 @@ Derived (💭): detail overlay gains a tracks panel — ALL tracks, every image,
 descending, highlighted by score/tier (alert > violation > review > match > none). Powered by
 ADR-15 sidecars / live matvec fallback. Routed: b-daemon (per-image all-tracks payload),
 b-app (ranked highlighted panel).
+
+## 2026-07-22 ~14:56–15:00Z — feel-test reports (verbatim)
+
+> "i still dont see the tags and confidences for each of the tracks on all the images - whats
+> the status - please fix it now" (armed as /goal Stop-hook)
+
+> "also theres an issue if i search for "weapo" rather than "weapon" i get more correct
+> results, the full word shows me alot of false positives"
+
+Resolved (💭): panel chain verified end-to-end (root causes: browser-cached stale app.js —
+daemon now serves no-store — plus a stale running daemon predating the endpoint); browser-level
+proof screenshotted. weapo/weapon root-caused: hypernym expansion into ALL-uncalibrated tags
+(sword/missile/axe/dagger) saturating to p≈0.99 over the honest dense path — class fix routed
+to b-daemon (uncalibrated may boost, never dominate) with the repro as regression.
+Standing user offers surfaced by tracks: labeled TP folders would unlock drugs' next tier
+(cocaine/heroin/meth/pills) and nudity's violation-tier local measurement (nsfwprobe slot).
