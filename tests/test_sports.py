@@ -162,7 +162,32 @@ def test_fit_calibrates_and_sets_tau():
     assert h.calibrated is True
     assert h.platt is not None
     assert h.metrics["held_out"] is True
-    assert 0.0 <= h.tau_match <= 1.0
+    # τ_match is a MARGIN threshold (the reader gates in margin space), so it lives in the
+    # margin's range [-1, 1] — NOT a probability. This is the guard against the reader-0-match
+    # bug: a probability-space τ (~0.18) exceeds the max attainable margin → 0 matches.
+    assert h.metrics["tau_space"] == "margin"
+    assert -1.0 <= h.tau_match <= 1.0
+    assert h.tau_match <= float(m.max())          # some image can actually clear it
+
+
+def test_gates_in_margin_space_not_probability():
+    """Regression for the head≠reader divergence: the tier MUST be decided on the raw margin
+    vs τ_match (what b-daemon's fitted reader does: `margin - tau >= 0`), never on the Platt
+    probability. A steep Platt makes probability-space and margin-space gating disagree, and
+    the reader is the authority."""
+    rng = np.random.default_rng(11)
+    h = S.SportsHead.build(_Backend())
+    emb = _unit(rng.normal(size=(400, 16)).astype(np.float32))
+    y = h.margins(emb) > np.median(h.margins(emb))
+    S.fit(h, emb, y)
+    m = h.margins(emb)
+    flags = h.score(emb)
+    # head's match set == the reader's margin-space gate, exactly
+    head_match = np.array([f["tier"] == "match" for f in flags])
+    reader_gate = m >= h.tau_match
+    assert np.array_equal(head_match, reader_gate)
+    # and the reported p is Platt(margin), decoupled from the gate
+    assert np.allclose([f["p"] for f in flags], np.round(h.probs(emb), 4), atol=1e-4)
 
 
 # ── persistence: fp16 round-trip + b-daemon's fitted-file keys ────────────────

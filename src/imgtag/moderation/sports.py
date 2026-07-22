@@ -161,8 +161,10 @@ NEGATIVE_PROMPTS = [
     "an abstract pattern",
 ]
 
-#: Uncalibrated default for the zero-shot path. A FLAG BUDGET, not an operating point.
-ZERO_SHOT_TAU = 0.5
+#: Uncalibrated MARGIN default for the zero-shot path — a FLAG BUDGET, not an operating
+#: point (τ_match gates in margin space; a 0.5 *probability* here would flag nothing, since
+#: margins top out near 0.16). The fitted head replaces this with a measured margin-τ.
+ZERO_SHOT_TAU = 0.05
 
 #: A content track is not enforcement, so it is NOT recall-first (weapons/nudity are —
 #: a missed weapon goes live, a missed sports photo just does not show up in a filter).
@@ -205,9 +207,14 @@ def squash(m: np.ndarray, platt: list | None = None) -> np.ndarray:
     return 1.0 / (1.0 + np.exp(-np.asarray(m, np.float64) * 20.0))
 
 
-def tier_of(p: float, tau_match: float) -> str:
-    """Content-track tier. ``none`` is a real answer, not a missing one."""
-    return "match" if p >= tau_match else "none"
+def tier_of(margin_score: float, tau_match: float) -> str:
+    """Content-track tier. Gates in MARGIN space (`margin >= tau_match`), because that is
+    the shared serving contract: b-daemon's fitted reader (search.py `_margin_p` / the
+    `fitted` branch) does `margin - tau >= 0` and treats Platt as a COSMETIC reported
+    probability. τ_match is therefore a margin threshold, NOT a probability — fitting it in
+    probability space silently ships a track the reader flags 0 images for (the max margin
+    never reaches a 0.18 probability-τ). ``none`` is a real answer, not a missing one."""
+    return "match" if margin_score >= tau_match else "none"
 
 
 def _pack(a: np.ndarray) -> dict:
@@ -310,6 +317,8 @@ class SportsHead:
         return margin(emb, self.pos, self.neg)
 
     def probs(self, emb: np.ndarray) -> np.ndarray:
+        """The reported (cosmetic) probability — Platt over the margin. NOT the gate:
+        the tier is decided on the raw margin vs τ_match (see ``score``)."""
         return squash(self.margins(emb), self.platt)
 
     def score(self, embeddings, images=None, ids=None) -> list[dict]:
@@ -317,12 +326,13 @@ class SportsHead:
         if emb.ndim != 2 or emb.shape[1] != self.dim:
             raise ValueError(f"sports head expects [N,{self.dim}], got {emb.shape}")
         cp = emb @ self.pos.T
-        p = squash(cp.max(1) - (emb @ self.neg.T).max(1), self.platt)
+        m = cp.max(1) - (emb @ self.neg.T).max(1)      # margin — the GATED quantity
+        p = squash(m, self.platt)                       # probability — cosmetic display
         best = cp.argmax(1)
         out = []
-        for i, v in enumerate(p):
-            tier = tier_of(v, self.tau_match)
-            d = {"category": CATEGORY, "p": round(float(v), 4), "tier": tier,
+        for i in range(len(m)):
+            tier = tier_of(float(m[i]), self.tau_match)   # gate in MARGIN space (reader contract)
+            d = {"category": CATEGORY, "p": round(float(p[i]), 4), "tier": tier,
                  "model_id": self.model_id, "calibrated": self.calibrated,
                  "enforcement_ready": False, "content_track": True}
             if tier == "match":
@@ -373,14 +383,21 @@ def fit(head: SportsHead, emb: np.ndarray, y: np.ndarray, val: tuple | None = No
         precision: float = MATCH_PRECISION) -> SportsHead:
     """Calibrate + fit τ. ``val`` = held-out (emb, y); τ is fitted THERE when given —
     fitting an operating point on the same scores you calibrated on is how a track
-    quietly ships a precision it does not have."""
+    quietly ships a precision it does not have.
+
+    τ_match is fitted in **MARGIN space** — the space the reader gates in. Platt is fitted
+    too but only feeds the reported (cosmetic) probability; it never decides a tier. AP and
+    prf are computed on the margin (a monotone transform, so ranking-identical to the
+    probability), and the reported-probability spread is published for the saturation check.
+    """
     m = head.margins(emb)
     head.platt = fit_platt(m, y)
     ve, vy = val if val is not None else (emb, y)
-    vp = squash(head.margins(ve), head.platt)
-    head.tau_match = tau_for_precision(vp, vy, precision)
-    met = {"target_precision": precision, **prf(vp, vy, head.tau_match)}
-    met.update(ap=average_precision(vp, vy), held_out=val is not None,
+    vm = head.margins(ve)                                  # MARGIN space — the reader's gate
+    head.tau_match = tau_for_precision(vm, vy, precision)  # τ_match is a MARGIN threshold
+    vp = squash(vm, head.platt)                            # reported probability (cosmetic)
+    met = {"target_precision": precision, "tau_space": "margin", **prf(vm, vy, head.tau_match)}
+    met.update(ap=average_precision(vm, vy), held_out=val is not None,
                n=int(len(vy)), n_pos=int(np.sum(vy)), spread=spread(vp))
     head.metrics = met
     return head

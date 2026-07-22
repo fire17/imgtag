@@ -175,6 +175,9 @@ def main() -> None:
     print("  " + json.dumps({k: (round(v, 4) if isinstance(v, float) else v)
                              for k, v in head.metrics.items() if k != "spread"}))
     print("  spread " + json.dumps(head.metrics["spread"]))
+    # τ_match gates in MARGIN space (the reader's contract) — use margins for every
+    # `>= tau` gate below; p_all is the reported (cosmetic) probability, for the histogram.
+    m_all = head.margins(emb)
     p_all = head.probs(emb)
     hist, edges = np.histogram(p_all, bins=20, range=(0, 1))
     print("  p-histogram (all 5000, 20 bins 0..1):")
@@ -184,8 +187,8 @@ def main() -> None:
     # precision/recall sweep so the threshold ruling is auditable
     print("\n[4] operating points on the held-out half (COCO truth)")
     for tgt in (0.60, 0.70, 0.80, 0.90):
-        t = sports.tau_for_precision(p_all[va], y[va], tgt)
-        m = sports.prf(p_all[va], y[va], t)
+        t = sports.tau_for_precision(m_all[va], y[va], tgt)
+        m = sports.prf(m_all[va], y[va], t)
         print(f"  target_prec={tgt:.2f} tau={t:.4f} prec={m['precision']:.3f} "
               f"rec={m['recall']:.3f} f1={m['f1']:.3f} match_rate={m['match_rate']:.3f}")
 
@@ -195,7 +198,7 @@ def main() -> None:
     for c in sorted(children):
         idx = [i for i, nm in enumerate(names) if nm in per and c in per[nm]]
         if idx:
-            print(f"  {c:16s} n={len(idx):4d} recall={np.mean(p_all[idx] >= tau):.3f}")
+            print(f"  {c:16s} n={len(idx):4d} recall={np.mean(m_all[idx] >= tau):.3f}")
 
     print(f"\n[6] per-LVIS-extra recall at tau={tau:.4f} (sports COCO does not name)")
     counts: dict[str, list] = {}
@@ -204,13 +207,13 @@ def main() -> None:
             counts.setdefault(c, []).append(i)
     for c, idx in sorted(counts.items(), key=lambda kv: -len(kv[1])):
         if len(idx) >= 5:
-            print(f"  {c:24s} n={len(idx):4d} recall={np.mean(p_all[idx] >= tau):.3f}")
+            print(f"  {c:24s} n={len(idx):4d} recall={np.mean(m_all[idx] >= tau):.3f}")
 
     # ── false positives: what does it match that GT says is not sport? ───────
     print(f"\n[7] false-positive anatomy at tau={tau:.4f} (COCO+LVIS truth)")
-    fp = np.flatnonzero((p_all >= tau) & ~y_any)
-    tp = np.flatnonzero((p_all >= tau) & y_any)
-    print(f"  matched={int((p_all>=tau).sum())} tp={len(tp)} fp={len(fp)} "
+    fp = np.flatnonzero((m_all >= tau) & ~y_any)
+    tp = np.flatnonzero((m_all >= tau) & y_any)
+    print(f"  matched={int((m_all>=tau).sum())} tp={len(tp)} fp={len(fp)} "
           f"precision={len(tp)/max(len(tp)+len(fp),1):.3f}")
     best = cp_all.argmax(1)
     by: dict[str, int] = {}
@@ -222,10 +225,10 @@ def main() -> None:
     for c in sorted(LVIS_HARD_NEG):
         idx = [i for i, nm in enumerate(names) if c in lv_neg.get(nm, ()) and not y_any[i]]
         if len(idx) >= 5:
-            print(f"    {c:12s} n={len(idx):4d} fp_rate={np.mean(p_all[idx] >= tau):.3f}")
+            print(f"    {c:12s} n={len(idx):4d} fp_rate={np.mean(m_all[idx] >= tau):.3f}")
     print("  top-20 FP filenames (for eyeballing):")
-    for i in fp[np.argsort(-p_all[fp])][:20]:
-        print(f"    {names[i]} p={p_all[i]:.3f} -> {labels[best[i]]}")
+    for i in fp[np.argsort(-m_all[fp])][:20]:
+        print(f"    {names[i]} m={m_all[i]:.3f} -> {labels[best[i]]}")
 
     # ── sport-label distribution on true positives ───────────────────────────
     print("\n[8] reported `sport` label on matched true positives")
@@ -238,7 +241,7 @@ def main() -> None:
     print("\n[8b] FP samples per group (for the manual audit)")
     for g in ("motorsport", "equestrian", "kite", "water sports"):
         ids = [i for i in fp if labels[best[i]] == g]
-        ids = sorted(ids, key=lambda i: -p_all[i])[:: max(1, len(ids) // 4)][:4]
+        ids = sorted(ids, key=lambda i: -m_all[i])[:: max(1, len(ids) // 4)][:4]
         print(f"    {g:14s} " + " ".join(names[i] for i in ids))
 
     # ── [9] weak-label cross-domain probe: Unsplash Lite keywords ────────────

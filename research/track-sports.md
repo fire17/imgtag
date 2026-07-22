@@ -20,7 +20,8 @@
   loads from the machine profile with no text-tower pass — prompt matrices baked fp16 into
   the fitted file) and `ZeroShotSportsHead` (same margin, no fit, `p` is a ranking).
 - **Measured on CORPUS-A** (COCO val2017, 5000 imgs, PE-Core-S16-384 fp32):
-  **AP 0.9321**, held-out precision **0.801** / recall **0.947** at τ_match **0.1809**.
+  **AP 0.9321**, held-out precision **0.801** / recall **0.947** at τ_match **0.0415**
+  (a MARGIN threshold — see §9; the reader gates in margin space).
 - **`enforcement_ready` = false, permanently.** A content label is not a policy breach and
   must never gate enforcement.
 
@@ -78,7 +79,7 @@ far from "rifle".)
 `mean-top3` background pooling recovers some of the loss (0.932→0.937 AP) but not enough to
 beat generic-only, and it complicates the scorer for b-daemon's reader — rejected.
 
-## 4. Measured — per-class recall (held-out τ = 0.1809)
+## 4. Measured — per-class recall (held-out margin τ = 0.0415)
 
 **Per COCO child** (exhaustive truth): baseball bat 0.938 · baseball glove 1.000 · frisbee
 0.917 · kite 0.934 · skateboard 0.945 · skis 0.917 · snowboard 0.959 · sports ball 0.941 ·
@@ -90,12 +91,17 @@ mound 1.000. The equipment prompts generalise past the COCO taxonomy.
 
 ## 5. Operating-point sweep (held-out half, COCO truth)
 
-| target precision | τ_match | precision | recall | f1 | match-rate |
+| target precision | τ_match (margin) | precision | recall | f1 | match-rate |
 |---|---|---|---|---|---|
-| 0.60 | 0.0487 | 0.600 | 0.971 | 0.742 | 0.308 |
-| 0.70 | 0.0920 | 0.700 | 0.956 | 0.808 | 0.260 |
-| **0.80 (SHIPPED)** | **0.1809** | **0.801** | **0.947** | **0.868** | 0.225 |
-| 0.90 | 0.5489 | 0.902 | 0.828 | 0.863 | 0.175 |
+| 0.60 | 0.0167 | 0.600 | 0.971 | 0.742 | 0.308 |
+| 0.70 | 0.0283 | 0.700 | 0.956 | 0.808 | 0.260 |
+| **0.80 (SHIPPED)** | **0.0415** | **0.801** | **0.947** | **0.868** | 0.225 |
+| 0.90 | 0.0704 | 0.902 | 0.828 | 0.863 | 0.175 |
+
+τ is a **margin** threshold (cosine-difference), NOT a probability — the operating points
+(precision/recall/match-rate) are identical to a probability-space fit because Platt is
+monotone, but the reader gates `margin − τ ≥ 0`, so the number that ships must be in margin
+space (§9, and the ledger's head≠reader-divergence entry).
 
 **p-spread (NOT saturated — the drugs failure mode is absent):** q05=0.0003, q50=0.0112,
 q95=0.9744; frac(p<0.02)=0.582, frac(p>0.98)=0.041. A genuine spread, not a p=0.99 pile —
@@ -185,9 +191,18 @@ weak-label plausible · chess/hiking → `none` by the documented default, one f
   `scorer:"margin"`, `tau_match`, `platt` (the keys b-daemon's spec reader honours) plus the
   fp16 prompt matrices this module needs to score with no text tower. The fitted file WINS
   over the spec; a refit is a pure file swap (TRACKS.md T3).
-- **Spec ⇄ head must agree.** The `match`/`negatives` prompts in `moderation.json` are the
-  EXACT strings this module embeds (borderline folded into `negatives`), so b-daemon's
-  spec-reader margin reproduces this head's margin. Changing one requires changing both.
+- **τ_match is a MARGIN threshold, and this matters.** The reader's fitted path
+  (search.py: `margin − tau ≥ 0`, Platt only for the reported/cosmetic probability) gates in
+  MARGIN space, so `tau_match` must be a margin, not a probability. Both `SportsHead.score`
+  and `tier_of` gate the raw margin; `probs()` is display-only. (History: v1 fitted τ in
+  probability space → the reader flagged **0** images on a sports-packed slice because the max
+  margin never reaches a 0.18 probability-τ. Fixed 2026-07-22 — see the ledger.)
+- **Spec ⇄ head agree in margin space.** The `match`/`negatives` prompts in `moderation.json`
+  are the EXACT strings this module embeds (borderline folded into `negatives`), so the
+  reader's spec-margin reproduces this head's margin — verified end-to-end on `vslices`:
+  reader **143** matches vs head **137** (the small gap is the reader's fp32 spec-embed vs the
+  head's fp16 stored matrices; margin-space is robust to it, where the old steep-Platt
+  probability was not). Changing a prompt requires changing both.
 
 ## 10. Reproduce
 
@@ -207,7 +222,7 @@ and labeled as such; activity-only and contact-sports recall are under-measured 
 - **2026-07-22 · track-sports2 · v1 shipped + owner-consolidated.** Built the measured
   scorer (embedding-space prompt ensemble, generic-only background, precision-first τ),
   measured on CORPUS-A (COCO val2017 exhaustive GT): AP 0.9321, held-out prec 0.801 /
-  rec 0.947 @ τ 0.1809, non-saturated p-spread. Committed sports.py + fitted head +
+  rec 0.947 @ margin-τ 0.0415, non-saturated p-spread. Committed sports.py + fitted head +
   tests (17, green) + this doc + `scripts/_sports_explore.py` at 45c10f6.
 - **2026-07-22 · spec approved (b-daemon).** `categories.sports` entry authored per
   b-daemon's amendments: `match` sole positive key, `match_labels` parallel array,
@@ -235,6 +250,21 @@ and labeled as such; activity-only and contact-sports recall are under-measured 
   grown `unsplashb` (n≈9926) — direction/ranking unchanged; the corpus-dependent phrasing
   in sports.py's background-bank comment tightened. Lane consolidated to a single owner
   (track-sports2) after the auth-outage false-death; successor stopped, its edits adopted.
+
+- **2026-07-22 · HEAD≠READER DIVERGENCE found + fixed (track-violence caught it).** On the
+  real contact-sports slice `vslices` (1856), b-daemon's reader fired `sports.match` **0/1856**
+  while this head fired 137. Root cause: v1 fitted `tau_match` in PROBABILITY space
+  (`tau_for_precision` over `squash(margin)`), but the reader's fitted path gates in MARGIN
+  space (`margin − tau ≥ 0`, Platt cosmetic — search.py). The max margin (~0.16) never reaches
+  a 0.18 probability-τ → the reader flagged nothing. Compounded by a pathologically steep Platt
+  (A≈−59) that made probability-space gating hypersensitive to any head/reader margin
+  difference. FIX: fit `tau_match` in margin space (0.1809 prob → **0.0415 margin**, identical
+  operating point since Platt is monotone); `score`/`tier_of` gate the margin; `probs()` is
+  display-only. VERIFIED end-to-end: reader now **143** vs head **137** on vslices (fp32-spec
+  vs fp16-head gap, robust in margin space). Regression test added
+  (`test_gates_in_margin_space_not_probability`). Lesson: a head is not done until its numbers
+  match the READER's, not just its own — two scorers, one contract. Corrected my earlier false
+  "reader reproduces exactly" claim.
 
 ## Open items (darwin backlog)
 
