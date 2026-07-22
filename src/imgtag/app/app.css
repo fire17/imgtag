@@ -223,6 +223,8 @@ h2 { font: 600 var(--t-lg)/1.25 var(--font); margin: 0; text-wrap: balance; }
 .tile__terms { display: flex; gap: 5px; overflow: hidden; white-space: nowrap; }
 .term { color: var(--ink-dim); }
 .term--missed { color: var(--ink-mute); text-decoration: line-through; text-decoration-thickness: 1px; }
+/* matched through a hypernym/synonym — the user's word, marked as an inferred route */
+.term--via { text-decoration: underline dotted; text-underline-offset: 2px; text-decoration-color: var(--ink-mute); }
 
 .tile[data-tier="all"] .tile__cov { background: var(--accent); color: var(--accent-ink); box-shadow: none; }
 .tile[data-tier="some"] .tile__ds { color: var(--ink-dim); }

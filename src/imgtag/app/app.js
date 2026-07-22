@@ -99,6 +99,7 @@ const API = {
       rttMs: performance.now() - t0,
       coverage: j.coverage || null,
       terms: normTerms(j.terms),
+      calibration: j.calibration || null,   // "measured-default" until the CAL-SET fit lands
       noMatch: j.no_match === true || (j.hits || []).length === 0,
       hits: (j.hits || []).map(normHit),
     };
@@ -131,25 +132,27 @@ function normDataset(d) {
     updated: d.updated ?? d.created ?? null,
   };
 }
-// top-level term echo — accepts a bare array or {parsed|terms, n} until b-daemon pins it
+// Top-level `terms` is a BARE ARRAY of the parsed terms, absent when n<2 (b-daemon, pinned).
+// A quoted span or a greedy vocabulary match is ONE element — one element, one chip.
 function normTerms(t) {
-  if (!t) return null;
-  const list = Array.isArray(t) ? t : (t.parsed || t.terms || t.list || []);
-  const n = Number.isFinite(t?.n) ? t.n : list.length;
-  return n > 1 ? { list, n } : null;   // a single term needs no coverage vocabulary
+  return Array.isArray(t) && t.length > 1 ? { list: t, n: t.length } : null;
 }
-// per-hit coverage: which of the user's terms this image actually satisfies
-function normHitTerms(t) {
-  if (!t) return null;
-  const matched = t.matched || [];
-  const missed = t.missed || [];
-  const n = Number.isFinite(t.n) ? t.n : matched.length + missed.length;
-  const m = Number.isFinite(t.m) ? t.m : matched.length;
-  return n > 1 ? { matched, missed, m, n } : null;
+// Per-hit coverage rides inside `why.terms` and is absent for single-term queries.
+// `via` maps an internal tag to the user words that reached it through a hypernym/synonym —
+// the chips always print the user's own word, never the internal tag.
+function normHitTerms(why) {
+  const t = why && why.terms;
+  if (!t || !(t.n > 1)) return null;
+  return {
+    matched: t.matched || [], missed: t.missed || [],
+    m: t.m ?? (t.matched || []).length, n: t.n,
+    meanP: Number.isFinite(t.mean_p) ? t.mean_p : null,
+    via: t.via || null,
+  };
 }
 function normHit(h) {
   return {
-    terms: normHitTerms(h.terms),
+    terms: normHitTerms(h.why),
     id: h.image_id ?? h.id ?? '',
     path: h.path ?? '',
     dataset: h.dataset ?? h.dataset_slug ?? '',
@@ -184,6 +187,9 @@ const S = {
   lastQuery: '',
   recent: [],               // {q, tookMs, rttMs, hits, at} — observability, real data only
   rss: null,
+  models: null,             // models_loaded from /api/status; [] at idle is CORRECT (ADR-5)
+  calibration: null,        // "measured-default" | "fitted" — gates the confidence wording
+  textTower: null,
   view: null,               // current view controller {destroy?}
 };
 const activeJobs = () => [...S.jobs.values()].filter((j) => j.state === 'running' || j.state === 'queued');
@@ -374,7 +380,13 @@ class VirtualGrid {
     if (item.terms) {
       // the terms themselves ARE the explanation: matched plain, missed struck through
       const row = el('div', { className: 'tile__terms' });
-      for (const term of item.terms.matched) row.append(el('span', { className: 'term', textContent: term }));
+      const via = item.terms.via || {};
+      for (const term of item.terms.matched) {
+        const through = Object.keys(via).find((tag) => (via[tag] || []).includes(term));
+        const chip = el('span', { className: 'term', textContent: term });
+        if (through) { chip.classList.add('term--via'); chip.title = `matched through “${through}”`; }
+        row.append(chip);
+      }
       for (const term of item.terms.missed) row.append(el('span', { className: 'term term--missed', textContent: term }));
       cap.append(row);
     } else {
@@ -432,7 +444,18 @@ function openDetail(item) {
   );
   if (item.w && item.h) side.append(kv('dimensions', `${item.w} × ${item.h}`));
   if (item.score != null) side.append(kv('score', item.score.toFixed(4)));
-  if (item.p != null) side.append(kv('calibrated p', item.p.toFixed(3)));
+  if (item.p != null) {
+    // never call it calibrated while the engine is still on its measured default
+    side.append(kv(S.calibration === 'fitted' ? 'calibrated p' : 'p (uncalibrated default)', item.p.toFixed(3)));
+  }
+  if (item.terms) {
+    side.append(kv(`term coverage — ${tierLabel(item.terms.m, item.terms.n)}`,
+      [item.terms.matched.join(', ') || '—',
+        item.terms.missed.length ? `missed: ${item.terms.missed.join(', ')}` : null].filter(Boolean).join(' · ')));
+    for (const [tag, words] of Object.entries(item.terms.via || {})) {
+      side.append(kv('matched through', `${words.join(', ')} → ${tag}`));
+    }
+  }
   if (item.why) {
     side.append(kv('why it matched', item.why.tag ? `${item.why.path}: ${item.why.tag}` : String(item.why.path || '—')));
   }
@@ -466,6 +489,19 @@ function paintStatus({ latency, hits, coverage } = {}) {
   d.className = 'status__cell ' + (API.online === true ? 'ok' : API.online === false ? 'bad' : '');
   d.textContent = API.online === true ? (S.rss != null ? `daemon ok · rss ${bytes(S.rss)}` : 'daemon ok')
     : API.online === false ? 'daemon unreachable' : 'connecting…';
+}
+
+// RSS and resident-model state come from /api/status — the SSE stream stays job-only so it
+// costs nothing when nothing is indexing (b-daemon's design; do not ask events for rss).
+async function refreshStatus() {
+  try {
+    const st = await API.status();
+    if (Number.isFinite(st?.rss)) S.rss = st.rss;
+    if (Array.isArray(st?.models_loaded)) S.models = st.models_loaded;
+    if (st?.text_tower) S.textTower = st.text_tower;
+    if (Array.isArray(st?.datasets) && st.datasets.length) S.datasets = st.datasets.map(normDataset);
+    paintStatus();
+  } catch { /* older daemons have no /api/status; every tile fed by it reads "—" */ }
 }
 
 // ── SSE: live job progress (≤1s freshness per B10) ─────────────────────────
@@ -572,22 +608,25 @@ async function viewFleet() {
   paintFleet();
 }
 
-// Group hits into the ALL → SOME → ANY spectrum. Null means "render a plain grid":
-// one term, one tier, or a payload where coverage is not on every hit.
+// Group hits into the ALL → SOME → ANY spectrum. The engine guarantees the bands arrive
+// CONTIGUOUS (m DESC → mean_p DESC → p DESC → image_id, byte-identical across runs per B18e),
+// so this walks the list in the engine's order and never re-sorts — band boundaries cannot
+// jitter between renders. Null means "render a plain grid": one term, one tier, or coverage
+// missing from any hit.
 function groupByCoverage(res) {
   if (!res.terms || !res.hits.length || res.hits.some((h) => !h.terms)) return null;
-  const byM = new Map();
+  const groups = [];
   for (const h of res.hits) {
-    const arr = byM.get(h.terms.m) || [];
-    arr.push(h);
-    byM.set(h.terms.m, arr);
+    const last = groups[groups.length - 1];
+    if (last && last.m === h.terms.m) last.hits.push(h);
+    else groups.push({ m: h.terms.m, n: res.terms.n, hits: [h] });
   }
-  const ms = [...byM.keys()].sort((a, b) => b - a);
-  if (ms.length < 2) return null;
-  return ms.map((m) => ({
-    m, n: res.terms.n, tier: tierOf({ m, n: res.terms.n }),
-    label: tierLabel(m, res.terms.n), hits: byM.get(m),
-  }));
+  if (groups.length < 2) return null;
+  for (const g of groups) {
+    g.tier = tierOf(g);
+    g.label = tierLabel(g.m, g.n);
+  }
+  return groups;
 }
 
 // The syntax is taught until it is used, then it gets out of the way for good.
@@ -664,6 +703,7 @@ async function viewSearch(q, dataset) {
   }
   if (seq !== searchSeq) return;   // superseded: never paint into a view the user has left
   lastRes = res;
+  if (res.calibration) S.calibration = res.calibration;
   S.recent.unshift({ q, tookMs: res.tookMs, rttMs: res.rttMs, hits: res.hits.length, at: Date.now() });
   S.recent.length = Math.min(S.recent.length, 20);
 
@@ -855,11 +895,7 @@ async function viewJobs() {
     for (const j of await API.jobs()) S.jobs.set(j.id, j);
     API.online = true;
   } catch (e) { API.online = false; mountView(daemonDownView(e)); paintStatus(); return; }
-  try {
-    const st = await API.status();
-    if (Number.isFinite(st?.rss)) S.rss = st.rss;
-    if (Array.isArray(st?.datasets)) S.datasets = st.datasets.map(normDataset);
-  } catch { /* /api/status is optional; the jobs table stands on its own */ }
+  await refreshStatus();
   if (!S.datasets.length) { try { S.datasets = await API.datasets(); } catch { /* fleet unavailable */ } }
 
   function paint() {
@@ -870,7 +906,14 @@ async function viewJobs() {
       el('div', { className: 'metric' }, el('b', { textContent: act.length ? act.reduce((a, j) => a + j.imgS, 0).toFixed(1) : '0' }), el('span', { textContent: 'images / second, right now' })),
       el('div', { className: 'metric' }, el('b', { textContent: n0(S.datasets.reduce((a, d) => a + d.count, 0)) }), el('span', { textContent: 'images searchable' })),
       el('div', { className: 'metric' }, el('b', { textContent: idxBytes ? bytes(idxBytes) : '—' }), el('span', { textContent: 'index on disk' })),
-      el('div', { className: 'metric' }, el('b', { textContent: S.rss != null ? bytes(S.rss) : '—' }), el('span', { textContent: 'daemon RSS' })),
+      el('div', { className: 'metric' }, el('b', { textContent: S.rss != null ? bytes(S.rss) : '—' }),
+        el('span', {
+          // an empty model list at idle is the design, not a fault (ADR-5): nothing stays
+          // resident until a free-text query needs it
+          textContent: S.models == null ? 'daemon RSS'
+            : S.models.length ? `daemon RSS · ${S.models.join(', ')} resident`
+              : 'daemon RSS · no model resident (loads on demand)',
+        })),
     );
 
     jobsWrap.replaceChildren(el('h2', { textContent: 'Index jobs' }));
@@ -1015,6 +1058,7 @@ window.__imgtag = {
 
 // ── boot ───────────────────────────────────────────────────────────────────
 connectEvents();
+refreshStatus();
 route();
 qInput.focus();      // search is never more than zero keystrokes away
 paintStatus();
