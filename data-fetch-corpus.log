@@ -26,3 +26,37 @@ curl: (56) Recv failure: Connection reset by peer
 [2026-07-22T14:01:57] CORPUS-B12 start: want=300 cand=360 out=/Users/magic/Creations/ImgTag/data/unsplash-fullres
 candidates: 360
 candidates: 360
+curl: (52) Empty reply from server
+curl: (52) Empty reply from server
+curl: (52) Empty reply from server
+curl: (56) Recv failure: Connection reset by peer
+curl: (52) Empty reply from server
+curl: (6) Could not resolve host: images.cocodataset.org
+curl: (6) Could not resolve host: images.cocodataset.org
+curl: (6) Could not resolve host: images.cocodataset.org
+curl: (6) Could not resolve host: images.cocodataset.org
+curl: (6) Could not resolve host: images.cocodataset.org
+curl: (6) Could not resolve host: images.cocodataset.org
+curl: (6) Could not resolve host: images.cocodataset.org
+curl: (6) Could not resolve host: images.cocodataset.org
+curl: (35) LibreSSL SSL_connect: SSL_ERROR_SYSCALL in connection to images.unsplash.com:443 
+curl: (35) LibreSSL SSL_connect: SSL_ERROR_SYSCALL in connection to images.unsplash.com:443 
+curl: (35) LibreSSL SSL_connect: SSL_ERROR_SYSCALL in connection to images.unsplash.com:443 
+curl: (35) LibreSSL SSL_connect: SSL_ERROR_SYSCALL in connection to images.unsplash.com:443 
+curl: (56) Recv failure: Connection reset by peer
+curl: (56) Recv failure: Connection reset by peer
+curl: (56) Recv failure: Connection reset by peer
+curl: (6) Could not resolve host: images.cocodataset.org
+curl: (6) Could not resolve host: images.cocodataset.org
+curl: (56) Recv failure: Connection reset by peer
+curl: (52) Empty reply from server
+curl: (52) Empty reply from server
+curl: (52) Empty reply from server
+curl: (52) Empty reply from server
+curl: (52) Empty reply from server
+curl: (52) Empty reply from server
+curl: (52) Empty reply from server
+curl: (52) Empty reply from server
+curl: (56) Recv failure: Connection reset by peer
+curl: (56) Recv failure: Connection reset by peer
+curl: (56) Recv failure: Connection reset by peer
