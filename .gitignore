@@ -1,0 +1,7 @@
+datasets/
+.imgtag/
+__pycache__/
+*.pyc
+.DS_Store
+models/*.onnx
+models/*.bin
