@@ -22,6 +22,7 @@ engine returns the ranking labeled ``"calibration": "unfitted"`` and never no-ma
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
 from functools import lru_cache
@@ -76,6 +77,26 @@ DATA = Path(__file__).resolve().parent.parent / "data"
 
 class CalibrationMismatchError(RuntimeError):
     """Manifest calib_sha/calib_model_sha != the tag table on disk (CLI exit 5)."""
+
+
+def dedupe(hits: list[dict]) -> tuple[list[dict], int]:
+    """Collapse rows that describe the SAME image (IA.md: the id is xxhash64 of the bytes,
+    so duplicates are the same picture). Keeps the best-ranked row, folds the other paths
+    into `paths`, and RETURNS the count collapsed so the caller can surface it instead of
+    hiding an indexer bug (b-app found 200 hits carrying 181 unique ids, one id x21)."""
+    out: list[dict] = []
+    seen: dict[tuple, dict] = {}
+    for h in hits:
+        key = (h["dataset"], h["image_id"])
+        first = seen.get(key)
+        if first is None:
+            seen[key] = h
+            out.append(h)
+            continue
+        paths = first.setdefault("paths", [first["path"]])
+        if h["path"] not in paths:
+            paths.append(h["path"])
+    return out, len(hits) - len(out)
 
 
 def _order(h: dict) -> tuple:
@@ -560,7 +581,7 @@ class Searcher:
         man = snap.manifest
         n = len(snap.ids)
         if n == 0:
-            return {"hits": [], "gated": False, "indexed": 0, "best_p_text": 0.0,
+            return {"hits": [], "gated": False, "indexed": 0, "collapsed": 0, "best_p_text": 0.0,
                     "text_tower": "skipped", "load_ms": 0.0, "terms": [],
                     "calibration": "unfitted"}
         table = self.tags(man)
@@ -701,6 +722,8 @@ class Searcher:
                     "p": round(float(p[i]), 4),
                     "w": rec.get("w"),
                     "h": rec.get("h"),
+                    # B18(b): a moved/deleted file is TOMBSTONED, never a silent 404 later
+                    "exists": os.path.exists(rec["path"]),
                     "why": why,
                     # LIVE scan: categories firing now, [{category, p, tier}] (ADR-14)
                     **({"flags": flags} if flags else {}),
@@ -713,7 +736,9 @@ class Searcher:
                 }
             )
         hits.sort(key=_order)  # ALL-SOME-ANY, then p, then image id (B18e determinism)
-        return {"hits": hits[:k], "gated": gated, "indexed": n, "best_p_text": float(p_text.max()),
+        hits, collapsed = dedupe(hits)
+        return {"hits": hits[:k], "gated": gated, "indexed": n, "collapsed": collapsed,
+                "best_p_text": float(p_text.max()),
                 "text_tower": ("loaded" if load_ms else "warm") if use_text else "skipped",
                 "load_ms": load_ms, "terms": [t for t, _ in groups],
                 "calibration": "fitted" if fitted else "unfitted"}
@@ -725,7 +750,7 @@ class Searcher:
         self.last_query = time.time()
         names = [dataset] if dataset else list_datasets(self.home)
         hits: list[dict] = []
-        indexed, gated, best_text, load_ms = 0, False, 0.0, 0.0
+        indexed, gated, best_text, load_ms, collapsed = 0, False, 0.0, 0.0, 0
         tower, terms, calibration = "skipped", [], "unfitted"
         for name in names:
             r = self.search_one(query, name, k=k, strict=strict, text=text, track=track, tier=tier)
@@ -734,10 +759,13 @@ class Searcher:
             gated |= r["gated"]
             best_text = max(best_text, r["best_p_text"])
             load_ms += r["load_ms"]
+            collapsed += r["collapsed"]
             tower = r["text_tower"] if tower == "skipped" else tower
             terms = terms or r["terms"]
             calibration = "fitted" if r["calibration"] == "fitted" else calibration
         hits.sort(key=_order)
+        hits, extra_collapsed = dedupe(hits)
+        collapsed += extra_collapsed
         return {
             "query": query,
             "tookMs": round((time.perf_counter() - t0) * 1000, 2),
@@ -753,6 +781,9 @@ class Searcher:
             # defaults. Never let a caller mistake one for the other.
             "calibration": calibration,
             "coverage": {"indexed": indexed, "total": total_expected(names, indexed, self.home)},
+            # duplicate index rows for one content-addressed id: collapsed here, COUNTED so
+            # the indexer bug behind them stays visible (never silently swallowed)
+            **({"collapsed_duplicates": collapsed} if collapsed else {}),
             "datasets": names,
             # parsed multi-term query (quoted spans stay ONE element); absent when n < 2
             **({"terms": terms} if terms else {}),

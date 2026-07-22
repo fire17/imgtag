@@ -456,3 +456,31 @@ def test_stored_index_time_flags_pass_through_under_their_own_name(home):
     assert h["flags_stored"] == [{"category": "weapons", "p": 0.9, "tier": "violation"}]
     assert "flags" not in h  # nothing scanned live in this process -> no live flags invented
     assert "flags" not in h.get("meta", {})  # and it does not leak into generic metadata
+
+
+def test_duplicate_index_rows_collapse_but_stay_counted(home):
+    """One content-addressed id = one image (IA.md). Duplicate rows collapse, extra paths
+    fold into `paths`, and the count is REPORTED so the indexer bug stays visible."""
+    be = FakeBackend()
+    recs = [{"image_id": "a" * 16, "path": f"/img/copy{i}.jpg", "dataset": "d1", "w": 1, "h": 1}
+            for i in range(7)] + [
+           {"image_id": "b" * 16, "path": "/img/other.jpg", "dataset": "d1", "w": 1, "h": 1}]
+    with Writer("d1", be, home) as w:
+        w.append(np.stack([be._vec("cat")] * 8), recs)
+    r = S.Searcher(home, backend=be).search("cat", "d1", k=10)
+    ids = [h["image_id"] for h in r["hits"]]
+    assert len(ids) == len(set(ids)) == 2, ids
+    assert r["collapsed_duplicates"] == 6
+    dup = next(h for h in r["hits"] if h["image_id"] == "a" * 16)
+    assert len(dup["paths"]) == 7 and dup["path"] in dup["paths"]
+
+
+def test_every_hit_carries_exists(home):
+    """B18(b): a path that is gone is tombstoned, never a silent 404 for the client."""
+    be = FakeBackend()
+    with Writer("d1", be, home) as w:
+        w.append(np.stack([be._vec("cat")] * 2),
+                 [{"image_id": f"{i:016x}", "path": f"/gone/{i}.jpg", "dataset": "d1", "w": 1, "h": 1}
+                  for i in range(2)])
+    r = S.Searcher(home, backend=be).search("cat", "d1", k=2)
+    assert r["hits"] and all(h["exists"] is False for h in r["hits"])
