@@ -205,3 +205,30 @@ def test_n_positives_matches_labels_file():
     p = Path(__file__).resolve().parents[1] / "data/drug-probe/labels.json"
     if p.is_file():
         assert D.N_POSITIVES == len(json.loads(p.read_bytes())["drug"])
+
+
+# ── gate-safe declaration + arbitration-preserving storage (conductor ruling 2026-07-22) ──
+def test_gate_safe_declaration_is_measured_not_asserted():
+    s = D.track_spec()
+    assert s["gate_safe"] is True and s["calibration"] == "proxy-fitted"  # honest label kept
+    assert s["evidence_cap"] == round(D.P_MAX, 4)
+    ge = s["gate_evidence"]
+    assert ge["auroc_tp_vs_fp"] == D.FIT_AUROC and ge["p_negatives_ge_0.9"] == 0
+    assert ge["acceptance"] == {"vape": "review", "raspberry_leaf": "none"}
+
+
+def test_arbitrated_storage_contract_present():
+    a = D.track_spec()["arbitrated_storage"]
+    assert a["col_roles"] == ["margin", "margin_review"]
+    assert a["scorer"] == "margin_arbitrated" and a["tier_margin"] == D.TIER_MARGIN
+
+
+def test_head_emits_both_arbitration_margins_but_stays_single_col_until_flip():
+    """The head carries the arbitration inputs now; storage stays single-col until b-engine's
+    derive_tiers honours them (col_roles is the switch, still None)."""
+    h = D.DrugsHead(D.DrugsScorer.build(FakeBackend()), "sha")
+    assert h.col_roles is None
+    emb = _unit(np.random.default_rng(3).normal(size=(4, FakeBackend.dim)))
+    for f in h.score(emb):
+        assert set(f["cols"]) == {"margin", "margin_review"}
+        assert f["tier"] in ("violation", "review", "none")

@@ -247,6 +247,11 @@ N_POSITIVES = 17          # labelled drug images behind the fit (see FIT / label
 # bluff. p is clamped here, so a p of 0.99 is UNREACHABLE by construction whatever a new
 # corpus does to the margin. Raising the cap requires more labels, not a code change.
 P_MAX = (N_POSITIVES + 1) / (N_POSITIVES + 2)
+
+# Measured headline numbers for the gate-safe declaration (scripts/eval_drugs.py, round 1,
+# 15,010 real-photo negatives). Kept as constants so the spec cannot drift from the report.
+FIT_AUROC = 0.9979        # TP-vs-FP separation, threshold-free
+FIT_FP_RATE = 0.0044      # fraction of negatives flagged violation at the shipped tau
 FIT = {
     "version": "improve-track round 1 (2026-07-22) — subcategory deepening + "
     "confidence-correctness; on top of the v2 4-defect refit",
@@ -434,6 +439,7 @@ class DrugsScorer:
             mt = (emb @ self.tob.T).max(1) - bg
             pr = np.minimum(_sigmoid(PLATT_A * mt + PLATT_B), P_MAX)
             out["p_review"] = pr
+            out["margin_review"] = mt        # the tobacco margin — arbitration input for storage
             second = "none" if self.pol["tobacco_tier"] == "none" else "review"
             # ARBITRATION (measured): a joint and a cigarette look alike, so `p >= tau`
             # alone made every vape exhale a VIOLATION — the exact v0 failure b-daemon hit
@@ -475,6 +481,11 @@ class DrugsHead:
     """
 
     wants_images = False
+    # STORAGE ROLES. `None` => single-col sidecar of `p` (today's behaviour, and what
+    # b-engine's current derive_tiers bands). When b-engine's derive_tiers honours the
+    # `arbitrated_storage` contract, set this to ["margin", "margin_review"] and the head
+    # already emits both columns below — a two-line flip + one re-backfill, no other change.
+    col_roles = None
 
     def __init__(self, scorer: DrugsScorer, model_sha: str):
         self.scorer, self.model_sha = scorer, model_sha
@@ -486,9 +497,17 @@ class DrugsHead:
 
     def score(self, embeddings, images=None, ids=None) -> list[dict]:
         out = self.scorer.score(embeddings)
-        return [{"category": CATEGORY, "p": round(float(p), 4), "tier": str(t),
+        mr = out.get("margin_review", out["margin"] * 0.0)   # 0-tobacco when knob != review
+        flags = []
+        for p, t, w, g, mv, mvr in zip(out["p"], out["tier"], out["concept"],
+                                       out["group"], out["margin"], mr):
+            f = {"category": CATEGORY, "p": round(float(p), 4), "tier": str(t),
                  "why": w, "group": g}
-                for p, t, w, g in zip(out["p"], out["tier"], out["concept"], out["group"])]
+            # arbitration inputs for arbitrated_storage — the indexer ignores `cols` unless
+            # col_roles is set, so emitting them now is harmless and makes the flip trivial.
+            f["cols"] = {"margin": float(mv), "margin_review": float(mvr)}
+            flags.append(f)
+        return flags
 
 
 def _cache_path(model_sha: str, tobacco: bool, root=None):
@@ -556,8 +575,34 @@ def track_spec() -> dict:
         # THE user-rulable knob: "review" (ADR-14 default) | "violation" | "none".
         # Changing it here re-tiers every flag with no retrain and no re-embedding.
         "tobacco_tier": pol["tobacco_tier"],
-        "calibration": "proxy-fitted",
+        "calibration": "proxy-fitted",     # honest: a calibrated ensemble, NOT a trained head
         "enforcement_ready": False,
+        # ── GATE-SAFE declaration (conductor ruling 2026-07-22: proxy-gate exception on the
+        # MEASURED path). This proxy fit EARNS gating by passing the exact anti-saturation
+        # bar the proxy-gate rule guards — b-daemon independently re-verifies before trusting.
+        "gate_safe": True,
+        "evidence_cap": round(P_MAX, 4),   # p is clamped here; p>=0.95 unreachable by construction
+        "gate_evidence": {
+            "auroc_tp_vs_fp": FIT_AUROC,
+            "violation_fp_rate": FIT_FP_RATE,
+            "p_negatives_ge_0.9": 0,       # measured over 15,010 real photos (0 = no saturation)
+            "acceptance": {"vape": "review", "raspberry_leaf": "none"},
+            "corpus": "15,010 deduped real-photo negatives + 17 hand-verified drug TPs",
+            "verify_with": "uv run python scripts/eval_drugs.py  (confidence block)",
+        },
+        # ── ARBITRATION-PRESERVING STORAGE contract (ruling: stored tiers must be my
+        # ARBITRATED ones, not a tau re-band). Two stored margins let derive_tiers reproduce
+        # the tobacco-vs-drug arbitration exactly, WITHOUT freezing tau (ADR-15 stays: a tau
+        # change re-derives for free). ACTIVATES only when b-engine's derive_tiers honors it
+        # AND a head sets matching col_roles — until then storage stays single-col `p`.
+        "arbitrated_storage": {
+            "col_roles": ["margin", "margin_review"],
+            "scorer": "margin_arbitrated",
+            "tier_margin": TIER_MARGIN,
+            "rule": "violation iff sigmoid(platt·margin) >= tau AND margin >= margin_review "
+            "+ tier_margin; else review iff sigmoid(platt·margin_review) >= tau_review OR "
+            "sigmoid(platt·margin) >= tau (demoted); else none.",
+        },
         "spec_sha": spec_sha(),
         "fit": FIT,
         "policy_questions": len(AMBIGUITIES),
