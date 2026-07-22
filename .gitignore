@@ -13,3 +13,4 @@ models/**/tokenizer.json
 models/**/*.sha256
 models/*.sha256
 bench/cache/
+bench/cache/perf/

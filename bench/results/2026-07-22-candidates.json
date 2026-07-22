@@ -1,6 +1,6 @@
 {
  "header": {
-  "generated": "2026-07-22T15:02:35",
+  "generated": "2026-07-22T17:46:10",
   "machine": {
    "platform": "macOS-14.4-arm64-arm-64bit",
    "machine": "arm64",
@@ -19,18 +19,126 @@
    "PROXY": true
   },
   "loadavg_at_start": [
-   10.27734375,
-   11.2958984375,
-   13.81494140625
+   10.16455078125,
+   13.5654296875,
+   17.93896484375
   ],
   "repeats": 3,
-  "git_sha": "aec1c92",
+  "git_sha": "aec848c",
   "corpora": {
    "quality": "CORPUS-A/coco5k",
    "fidelity": "quick500[:200]"
   }
  },
  "summaries": [
+  {
+   "candidate": "pecore-s16-384",
+   "license": "Apache-2.0",
+   "shippable_precision": "fp32",
+   "b24_label": "\u2705 (ref)",
+   "int8_tier": "banned",
+   "int8_delta": {
+    "d_r10": -1.7,
+    "d_p_at_k": -0.023
+   },
+   "b24": false,
+   "img_s_stream": 8.61,
+   "ms_img_stream": 116.18,
+   "stream_config": "intra=4,b=2",
+   "img_s_best": 8.61,
+   "per_worker_rss_mb": 425.0,
+   "projected_index_rss_mb": 850.0,
+   "workers_affordable_under_b8": 2,
+   "projected_polite_img_s": 17.2,
+   "b8_eligible": true,
+   "artifact_total_mb": 182.4,
+   "artifact_breakdown": {
+    "vision_fp32": 102.6,
+    "text_int8": 64.3,
+    "tag_table": 4.5,
+    "tokenizer": 11.0
+   },
+   "b9_ok": false,
+   "b6_mean": 0.8925694444444445,
+   "b6_min": 0.2,
+   "b5_p100": 0.9266666666666667,
+   "b5_min_child": 0.2874251497005988,
+   "b17_r10": 77.24474294395138,
+   "b7_leak": 0.3,
+   "advisory": true,
+   "blocked": []
+  },
+  {
+   "candidate": "pecore-t16-384",
+   "license": "Apache-2.0",
+   "shippable_precision": "fp32",
+   "b24_label": "\u2705 (ref)",
+   "int8_tier": "banned",
+   "int8_delta": {
+    "d_r10": -15.7,
+    "d_p_at_k": -0.075
+   },
+   "b24": false,
+   "img_s_stream": 23.21,
+   "ms_img_stream": 43.09,
+   "stream_config": "intra=4,b=2",
+   "img_s_best": 24.23,
+   "per_worker_rss_mb": 229.7,
+   "projected_index_rss_mb": 459.4,
+   "workers_affordable_under_b8": 4,
+   "projected_polite_img_s": 46.4,
+   "b8_eligible": true,
+   "artifact_total_mb": 111.8,
+   "artifact_breakdown": {
+    "vision_fp32": 32.0,
+    "text_int8": 64.3,
+    "tag_table": 4.5,
+    "tokenizer": 11.0
+   },
+   "b9_ok": true,
+   "b6_mean": 0.8405902777777777,
+   "b6_min": 0.1,
+   "b5_p100": 0.9083333333333333,
+   "b5_min_child": 0.31736526946107785,
+   "b17_r10": 70.8523226992884,
+   "b7_leak": 0.4666666666666667,
+   "advisory": true,
+   "blocked": []
+  },
+  {
+   "candidate": "mobileclip2-s2",
+   "license": "apple-amlr",
+   "shippable_precision": "fp32",
+   "b24_label": "\u2705 (ref)",
+   "int8_tier": null,
+   "int8_delta": null,
+   "b24": null,
+   "img_s_stream": null,
+   "ms_img_stream": null,
+   "stream_config": null,
+   "img_s_best": null,
+   "per_worker_rss_mb": null,
+   "projected_index_rss_mb": null,
+   "workers_affordable_under_b8": 0,
+   "projected_polite_img_s": null,
+   "b8_eligible": false,
+   "artifact_total_mb": 412.6,
+   "artifact_breakdown": {
+    "vision_fp32": 143.0,
+    "text_int8": 254.1,
+    "tag_table": 4.5,
+    "tokenizer": 11.0
+   },
+   "b9_ok": false,
+   "b6_mean": 0.9138194444444444,
+   "b6_min": 0.25,
+   "b5_p100": 0.9133333333333334,
+   "b5_min_child": 0.33689839572192515,
+   "b17_r10": 82.0220676421204,
+   "b7_leak": 0.13333333333333333,
+   "advisory": false,
+   "blocked": []
+  },
   {
    "candidate": "siglip-base-224",
    "license": "Apache-2.0",
@@ -42,14 +150,14 @@
     "d_p_at_k": 0.004
    },
    "b24": false,
-   "img_s_stream": null,
-   "ms_img_stream": null,
-   "stream_config": null,
-   "img_s_best": null,
-   "per_worker_rss_mb": null,
-   "projected_index_rss_mb": null,
-   "workers_affordable_under_b8": 0,
-   "projected_polite_img_s": null,
+   "img_s_stream": 9.85,
+   "ms_img_stream": 101.55,
+   "stream_config": "intra=4,b=2",
+   "img_s_best": 9.85,
+   "per_worker_rss_mb": 688.2,
+   "projected_index_rss_mb": 1376.4,
+   "workers_affordable_under_b8": 1,
+   "projected_polite_img_s": 9.8,
    "b8_eligible": false,
    "artifact_total_mb": 830.9,
    "artifact_breakdown": {
@@ -65,6 +173,40 @@
    "b5_min_child": 0.3532934131736527,
    "b17_r10": 80.47493403693932,
    "b7_leak": 0.2,
+   "advisory": true,
+   "blocked": []
+  },
+  {
+   "candidate": "mobileclip2-s0",
+   "license": "apple-amlr",
+   "shippable_precision": "fp32",
+   "b24_label": "\u2705 (ref)",
+   "int8_tier": null,
+   "int8_delta": null,
+   "b24": null,
+   "img_s_stream": null,
+   "ms_img_stream": null,
+   "stream_config": null,
+   "img_s_best": null,
+   "per_worker_rss_mb": null,
+   "projected_index_rss_mb": null,
+   "workers_affordable_under_b8": 0,
+   "projected_polite_img_s": null,
+   "b8_eligible": false,
+   "artifact_total_mb": 315.2,
+   "artifact_breakdown": {
+    "vision_fp32": 45.6,
+    "text_int8": 254.1,
+    "tag_table": 4.5,
+    "tokenizer": 11.0
+   },
+   "b9_ok": false,
+   "b6_mean": 0.8950694444444445,
+   "b6_min": 0.2,
+   "b5_p100": 0.9066666666666666,
+   "b5_min_child": 0.33884297520661155,
+   "b17_r10": 78.58399296394019,
+   "b7_leak": 0.2,
    "advisory": false,
    "blocked": []
   },
@@ -79,14 +221,14 @@
     "d_p_at_k": -0.112
    },
    "b24": false,
-   "img_s_stream": null,
-   "ms_img_stream": null,
-   "stream_config": null,
-   "img_s_best": null,
-   "per_worker_rss_mb": null,
-   "projected_index_rss_mb": null,
-   "workers_affordable_under_b8": 0,
-   "projected_polite_img_s": null,
+   "img_s_stream": 10.05,
+   "ms_img_stream": 99.46,
+   "stream_config": "intra=4,b=1",
+   "img_s_best": 10.05,
+   "per_worker_rss_mb": 645.3,
+   "projected_index_rss_mb": 1290.6,
+   "workers_affordable_under_b8": 1,
+   "projected_polite_img_s": 10.1,
    "b8_eligible": false,
    "artifact_total_mb": 672.9,
    "artifact_breakdown": {
@@ -102,81 +244,7 @@
    "b5_min_child": 0.35728542914171657,
    "b17_r10": 77.54057727672503,
    "b7_leak": 0.2,
-   "advisory": false,
-   "blocked": []
-  },
-  {
-   "candidate": "pecore-s16-384",
-   "license": "Apache-2.0",
-   "shippable_precision": "fp32",
-   "b24_label": "\u2705 (ref)",
-   "int8_tier": "banned",
-   "int8_delta": {
-    "d_r10": -1.7,
-    "d_p_at_k": -0.023
-   },
-   "b24": false,
-   "img_s_stream": null,
-   "ms_img_stream": null,
-   "stream_config": null,
-   "img_s_best": null,
-   "per_worker_rss_mb": null,
-   "projected_index_rss_mb": null,
-   "workers_affordable_under_b8": 0,
-   "projected_polite_img_s": null,
-   "b8_eligible": false,
-   "artifact_total_mb": 182.4,
-   "artifact_breakdown": {
-    "vision_fp32": 102.6,
-    "text_int8": 64.3,
-    "tag_table": 4.5,
-    "tokenizer": 11.0
-   },
-   "b9_ok": false,
-   "b6_mean": 0.8925694444444445,
-   "b6_min": 0.2,
-   "b5_p100": 0.9266666666666667,
-   "b5_min_child": 0.2874251497005988,
-   "b17_r10": 77.24474294395138,
-   "b7_leak": 0.3,
-   "advisory": false,
-   "blocked": []
-  },
-  {
-   "candidate": "pecore-t16-384",
-   "license": "Apache-2.0",
-   "shippable_precision": "fp32",
-   "b24_label": "\u2705 (ref)",
-   "int8_tier": "banned",
-   "int8_delta": {
-    "d_r10": -15.7,
-    "d_p_at_k": -0.075
-   },
-   "b24": false,
-   "img_s_stream": null,
-   "ms_img_stream": null,
-   "stream_config": null,
-   "img_s_best": null,
-   "per_worker_rss_mb": null,
-   "projected_index_rss_mb": null,
-   "workers_affordable_under_b8": 0,
-   "projected_polite_img_s": null,
-   "b8_eligible": false,
-   "artifact_total_mb": 301.5,
-   "artifact_breakdown": {
-    "vision_fp32": 32.0,
-    "text_int8": 254.0,
-    "tag_table": 4.5,
-    "tokenizer": 11.0
-   },
-   "b9_ok": false,
-   "b6_mean": 0.8405902777777777,
-   "b6_min": 0.1,
-   "b5_p100": 0.9083333333333333,
-   "b5_min_child": 0.31736526946107785,
-   "b17_r10": 70.8523226992884,
-   "b7_leak": 0.4666666666666667,
-   "advisory": false,
+   "advisory": true,
    "blocked": []
   },
   {
@@ -190,14 +258,14 @@
     "d_p_at_k": 0.023
    },
    "b24": false,
-   "img_s_stream": null,
-   "ms_img_stream": null,
-   "stream_config": null,
-   "img_s_best": null,
-   "per_worker_rss_mb": null,
-   "projected_index_rss_mb": null,
-   "workers_affordable_under_b8": 0,
-   "projected_polite_img_s": null,
+   "img_s_stream": 38.37,
+   "ms_img_stream": 26.06,
+   "stream_config": "intra=4,b=2",
+   "img_s_best": 39.17,
+   "per_worker_rss_mb": 626.0,
+   "projected_index_rss_mb": 1252.0,
+   "workers_affordable_under_b8": 1,
+   "projected_polite_img_s": 38.4,
    "b8_eligible": false,
    "artifact_total_mb": 621.6,
    "artifact_breakdown": {
@@ -213,7 +281,7 @@
    "b5_min_child": 0.24550898203592814,
    "b17_r10": 65.16350843527624,
    "b7_leak": 0.6,
-   "advisory": false,
+   "advisory": true,
    "blocked": []
   }
  ],
@@ -230,7 +298,260 @@
     "text_fp32_mb": 254.0,
     "text_int8_mb": 64.3
    },
-   "perf": [],
+   "perf": [
+    {
+     "candidate": "pecore-s16-384",
+     "precision": "fp32",
+     "intra": 1,
+     "batch": 1,
+     "img_s": 2.59,
+     "ms_per_img": 385.71,
+     "peak_rss_mb": 362.0,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "pecore-s16-384",
+     "precision": "fp32",
+     "intra": 1,
+     "batch": 2,
+     "img_s": 2.56,
+     "ms_per_img": 390.54,
+     "peak_rss_mb": 439.6,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "pecore-s16-384",
+     "precision": "fp32",
+     "intra": 1,
+     "batch": 8,
+     "img_s": 2.4,
+     "ms_per_img": 416.51,
+     "peak_rss_mb": 763.2,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "pecore-s16-384",
+     "precision": "fp32",
+     "intra": 2,
+     "batch": 1,
+     "img_s": 4.84,
+     "ms_per_img": 206.56,
+     "peak_rss_mb": 369.9,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "pecore-s16-384",
+     "precision": "fp32",
+     "intra": 2,
+     "batch": 2,
+     "img_s": 4.75,
+     "ms_per_img": 210.71,
+     "peak_rss_mb": 467.4,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "pecore-s16-384",
+     "precision": "fp32",
+     "intra": 2,
+     "batch": 8,
+     "img_s": 4.54,
+     "ms_per_img": 220.26,
+     "peak_rss_mb": 747.7,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "pecore-s16-384",
+     "precision": "fp32",
+     "intra": 4,
+     "batch": 1,
+     "img_s": 8.35,
+     "ms_per_img": 119.71,
+     "peak_rss_mb": 414.6,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "pecore-s16-384",
+     "precision": "fp32",
+     "intra": 4,
+     "batch": 2,
+     "img_s": 8.61,
+     "ms_per_img": 116.18,
+     "peak_rss_mb": 425.0,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "pecore-s16-384",
+     "precision": "fp32",
+     "intra": 4,
+     "batch": 8,
+     "img_s": 8.57,
+     "ms_per_img": 116.63,
+     "peak_rss_mb": 737.1,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "pecore-s16-384",
+     "precision": "int8",
+     "intra": 1,
+     "batch": 1,
+     "img_s": 4.78,
+     "ms_per_img": 209.0,
+     "peak_rss_mb": 208.3,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "pecore-s16-384",
+     "precision": "int8",
+     "intra": 1,
+     "batch": 2,
+     "img_s": 4.71,
+     "ms_per_img": 212.46,
+     "peak_rss_mb": 246.9,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "pecore-s16-384",
+     "precision": "int8",
+     "intra": 1,
+     "batch": 8,
+     "img_s": 4.65,
+     "ms_per_img": 215.17,
+     "peak_rss_mb": 460.5,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "pecore-s16-384",
+     "precision": "int8",
+     "intra": 2,
+     "batch": 1,
+     "img_s": 8.73,
+     "ms_per_img": 114.52,
+     "peak_rss_mb": 219.6,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "pecore-s16-384",
+     "precision": "int8",
+     "intra": 2,
+     "batch": 2,
+     "img_s": 8.75,
+     "ms_per_img": 114.33,
+     "peak_rss_mb": 268.1,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "pecore-s16-384",
+     "precision": "int8",
+     "intra": 2,
+     "batch": 8,
+     "img_s": 8.58,
+     "ms_per_img": 116.52,
+     "peak_rss_mb": 448.3,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "pecore-s16-384",
+     "precision": "int8",
+     "intra": 4,
+     "batch": 1,
+     "img_s": 13.93,
+     "ms_per_img": 71.81,
+     "peak_rss_mb": 188.3,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "pecore-s16-384",
+     "precision": "int8",
+     "intra": 4,
+     "batch": 2,
+     "img_s": 14.72,
+     "ms_per_img": 67.91,
+     "peak_rss_mb": 254.0,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "pecore-s16-384",
+     "precision": "int8",
+     "intra": 4,
+     "batch": 8,
+     "img_s": 14.69,
+     "ms_per_img": 68.09,
+     "peak_rss_mb": 475.0,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    }
+   ],
    "fidelity": {
     "int8": {
      "n": 200,
@@ -2029,9 +2350,263 @@
    "artifacts": {
     "vision_fp32_mb": 32.0,
     "vision_int8_mb": 14.7,
-    "text_fp32_mb": 254.0
+    "text_fp32_mb": 254.0,
+    "text_int8_mb": 64.3
    },
-   "perf": [],
+   "perf": [
+    {
+     "candidate": "pecore-t16-384",
+     "precision": "fp32",
+     "intra": 1,
+     "batch": 1,
+     "img_s": 7.63,
+     "ms_per_img": 131.02,
+     "peak_rss_mb": 203.8,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "pecore-t16-384",
+     "precision": "fp32",
+     "intra": 1,
+     "batch": 2,
+     "img_s": 7.61,
+     "ms_per_img": 131.45,
+     "peak_rss_mb": 228.3,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "pecore-t16-384",
+     "precision": "fp32",
+     "intra": 1,
+     "batch": 8,
+     "img_s": 7.35,
+     "ms_per_img": 136.05,
+     "peak_rss_mb": 411.0,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "pecore-t16-384",
+     "precision": "fp32",
+     "intra": 2,
+     "batch": 1,
+     "img_s": 12.97,
+     "ms_per_img": 77.11,
+     "peak_rss_mb": 204.5,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "pecore-t16-384",
+     "precision": "fp32",
+     "intra": 2,
+     "batch": 2,
+     "img_s": 14.07,
+     "ms_per_img": 71.07,
+     "peak_rss_mb": 239.6,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "pecore-t16-384",
+     "precision": "fp32",
+     "intra": 2,
+     "batch": 8,
+     "img_s": 13.73,
+     "ms_per_img": 72.85,
+     "peak_rss_mb": 408.1,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "pecore-t16-384",
+     "precision": "fp32",
+     "intra": 4,
+     "batch": 1,
+     "img_s": 22.25,
+     "ms_per_img": 44.94,
+     "peak_rss_mb": 205.5,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "pecore-t16-384",
+     "precision": "fp32",
+     "intra": 4,
+     "batch": 2,
+     "img_s": 23.21,
+     "ms_per_img": 43.09,
+     "peak_rss_mb": 229.7,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "pecore-t16-384",
+     "precision": "fp32",
+     "intra": 4,
+     "batch": 8,
+     "img_s": 24.23,
+     "ms_per_img": 41.26,
+     "peak_rss_mb": 393.5,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "pecore-t16-384",
+     "precision": "int8",
+     "intra": 1,
+     "batch": 1,
+     "img_s": 11.32,
+     "ms_per_img": 88.33,
+     "peak_rss_mb": 146.9,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "pecore-t16-384",
+     "precision": "int8",
+     "intra": 1,
+     "batch": 2,
+     "img_s": 11.2,
+     "ms_per_img": 89.28,
+     "peak_rss_mb": 173.6,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "pecore-t16-384",
+     "precision": "int8",
+     "intra": 1,
+     "batch": 8,
+     "img_s": 11.05,
+     "ms_per_img": 90.5,
+     "peak_rss_mb": 291.7,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "pecore-t16-384",
+     "precision": "int8",
+     "intra": 2,
+     "batch": 1,
+     "img_s": 18.09,
+     "ms_per_img": 55.28,
+     "peak_rss_mb": 144.6,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "pecore-t16-384",
+     "precision": "int8",
+     "intra": 2,
+     "batch": 2,
+     "img_s": 20.16,
+     "ms_per_img": 49.6,
+     "peak_rss_mb": 173.6,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "pecore-t16-384",
+     "precision": "int8",
+     "intra": 2,
+     "batch": 8,
+     "img_s": 20.05,
+     "ms_per_img": 49.89,
+     "peak_rss_mb": 289.8,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "pecore-t16-384",
+     "precision": "int8",
+     "intra": 4,
+     "batch": 1,
+     "img_s": 29.38,
+     "ms_per_img": 34.04,
+     "peak_rss_mb": 150.3,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "pecore-t16-384",
+     "precision": "int8",
+     "intra": 4,
+     "batch": 2,
+     "img_s": 30.99,
+     "ms_per_img": 32.26,
+     "peak_rss_mb": 158.2,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "pecore-t16-384",
+     "precision": "int8",
+     "intra": 4,
+     "batch": 8,
+     "img_s": 33.87,
+     "ms_per_img": 29.53,
+     "peak_rss_mb": 296.3,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    }
+   ],
    "fidelity": {
     "int8": {
      "n": 200,
@@ -3828,7 +4403,260 @@
     "vision_int8_mb": 94.6,
     "text_int8_mb": 283.4
    },
-   "perf": [],
+   "perf": [
+    {
+     "candidate": "siglip2-base-224",
+     "precision": "fp32",
+     "intra": 1,
+     "batch": 1,
+     "img_s": 2.69,
+     "ms_per_img": 371.78,
+     "peak_rss_mb": 626.7,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "siglip2-base-224",
+     "precision": "fp32",
+     "intra": 1,
+     "batch": 2,
+     "img_s": 2.68,
+     "ms_per_img": 373.21,
+     "peak_rss_mb": 675.4,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "siglip2-base-224",
+     "precision": "fp32",
+     "intra": 1,
+     "batch": 8,
+     "img_s": 2.51,
+     "ms_per_img": 398.36,
+     "peak_rss_mb": 884.1,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "siglip2-base-224",
+     "precision": "fp32",
+     "intra": 2,
+     "batch": 1,
+     "img_s": 5.25,
+     "ms_per_img": 190.32,
+     "peak_rss_mb": 630.6,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "siglip2-base-224",
+     "precision": "fp32",
+     "intra": 2,
+     "batch": 2,
+     "img_s": 5.23,
+     "ms_per_img": 191.1,
+     "peak_rss_mb": 670.1,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "siglip2-base-224",
+     "precision": "fp32",
+     "intra": 2,
+     "batch": 8,
+     "img_s": 4.93,
+     "ms_per_img": 203.04,
+     "peak_rss_mb": 822.4,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "siglip2-base-224",
+     "precision": "fp32",
+     "intra": 4,
+     "batch": 1,
+     "img_s": 10.05,
+     "ms_per_img": 99.46,
+     "peak_rss_mb": 645.3,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "siglip2-base-224",
+     "precision": "fp32",
+     "intra": 4,
+     "batch": 2,
+     "img_s": 10.04,
+     "ms_per_img": 99.56,
+     "peak_rss_mb": 695.2,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "siglip2-base-224",
+     "precision": "fp32",
+     "intra": 4,
+     "batch": 8,
+     "img_s": 9.5,
+     "ms_per_img": 105.31,
+     "peak_rss_mb": 835.4,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "siglip2-base-224",
+     "precision": "int8",
+     "intra": 1,
+     "batch": 1,
+     "img_s": 7.17,
+     "ms_per_img": 139.46,
+     "peak_rss_mb": 347.3,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "siglip2-base-224",
+     "precision": "int8",
+     "intra": 1,
+     "batch": 2,
+     "img_s": 7.21,
+     "ms_per_img": 138.76,
+     "peak_rss_mb": 405.5,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "siglip2-base-224",
+     "precision": "int8",
+     "intra": 1,
+     "batch": 8,
+     "img_s": 6.96,
+     "ms_per_img": 143.58,
+     "peak_rss_mb": 574.3,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "siglip2-base-224",
+     "precision": "int8",
+     "intra": 2,
+     "batch": 1,
+     "img_s": 13.72,
+     "ms_per_img": 72.86,
+     "peak_rss_mb": 346.1,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "siglip2-base-224",
+     "precision": "int8",
+     "intra": 2,
+     "batch": 2,
+     "img_s": 13.83,
+     "ms_per_img": 72.31,
+     "peak_rss_mb": 372.3,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "siglip2-base-224",
+     "precision": "int8",
+     "intra": 2,
+     "batch": 8,
+     "img_s": 13.55,
+     "ms_per_img": 73.8,
+     "peak_rss_mb": 563.2,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "siglip2-base-224",
+     "precision": "int8",
+     "intra": 4,
+     "batch": 1,
+     "img_s": 25.4,
+     "ms_per_img": 39.36,
+     "peak_rss_mb": 366.9,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "siglip2-base-224",
+     "precision": "int8",
+     "intra": 4,
+     "batch": 2,
+     "img_s": 26.1,
+     "ms_per_img": 38.31,
+     "peak_rss_mb": 393.9,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "siglip2-base-224",
+     "precision": "int8",
+     "intra": 4,
+     "batch": 8,
+     "img_s": 23.95,
+     "ms_per_img": 41.75,
+     "peak_rss_mb": 580.9,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    }
+   ],
    "fidelity": {
     "int8": {
      "n": 200,
@@ -5624,7 +6452,260 @@
     "vision_int8_mb": 95.8,
     "text_fp32_mb": 441.5
    },
-   "perf": [],
+   "perf": [
+    {
+     "candidate": "siglip-base-224",
+     "precision": "fp32",
+     "intra": 1,
+     "batch": 1,
+     "img_s": 2.68,
+     "ms_per_img": 373.15,
+     "peak_rss_mb": 619.9,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "siglip-base-224",
+     "precision": "fp32",
+     "intra": 1,
+     "batch": 2,
+     "img_s": 2.66,
+     "ms_per_img": 375.97,
+     "peak_rss_mb": 659.8,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "siglip-base-224",
+     "precision": "fp32",
+     "intra": 1,
+     "batch": 8,
+     "img_s": 2.52,
+     "ms_per_img": 397.06,
+     "peak_rss_mb": 760.0,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "siglip-base-224",
+     "precision": "fp32",
+     "intra": 2,
+     "batch": 1,
+     "img_s": 5.24,
+     "ms_per_img": 191.01,
+     "peak_rss_mb": 634.4,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "siglip-base-224",
+     "precision": "fp32",
+     "intra": 2,
+     "batch": 2,
+     "img_s": 5.25,
+     "ms_per_img": 190.36,
+     "peak_rss_mb": 637.1,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "siglip-base-224",
+     "precision": "fp32",
+     "intra": 2,
+     "batch": 8,
+     "img_s": 5.0,
+     "ms_per_img": 199.8,
+     "peak_rss_mb": 771.7,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "siglip-base-224",
+     "precision": "fp32",
+     "intra": 4,
+     "batch": 1,
+     "img_s": 9.72,
+     "ms_per_img": 102.91,
+     "peak_rss_mb": 629.3,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "siglip-base-224",
+     "precision": "fp32",
+     "intra": 4,
+     "batch": 2,
+     "img_s": 9.85,
+     "ms_per_img": 101.55,
+     "peak_rss_mb": 688.2,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "siglip-base-224",
+     "precision": "fp32",
+     "intra": 4,
+     "batch": 8,
+     "img_s": 9.32,
+     "ms_per_img": 107.31,
+     "peak_rss_mb": 784.2,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "siglip-base-224",
+     "precision": "int8",
+     "intra": 1,
+     "batch": 1,
+     "img_s": 7.37,
+     "ms_per_img": 135.76,
+     "peak_rss_mb": 362.0,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "siglip-base-224",
+     "precision": "int8",
+     "intra": 1,
+     "batch": 2,
+     "img_s": 7.36,
+     "ms_per_img": 135.8,
+     "peak_rss_mb": 363.8,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "siglip-base-224",
+     "precision": "int8",
+     "intra": 1,
+     "batch": 8,
+     "img_s": 7.16,
+     "ms_per_img": 139.74,
+     "peak_rss_mb": 451.2,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "siglip-base-224",
+     "precision": "int8",
+     "intra": 2,
+     "batch": 1,
+     "img_s": 14.08,
+     "ms_per_img": 71.01,
+     "peak_rss_mb": 349.6,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "siglip-base-224",
+     "precision": "int8",
+     "intra": 2,
+     "batch": 2,
+     "img_s": 14.41,
+     "ms_per_img": 69.42,
+     "peak_rss_mb": 344.1,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "siglip-base-224",
+     "precision": "int8",
+     "intra": 2,
+     "batch": 8,
+     "img_s": 14.14,
+     "ms_per_img": 70.72,
+     "peak_rss_mb": 443.4,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "siglip-base-224",
+     "precision": "int8",
+     "intra": 4,
+     "batch": 1,
+     "img_s": 26.79,
+     "ms_per_img": 37.32,
+     "peak_rss_mb": 330.8,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "siglip-base-224",
+     "precision": "int8",
+     "intra": 4,
+     "batch": 2,
+     "img_s": 27.34,
+     "ms_per_img": 36.58,
+     "peak_rss_mb": 375.8,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "siglip-base-224",
+     "precision": "int8",
+     "intra": 4,
+     "batch": 8,
+     "img_s": 26.96,
+     "ms_per_img": 37.1,
+     "peak_rss_mb": 458.0,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    }
+   ],
    "fidelity": {
     "int8": {
      "n": 200,
@@ -7407,6 +8488,1804 @@
    "blocked": []
   },
   {
+   "candidate": "mobileclip2-s0",
+   "res": 256,
+   "dim": 512,
+   "license": "apple-amlr",
+   "note": "CEILING-REFERENCE only",
+   "artifacts": {
+    "vision_fp32_mb": 45.6,
+    "text_fp32_mb": 254.1
+   },
+   "perf": [],
+   "fidelity": {},
+   "quality": {
+    "fp32": {
+     "b6_category_precision": {
+      "rows": [
+       {
+        "category": "handbag",
+        "n_pos": 292,
+        "k": 10,
+        "p_at_k": 0.2
+       },
+       {
+        "category": "toaster",
+        "n_pos": 8,
+        "k": 8,
+        "p_at_k": 0.25
+       },
+       {
+        "category": "knife",
+        "n_pos": 181,
+        "k": 10,
+        "p_at_k": 0.3
+       },
+       {
+        "category": "potted plant",
+        "n_pos": 172,
+        "k": 10,
+        "p_at_k": 0.4
+       },
+       {
+        "category": "backpack",
+        "n_pos": 228,
+        "k": 10,
+        "p_at_k": 0.5
+       },
+       {
+        "category": "bottle",
+        "n_pos": 379,
+        "k": 10,
+        "p_at_k": 0.5
+       },
+       {
+        "category": "hair drier",
+        "n_pos": 9,
+        "k": 9,
+        "p_at_k": 0.5555555555555556
+       },
+       {
+        "category": "mouse",
+        "n_pos": 88,
+        "k": 10,
+        "p_at_k": 0.6
+       },
+       {
+        "category": "spoon",
+        "n_pos": 153,
+        "k": 10,
+        "p_at_k": 0.6
+       },
+       {
+        "category": "book",
+        "n_pos": 230,
+        "k": 10,
+        "p_at_k": 0.7
+       },
+       {
+        "category": "remote",
+        "n_pos": 145,
+        "k": 10,
+        "p_at_k": 0.7
+       },
+       {
+        "category": "sports ball",
+        "n_pos": 169,
+        "k": 10,
+        "p_at_k": 0.7
+       },
+       {
+        "category": "car",
+        "n_pos": 535,
+        "k": 10,
+        "p_at_k": 0.8
+       },
+       {
+        "category": "chair",
+        "n_pos": 580,
+        "k": 10,
+        "p_at_k": 0.8
+       },
+       {
+        "category": "couch",
+        "n_pos": 195,
+        "k": 10,
+        "p_at_k": 0.8
+       },
+       {
+        "category": "cup",
+        "n_pos": 390,
+        "k": 10,
+        "p_at_k": 0.8
+       },
+       {
+        "category": "fork",
+        "n_pos": 155,
+        "k": 10,
+        "p_at_k": 0.8
+       },
+       {
+        "category": "microwave",
+        "n_pos": 54,
+        "k": 10,
+        "p_at_k": 0.8
+       },
+       {
+        "category": "wine glass",
+        "n_pos": 110,
+        "k": 10,
+        "p_at_k": 0.8
+       },
+       {
+        "category": "apple",
+        "n_pos": 76,
+        "k": 10,
+        "p_at_k": 0.9
+       },
+       {
+        "category": "bowl",
+        "n_pos": 314,
+        "k": 10,
+        "p_at_k": 0.9
+       },
+       {
+        "category": "carrot",
+        "n_pos": 81,
+        "k": 10,
+        "p_at_k": 0.9
+       },
+       {
+        "category": "dining table",
+        "n_pos": 501,
+        "k": 10,
+        "p_at_k": 0.9
+       },
+       {
+        "category": "horse",
+        "n_pos": 128,
+        "k": 10,
+        "p_at_k": 0.9
+       },
+       {
+        "category": "keyboard",
+        "n_pos": 106,
+        "k": 10,
+        "p_at_k": 0.9
+       },
+       {
+        "category": "oven",
+        "n_pos": 115,
+        "k": 10,
+        "p_at_k": 0.9
+       },
+       {
+        "category": "sink",
+        "n_pos": 187,
+        "k": 10,
+        "p_at_k": 0.9
+       },
+       {
+        "category": "snowboard",
+        "n_pos": 49,
+        "k": 10,
+        "p_at_k": 0.9
+       },
+       {
+        "category": "toothbrush",
+        "n_pos": 34,
+        "k": 10,
+        "p_at_k": 0.9
+       },
+       {
+        "category": "airplane",
+        "n_pos": 97,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "banana",
+        "n_pos": 103,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "baseball bat",
+        "n_pos": 97,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "baseball glove",
+        "n_pos": 100,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "bear",
+        "n_pos": 49,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "bed",
+        "n_pos": 149,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "bench",
+        "n_pos": 235,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "bicycle",
+        "n_pos": 149,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "bird",
+        "n_pos": 125,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "boat",
+        "n_pos": 121,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "broccoli",
+        "n_pos": 71,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "bus",
+        "n_pos": 189,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "cake",
+        "n_pos": 124,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "cat",
+        "n_pos": 184,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "cell phone",
+        "n_pos": 214,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "clock",
+        "n_pos": 204,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "cow",
+        "n_pos": 87,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "dog",
+        "n_pos": 177,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "donut",
+        "n_pos": 62,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "elephant",
+        "n_pos": 89,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "fire hydrant",
+        "n_pos": 86,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "frisbee",
+        "n_pos": 84,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "giraffe",
+        "n_pos": 101,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "hot dog",
+        "n_pos": 51,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "kite",
+        "n_pos": 91,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "laptop",
+        "n_pos": 183,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "motorcycle",
+        "n_pos": 159,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "orange",
+        "n_pos": 85,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "parking meter",
+        "n_pos": 37,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "person",
+        "n_pos": 2693,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "pizza",
+        "n_pos": 153,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "refrigerator",
+        "n_pos": 101,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "sandwich",
+        "n_pos": 98,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "scissors",
+        "n_pos": 28,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "sheep",
+        "n_pos": 65,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "skateboard",
+        "n_pos": 127,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "skis",
+        "n_pos": 120,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "stop sign",
+        "n_pos": 69,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "suitcase",
+        "n_pos": 105,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "surfboard",
+        "n_pos": 149,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "teddy bear",
+        "n_pos": 94,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "tennis racket",
+        "n_pos": 167,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "tie",
+        "n_pos": 145,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "toilet",
+        "n_pos": 149,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "traffic light",
+        "n_pos": 191,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "train",
+        "n_pos": 157,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "truck",
+        "n_pos": 250,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "tv",
+        "n_pos": 207,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "umbrella",
+        "n_pos": 174,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "vase",
+        "n_pos": 137,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "zebra",
+        "n_pos": 85,
+        "k": 10,
+        "p_at_k": 1.0
+       }
+      ],
+      "mean": 0.8950694444444445,
+      "min": 0.2,
+      "zeros": [],
+      "pass": false
+     },
+     "b5_hypernym": {
+      "rows": [
+       {
+        "supercat": "vehicle",
+        "R": 1160,
+        "precision_at_100": 0.97,
+        "children": [
+         {
+          "child": "airplane",
+          "n_pos": 97,
+          "recall_at_R": 0.8556701030927835,
+          "in_top100": 4
+         },
+         {
+          "child": "bicycle",
+          "n_pos": 149,
+          "recall_at_R": 0.4899328859060403,
+          "in_top100": 5
+         },
+         {
+          "child": "boat",
+          "n_pos": 121,
+          "recall_at_R": 0.33884297520661155,
+          "in_top100": 2
+         },
+         {
+          "child": "bus",
+          "n_pos": 189,
+          "recall_at_R": 0.91005291005291,
+          "in_top100": 27
+         },
+         {
+          "child": "car",
+          "n_pos": 535,
+          "recall_at_R": 0.6934579439252336,
+          "in_top100": 57
+         },
+         {
+          "child": "motorcycle",
+          "n_pos": 159,
+          "recall_at_R": 0.8238993710691824,
+          "in_top100": 8
+         },
+         {
+          "child": "train",
+          "n_pos": 157,
+          "recall_at_R": 0.89171974522293,
+          "in_top100": 6
+         },
+         {
+          "child": "truck",
+          "n_pos": 250,
+          "recall_at_R": 0.784,
+          "in_top100": 48
+         }
+        ]
+       },
+       {
+        "supercat": "animal",
+        "R": 1016,
+        "precision_at_100": 1.0,
+        "children": [
+         {
+          "child": "bear",
+          "n_pos": 49,
+          "recall_at_R": 1.0,
+          "in_top100": 11
+         },
+         {
+          "child": "bird",
+          "n_pos": 125,
+          "recall_at_R": 0.736,
+          "in_top100": 3
+         },
+         {
+          "child": "cat",
+          "n_pos": 184,
+          "recall_at_R": 0.9021739130434783,
+          "in_top100": 2
+         },
+         {
+          "child": "cow",
+          "n_pos": 87,
+          "recall_at_R": 0.9310344827586207,
+          "in_top100": 14
+         },
+         {
+          "child": "dog",
+          "n_pos": 177,
+          "recall_at_R": 0.8022598870056498,
+          "in_top100": 5
+         },
+         {
+          "child": "elephant",
+          "n_pos": 89,
+          "recall_at_R": 0.9775280898876404,
+          "in_top100": 12
+         },
+         {
+          "child": "giraffe",
+          "n_pos": 101,
+          "recall_at_R": 1.0,
+          "in_top100": 34
+         },
+         {
+          "child": "horse",
+          "n_pos": 128,
+          "recall_at_R": 0.6796875,
+          "in_top100": 1
+         },
+         {
+          "child": "sheep",
+          "n_pos": 65,
+          "recall_at_R": 0.9384615384615385,
+          "in_top100": 7
+         },
+         {
+          "child": "zebra",
+          "n_pos": 85,
+          "recall_at_R": 0.9882352941176471,
+          "in_top100": 18
+         }
+        ]
+       },
+       {
+        "supercat": "food",
+        "R": 708,
+        "precision_at_100": 0.84,
+        "children": [
+         {
+          "child": "apple",
+          "n_pos": 76,
+          "recall_at_R": 0.6447368421052632,
+          "in_top100": 5
+         },
+         {
+          "child": "banana",
+          "n_pos": 103,
+          "recall_at_R": 0.6407766990291263,
+          "in_top100": 4
+         },
+         {
+          "child": "broccoli",
+          "n_pos": 71,
+          "recall_at_R": 0.9577464788732394,
+          "in_top100": 20
+         },
+         {
+          "child": "cake",
+          "n_pos": 124,
+          "recall_at_R": 0.717741935483871,
+          "in_top100": 7
+         },
+         {
+          "child": "carrot",
+          "n_pos": 81,
+          "recall_at_R": 0.9382716049382716,
+          "in_top100": 27
+         },
+         {
+          "child": "donut",
+          "n_pos": 62,
+          "recall_at_R": 0.9193548387096774,
+          "in_top100": 5
+         },
+         {
+          "child": "hot dog",
+          "n_pos": 51,
+          "recall_at_R": 0.9215686274509803,
+          "in_top100": 9
+         },
+         {
+          "child": "orange",
+          "n_pos": 85,
+          "recall_at_R": 0.7176470588235294,
+          "in_top100": 4
+         },
+         {
+          "child": "pizza",
+          "n_pos": 153,
+          "recall_at_R": 0.9477124183006536,
+          "in_top100": 7
+         },
+         {
+          "child": "sandwich",
+          "n_pos": 98,
+          "recall_at_R": 0.9285714285714286,
+          "in_top100": 35
+         }
+        ]
+       },
+       {
+        "supercat": "furniture",
+        "R": 1257,
+        "precision_at_100": 0.95,
+        "children": [
+         {
+          "child": "bed",
+          "n_pos": 149,
+          "recall_at_R": 0.7919463087248322,
+          "in_top100": 24
+         },
+         {
+          "child": "chair",
+          "n_pos": 580,
+          "recall_at_R": 0.5258620689655172,
+          "in_top100": 72
+         },
+         {
+          "child": "couch",
+          "n_pos": 195,
+          "recall_at_R": 0.8102564102564103,
+          "in_top100": 61
+         },
+         {
+          "child": "dining table",
+          "n_pos": 501,
+          "recall_at_R": 0.3532934131736527,
+          "in_top100": 31
+         },
+         {
+          "child": "potted plant",
+          "n_pos": 172,
+          "recall_at_R": 0.6744186046511628,
+          "in_top100": 31
+         },
+         {
+          "child": "toilet",
+          "n_pos": 149,
+          "recall_at_R": 0.87248322147651,
+          "in_top100": 0
+         }
+        ]
+       },
+       {
+        "supercat": "appliance",
+        "R": 320,
+        "precision_at_100": 0.69,
+        "children": [
+         {
+          "child": "microwave",
+          "n_pos": 54,
+          "recall_at_R": 0.6666666666666666,
+          "in_top100": 22
+         },
+         {
+          "child": "oven",
+          "n_pos": 115,
+          "recall_at_R": 0.6,
+          "in_top100": 30
+         },
+         {
+          "child": "refrigerator",
+          "n_pos": 101,
+          "recall_at_R": 0.6138613861386139,
+          "in_top100": 36
+         },
+         {
+          "child": "sink",
+          "n_pos": 187,
+          "recall_at_R": 0.3582887700534759,
+          "in_top100": 20
+         },
+         {
+          "child": "toaster",
+          "n_pos": 8,
+          "recall_at_R": 0.875,
+          "in_top100": 4
+         }
+        ]
+       },
+       {
+        "supercat": "sports",
+        "R": 938,
+        "precision_at_100": 0.99,
+        "children": [
+         {
+          "child": "baseball bat",
+          "n_pos": 97,
+          "recall_at_R": 0.979381443298969,
+          "in_top100": 37
+         },
+         {
+          "child": "baseball glove",
+          "n_pos": 100,
+          "recall_at_R": 1.0,
+          "in_top100": 36
+         },
+         {
+          "child": "frisbee",
+          "n_pos": 84,
+          "recall_at_R": 0.7619047619047619,
+          "in_top100": 17
+         },
+         {
+          "child": "kite",
+          "n_pos": 91,
+          "recall_at_R": 0.5604395604395604,
+          "in_top100": 0
+         },
+         {
+          "child": "skateboard",
+          "n_pos": 127,
+          "recall_at_R": 0.84251968503937,
+          "in_top100": 2
+         },
+         {
+          "child": "skis",
+          "n_pos": 120,
+          "recall_at_R": 0.6916666666666667,
+          "in_top100": 0
+         },
+         {
+          "child": "snowboard",
+          "n_pos": 49,
+          "recall_at_R": 0.6122448979591837,
+          "in_top100": 0
+         },
+         {
+          "child": "sports ball",
+          "n_pos": 169,
+          "recall_at_R": 0.9408284023668639,
+          "in_top100": 48
+         },
+         {
+          "child": "surfboard",
+          "n_pos": 149,
+          "recall_at_R": 0.5234899328859061,
+          "in_top100": 0
+         },
+         {
+          "child": "tennis racket",
+          "n_pos": 167,
+          "recall_at_R": 1.0,
+          "in_top100": 21
+         }
+        ]
+       }
+      ],
+      "mean_p_at_100": 0.9066666666666666,
+      "mean_child_recall": 0.7781966688307027,
+      "min_child_recall": 0.33884297520661155,
+      "children_absent_from_top100": [
+       "toilet",
+       "kite",
+       "skis",
+       "snowboard",
+       "surfboard"
+      ],
+      "pass": false
+     },
+     "b7_negatives": {
+      "tau": 0.2595978230234683,
+      "recall_at_10_at_tau": 0.7005902777777778,
+      "n_absent_queries": 30,
+      "leakage_rate": 0.2,
+      "margin_present_minus_absent": 0.058032482862472534,
+      "worst_leaks": [
+       {
+        "query": "passenger car (part of a train)",
+        "n_above_tau": 25,
+        "max_sim": 0.3122904300689697
+       },
+       {
+        "query": "birdbath",
+        "n_above_tau": 1,
+        "max_sim": 0.2623360753059387
+       },
+       {
+        "query": "canteen",
+        "n_above_tau": 1,
+        "max_sim": 0.2783426344394684
+       },
+       {
+        "query": "first-aid kit",
+        "n_above_tau": 1,
+        "max_sim": 0.26729530096054077
+       },
+       {
+        "query": "rag doll",
+        "n_above_tau": 1,
+        "max_sim": 0.2727642357349396
+       }
+      ],
+      "pass": false
+     },
+     "b17_retrieval": {
+      "corpus": "coco-val2017-5k (NOT Karpathy test split)",
+      "n_queries": 25014,
+      "R@1": 42.676101383225394,
+      "R@5": 68.9453905812745,
+      "R@10": 78.58399296394019,
+      "median_rank": 2.0
+     }
+    }
+   },
+   "blocked": []
+  },
+  {
+   "candidate": "mobileclip2-s2",
+   "res": 256,
+   "dim": 512,
+   "license": "apple-amlr",
+   "note": "CEILING-REFERENCE only",
+   "artifacts": {
+    "vision_fp32_mb": 143.0,
+    "text_fp32_mb": 254.1
+   },
+   "perf": [],
+   "fidelity": {},
+   "quality": {
+    "fp32": {
+     "b6_category_precision": {
+      "rows": [
+       {
+        "category": "toaster",
+        "n_pos": 8,
+        "k": 8,
+        "p_at_k": 0.25
+       },
+       {
+        "category": "handbag",
+        "n_pos": 292,
+        "k": 10,
+        "p_at_k": 0.4
+       },
+       {
+        "category": "potted plant",
+        "n_pos": 172,
+        "k": 10,
+        "p_at_k": 0.4
+       },
+       {
+        "category": "knife",
+        "n_pos": 181,
+        "k": 10,
+        "p_at_k": 0.5
+       },
+       {
+        "category": "hair drier",
+        "n_pos": 9,
+        "k": 9,
+        "p_at_k": 0.5555555555555556
+       },
+       {
+        "category": "backpack",
+        "n_pos": 228,
+        "k": 10,
+        "p_at_k": 0.6
+       },
+       {
+        "category": "spoon",
+        "n_pos": 153,
+        "k": 10,
+        "p_at_k": 0.6
+       },
+       {
+        "category": "sports ball",
+        "n_pos": 169,
+        "k": 10,
+        "p_at_k": 0.6
+       },
+       {
+        "category": "apple",
+        "n_pos": 76,
+        "k": 10,
+        "p_at_k": 0.7
+       },
+       {
+        "category": "cup",
+        "n_pos": 390,
+        "k": 10,
+        "p_at_k": 0.7
+       },
+       {
+        "category": "bottle",
+        "n_pos": 379,
+        "k": 10,
+        "p_at_k": 0.8
+       },
+       {
+        "category": "bowl",
+        "n_pos": 314,
+        "k": 10,
+        "p_at_k": 0.8
+       },
+       {
+        "category": "chair",
+        "n_pos": 580,
+        "k": 10,
+        "p_at_k": 0.8
+       },
+       {
+        "category": "fork",
+        "n_pos": 155,
+        "k": 10,
+        "p_at_k": 0.8
+       },
+       {
+        "category": "mouse",
+        "n_pos": 88,
+        "k": 10,
+        "p_at_k": 0.8
+       },
+       {
+        "category": "oven",
+        "n_pos": 115,
+        "k": 10,
+        "p_at_k": 0.8
+       },
+       {
+        "category": "baseball glove",
+        "n_pos": 100,
+        "k": 10,
+        "p_at_k": 0.9
+       },
+       {
+        "category": "book",
+        "n_pos": 230,
+        "k": 10,
+        "p_at_k": 0.9
+       },
+       {
+        "category": "car",
+        "n_pos": 535,
+        "k": 10,
+        "p_at_k": 0.9
+       },
+       {
+        "category": "parking meter",
+        "n_pos": 37,
+        "k": 10,
+        "p_at_k": 0.9
+       },
+       {
+        "category": "remote",
+        "n_pos": 145,
+        "k": 10,
+        "p_at_k": 0.9
+       },
+       {
+        "category": "sandwich",
+        "n_pos": 98,
+        "k": 10,
+        "p_at_k": 0.9
+       },
+       {
+        "category": "sink",
+        "n_pos": 187,
+        "k": 10,
+        "p_at_k": 0.9
+       },
+       {
+        "category": "snowboard",
+        "n_pos": 49,
+        "k": 10,
+        "p_at_k": 0.9
+       },
+       {
+        "category": "vase",
+        "n_pos": 137,
+        "k": 10,
+        "p_at_k": 0.9
+       },
+       {
+        "category": "wine glass",
+        "n_pos": 110,
+        "k": 10,
+        "p_at_k": 0.9
+       },
+       {
+        "category": "airplane",
+        "n_pos": 97,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "banana",
+        "n_pos": 103,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "baseball bat",
+        "n_pos": 97,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "bear",
+        "n_pos": 49,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "bed",
+        "n_pos": 149,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "bench",
+        "n_pos": 235,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "bicycle",
+        "n_pos": 149,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "bird",
+        "n_pos": 125,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "boat",
+        "n_pos": 121,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "broccoli",
+        "n_pos": 71,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "bus",
+        "n_pos": 189,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "cake",
+        "n_pos": 124,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "carrot",
+        "n_pos": 81,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "cat",
+        "n_pos": 184,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "cell phone",
+        "n_pos": 214,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "clock",
+        "n_pos": 204,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "couch",
+        "n_pos": 195,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "cow",
+        "n_pos": 87,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "dining table",
+        "n_pos": 501,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "dog",
+        "n_pos": 177,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "donut",
+        "n_pos": 62,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "elephant",
+        "n_pos": 89,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "fire hydrant",
+        "n_pos": 86,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "frisbee",
+        "n_pos": 84,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "giraffe",
+        "n_pos": 101,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "horse",
+        "n_pos": 128,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "hot dog",
+        "n_pos": 51,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "keyboard",
+        "n_pos": 106,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "kite",
+        "n_pos": 91,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "laptop",
+        "n_pos": 183,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "microwave",
+        "n_pos": 54,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "motorcycle",
+        "n_pos": 159,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "orange",
+        "n_pos": 85,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "person",
+        "n_pos": 2693,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "pizza",
+        "n_pos": 153,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "refrigerator",
+        "n_pos": 101,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "scissors",
+        "n_pos": 28,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "sheep",
+        "n_pos": 65,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "skateboard",
+        "n_pos": 127,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "skis",
+        "n_pos": 120,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "stop sign",
+        "n_pos": 69,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "suitcase",
+        "n_pos": 105,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "surfboard",
+        "n_pos": 149,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "teddy bear",
+        "n_pos": 94,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "tennis racket",
+        "n_pos": 167,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "tie",
+        "n_pos": 145,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "toilet",
+        "n_pos": 149,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "toothbrush",
+        "n_pos": 34,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "traffic light",
+        "n_pos": 191,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "train",
+        "n_pos": 157,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "truck",
+        "n_pos": 250,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "tv",
+        "n_pos": 207,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "umbrella",
+        "n_pos": 174,
+        "k": 10,
+        "p_at_k": 1.0
+       },
+       {
+        "category": "zebra",
+        "n_pos": 85,
+        "k": 10,
+        "p_at_k": 1.0
+       }
+      ],
+      "mean": 0.9138194444444444,
+      "min": 0.25,
+      "zeros": [],
+      "pass": false
+     },
+     "b5_hypernym": {
+      "rows": [
+       {
+        "supercat": "vehicle",
+        "R": 1160,
+        "precision_at_100": 0.98,
+        "children": [
+         {
+          "child": "airplane",
+          "n_pos": 97,
+          "recall_at_R": 0.865979381443299,
+          "in_top100": 2
+         },
+         {
+          "child": "bicycle",
+          "n_pos": 149,
+          "recall_at_R": 0.4899328859060403,
+          "in_top100": 3
+         },
+         {
+          "child": "boat",
+          "n_pos": 121,
+          "recall_at_R": 0.34710743801652894,
+          "in_top100": 1
+         },
+         {
+          "child": "bus",
+          "n_pos": 189,
+          "recall_at_R": 0.9153439153439153,
+          "in_top100": 34
+         },
+         {
+          "child": "car",
+          "n_pos": 535,
+          "recall_at_R": 0.7065420560747664,
+          "in_top100": 60
+         },
+         {
+          "child": "motorcycle",
+          "n_pos": 159,
+          "recall_at_R": 0.8364779874213837,
+          "in_top100": 10
+         },
+         {
+          "child": "train",
+          "n_pos": 157,
+          "recall_at_R": 0.89171974522293,
+          "in_top100": 5
+         },
+         {
+          "child": "truck",
+          "n_pos": 250,
+          "recall_at_R": 0.816,
+          "in_top100": 51
+         }
+        ]
+       },
+       {
+        "supercat": "animal",
+        "R": 1016,
+        "precision_at_100": 0.99,
+        "children": [
+         {
+          "child": "bear",
+          "n_pos": 49,
+          "recall_at_R": 1.0,
+          "in_top100": 9
+         },
+         {
+          "child": "bird",
+          "n_pos": 125,
+          "recall_at_R": 0.744,
+          "in_top100": 8
+         },
+         {
+          "child": "cat",
+          "n_pos": 184,
+          "recall_at_R": 0.9347826086956522,
+          "in_top100": 1
+         },
+         {
+          "child": "cow",
+          "n_pos": 87,
+          "recall_at_R": 0.9770114942528736,
+          "in_top100": 11
+         },
+         {
+          "child": "dog",
+          "n_pos": 177,
+          "recall_at_R": 0.8305084745762712,
+          "in_top100": 5
+         },
+         {
+          "child": "elephant",
+          "n_pos": 89,
+          "recall_at_R": 0.9775280898876404,
+          "in_top100": 10
+         },
+         {
+          "child": "giraffe",
+          "n_pos": 101,
+          "recall_at_R": 1.0,
+          "in_top100": 42
+         },
+         {
+          "child": "horse",
+          "n_pos": 128,
+          "recall_at_R": 0.6328125,
+          "in_top100": 2
+         },
+         {
+          "child": "sheep",
+          "n_pos": 65,
+          "recall_at_R": 0.9846153846153847,
+          "in_top100": 4
+         },
+         {
+          "child": "zebra",
+          "n_pos": 85,
+          "recall_at_R": 0.9882352941176471,
+          "in_top100": 21
+         }
+        ]
+       },
+       {
+        "supercat": "food",
+        "R": 708,
+        "precision_at_100": 0.84,
+        "children": [
+         {
+          "child": "apple",
+          "n_pos": 76,
+          "recall_at_R": 0.5921052631578947,
+          "in_top100": 8
+         },
+         {
+          "child": "banana",
+          "n_pos": 103,
+          "recall_at_R": 0.5922330097087378,
+          "in_top100": 6
+         },
+         {
+          "child": "broccoli",
+          "n_pos": 71,
+          "recall_at_R": 0.9436619718309859,
+          "in_top100": 21
+         },
+         {
+          "child": "cake",
+          "n_pos": 124,
+          "recall_at_R": 0.6693548387096774,
+          "in_top100": 9
+         },
+         {
+          "child": "carrot",
+          "n_pos": 81,
+          "recall_at_R": 0.9629629629629629,
+          "in_top100": 27
+         },
+         {
+          "child": "donut",
+          "n_pos": 62,
+          "recall_at_R": 0.9193548387096774,
+          "in_top100": 5
+         },
+         {
+          "child": "hot dog",
+          "n_pos": 51,
+          "recall_at_R": 1.0,
+          "in_top100": 6
+         },
+         {
+          "child": "orange",
+          "n_pos": 85,
+          "recall_at_R": 0.7764705882352941,
+          "in_top100": 5
+         },
+         {
+          "child": "pizza",
+          "n_pos": 153,
+          "recall_at_R": 0.9607843137254902,
+          "in_top100": 8
+         },
+         {
+          "child": "sandwich",
+          "n_pos": 98,
+          "recall_at_R": 0.9489795918367347,
+          "in_top100": 36
+         }
+        ]
+       },
+       {
+        "supercat": "furniture",
+        "R": 1257,
+        "precision_at_100": 0.96,
+        "children": [
+         {
+          "child": "bed",
+          "n_pos": 149,
+          "recall_at_R": 0.785234899328859,
+          "in_top100": 20
+         },
+         {
+          "child": "chair",
+          "n_pos": 580,
+          "recall_at_R": 0.5413793103448276,
+          "in_top100": 74
+         },
+         {
+          "child": "couch",
+          "n_pos": 195,
+          "recall_at_R": 0.841025641025641,
+          "in_top100": 61
+         },
+         {
+          "child": "dining table",
+          "n_pos": 501,
+          "recall_at_R": 0.3592814371257485,
+          "in_top100": 32
+         },
+         {
+          "child": "potted plant",
+          "n_pos": 172,
+          "recall_at_R": 0.7383720930232558,
+          "in_top100": 33
+         },
+         {
+          "child": "toilet",
+          "n_pos": 149,
+          "recall_at_R": 0.7718120805369127,
+          "in_top100": 1
+         }
+        ]
+       },
+       {
+        "supercat": "appliance",
+        "R": 320,
+        "precision_at_100": 0.71,
+        "children": [
+         {
+          "child": "microwave",
+          "n_pos": 54,
+          "recall_at_R": 0.6481481481481481,
+          "in_top100": 24
+         },
+         {
+          "child": "oven",
+          "n_pos": 115,
+          "recall_at_R": 0.6260869565217392,
+          "in_top100": 29
+         },
+         {
+          "child": "refrigerator",
+          "n_pos": 101,
+          "recall_at_R": 0.6633663366336634,
+          "in_top100": 39
+         },
+         {
+          "child": "sink",
+          "n_pos": 187,
+          "recall_at_R": 0.33689839572192515,
+          "in_top100": 18
+         },
+         {
+          "child": "toaster",
+          "n_pos": 8,
+          "recall_at_R": 0.875,
+          "in_top100": 4
+         }
+        ]
+       },
+       {
+        "supercat": "sports",
+        "R": 938,
+        "precision_at_100": 1.0,
+        "children": [
+         {
+          "child": "baseball bat",
+          "n_pos": 97,
+          "recall_at_R": 0.9690721649484536,
+          "in_top100": 34
+         },
+         {
+          "child": "baseball glove",
+          "n_pos": 100,
+          "recall_at_R": 1.0,
+          "in_top100": 35
+         },
+         {
+          "child": "frisbee",
+          "n_pos": 84,
+          "recall_at_R": 0.8452380952380952,
+          "in_top100": 21
+         },
+         {
+          "child": "kite",
+          "n_pos": 91,
+          "recall_at_R": 0.6373626373626373,
+          "in_top100": 0
+         },
+         {
+          "child": "skateboard",
+          "n_pos": 127,
+          "recall_at_R": 0.889763779527559,
+          "in_top100": 1
+         },
+         {
+          "child": "skis",
+          "n_pos": 120,
+          "recall_at_R": 0.675,
+          "in_top100": 1
+         },
+         {
+          "child": "snowboard",
+          "n_pos": 49,
+          "recall_at_R": 0.5102040816326531,
+          "in_top100": 0
+         },
+         {
+          "child": "sports ball",
+          "n_pos": 169,
+          "recall_at_R": 0.9467455621301775,
+          "in_top100": 47
+         },
+         {
+          "child": "surfboard",
+          "n_pos": 149,
+          "recall_at_R": 0.5302013422818792,
+          "in_top100": 0
+         },
+         {
+          "child": "tennis racket",
+          "n_pos": 167,
+          "recall_at_R": 1.0,
+          "in_top100": 18
+         }
+        ]
+       }
+      ],
+      "mean_p_at_100": 0.9133333333333334,
+      "mean_child_recall": 0.7856060733874277,
+      "min_child_recall": 0.33689839572192515,
+      "children_absent_from_top100": [
+       "kite",
+       "snowboard",
+       "surfboard"
+      ],
+      "pass": false
+     },
+     "b7_negatives": {
+      "tau": 0.28647466003866984,
+      "recall_at_10_at_tau": 0.7009027777777778,
+      "n_absent_queries": 30,
+      "leakage_rate": 0.13333333333333333,
+      "margin_present_minus_absent": 0.06965464353561401,
+      "worst_leaks": [
+       {
+        "query": "passenger car (part of a train)",
+        "n_above_tau": 17,
+        "max_sim": 0.3435465693473816
+       },
+       {
+        "query": "canteen",
+        "n_above_tau": 4,
+        "max_sim": 0.33264848589897156
+       },
+       {
+        "query": "mallard",
+        "n_above_tau": 1,
+        "max_sim": 0.29747357964515686
+       },
+       {
+        "query": "rag doll",
+        "n_above_tau": 1,
+        "max_sim": 0.30700522661209106
+       },
+       {
+        "query": "Band Aid",
+        "n_above_tau": 0,
+        "max_sim": 0.22494815289974213
+       }
+      ],
+      "pass": false
+     },
+     "b17_retrieval": {
+      "corpus": "coco-val2017-5k (NOT Karpathy test split)",
+      "n_queries": 25014,
+      "R@1": 48.4568641560726,
+      "R@5": 73.53082273926601,
+      "R@10": 82.0220676421204,
+      "median_rank": 2.0
+     }
+    }
+   },
+   "blocked": []
+  },
+  {
    "candidate": "openclip-vitb32",
    "res": 224,
    "dim": 512,
@@ -7417,7 +10296,260 @@
     "vision_int8_mb": 96.0,
     "text_fp32_mb": 254.3
    },
-   "perf": [],
+   "perf": [
+    {
+     "candidate": "openclip-vitb32",
+     "precision": "fp32",
+     "intra": 1,
+     "batch": 1,
+     "img_s": 10.28,
+     "ms_per_img": 97.23,
+     "peak_rss_mb": 588.6,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "openclip-vitb32",
+     "precision": "fp32",
+     "intra": 1,
+     "batch": 2,
+     "img_s": 10.64,
+     "ms_per_img": 93.96,
+     "peak_rss_mb": 612.8,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "openclip-vitb32",
+     "precision": "fp32",
+     "intra": 1,
+     "batch": 8,
+     "img_s": 10.38,
+     "ms_per_img": 96.29,
+     "peak_rss_mb": 686.7,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "openclip-vitb32",
+     "precision": "fp32",
+     "intra": 2,
+     "batch": 1,
+     "img_s": 19.45,
+     "ms_per_img": 51.41,
+     "peak_rss_mb": 623.9,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "openclip-vitb32",
+     "precision": "fp32",
+     "intra": 2,
+     "batch": 2,
+     "img_s": 20.48,
+     "ms_per_img": 48.83,
+     "peak_rss_mb": 632.4,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "openclip-vitb32",
+     "precision": "fp32",
+     "intra": 2,
+     "batch": 8,
+     "img_s": 20.51,
+     "ms_per_img": 48.75,
+     "peak_rss_mb": 680.0,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "openclip-vitb32",
+     "precision": "fp32",
+     "intra": 4,
+     "batch": 1,
+     "img_s": 35.63,
+     "ms_per_img": 28.06,
+     "peak_rss_mb": 648.4,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "openclip-vitb32",
+     "precision": "fp32",
+     "intra": 4,
+     "batch": 2,
+     "img_s": 38.37,
+     "ms_per_img": 26.06,
+     "peak_rss_mb": 626.0,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "openclip-vitb32",
+     "precision": "fp32",
+     "intra": 4,
+     "batch": 8,
+     "img_s": 39.17,
+     "ms_per_img": 25.53,
+     "peak_rss_mb": 642.4,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "openclip-vitb32",
+     "precision": "int8",
+     "intra": 1,
+     "batch": 1,
+     "img_s": 27.58,
+     "ms_per_img": 36.26,
+     "peak_rss_mb": 313.4,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "openclip-vitb32",
+     "precision": "int8",
+     "intra": 1,
+     "batch": 2,
+     "img_s": 28.84,
+     "ms_per_img": 34.68,
+     "peak_rss_mb": 312.4,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "openclip-vitb32",
+     "precision": "int8",
+     "intra": 1,
+     "batch": 8,
+     "img_s": 28.91,
+     "ms_per_img": 34.59,
+     "peak_rss_mb": 347.6,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "openclip-vitb32",
+     "precision": "int8",
+     "intra": 2,
+     "batch": 1,
+     "img_s": 50.54,
+     "ms_per_img": 19.79,
+     "peak_rss_mb": 298.7,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "openclip-vitb32",
+     "precision": "int8",
+     "intra": 2,
+     "batch": 2,
+     "img_s": 53.42,
+     "ms_per_img": 18.72,
+     "peak_rss_mb": 349.5,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "openclip-vitb32",
+     "precision": "int8",
+     "intra": 2,
+     "batch": 8,
+     "img_s": 55.15,
+     "ms_per_img": 18.13,
+     "peak_rss_mb": 377.7,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "openclip-vitb32",
+     "precision": "int8",
+     "intra": 4,
+     "batch": 1,
+     "img_s": 86.02,
+     "ms_per_img": 11.63,
+     "peak_rss_mb": 323.7,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "openclip-vitb32",
+     "precision": "int8",
+     "intra": 4,
+     "batch": 2,
+     "img_s": 93.77,
+     "ms_per_img": 10.66,
+     "peak_rss_mb": 362.4,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    },
+    {
+     "candidate": "openclip-vitb32",
+     "precision": "int8",
+     "intra": 4,
+     "batch": 8,
+     "img_s": 101.99,
+     "ms_per_img": 9.81,
+     "peak_rss_mb": 380.1,
+     "status": "ADVISORY",
+     "runs": 3,
+     "spread_pct": 0.0,
+     "loadavg_max": null,
+     "note": "parsed from ADVISORY perf-run.log; supersede via quiet-window run"
+    }
+   ],
    "fidelity": {
     "int8": {
      "n": 200,

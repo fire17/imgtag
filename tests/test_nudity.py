@@ -292,3 +292,90 @@ def test_score_still_works_when_the_caller_passes_no_views_at_all(photo):
 def test_the_dispatcher_finds_this_track():
     heads = load_heads({"intra_op": 1})
     assert "nudity" in heads and heads["nudity"].wants_images is True
+
+
+# ---------------------------------------------------------------- review-tier instrument
+# (track-nudity3 2026-07-22): the Marqo head cannot carry the review tier (swimwear p50
+# 0.056 == mannequin p50 0.056, measured) — review is a prompt-ensemble MARGIN over the
+# index embeddings, taxonomy-driven from moderation.json. These tests need NO ONNX artifact
+# and NO real backend: an axis-aligned fake text space makes the margin exactly checkable.
+
+
+class ReviewFakeBackend:
+    """One axis per concept family, so margin = max(review) - max(neg) is exact:
+    swimwear/lingerie/underwear/bare-chest each own a POSITIVE axis; clothed / mannequin /
+    generic negatives each own a NEGATIVE axis."""
+
+    model_sha = "fake-review"
+    AXES = ["swim", "lingerie", "underwear", "barechest", "skin", "clothed", "mannequin", "generic"]
+
+    def _axis(self, t: str) -> int:
+        t = t.lower()
+        if any(w in t for w in ("bikini", "swim", "swimsuit")):
+            return 0
+        if "lingerie" in t or "bra" in t:
+            return 1
+        if "underwear" in t or "briefs" in t or "boxer" in t:
+            return 2
+        if "shirtless" in t or "bare-chested" in t or "muscular" in t:
+            return 3
+        if any(w in t for w in ("artistic", "fine-art", "bare human form", "medical", "dermatology", "skin")):
+            return 4
+        if "clothed" in t or "wearing clothes" in t:
+            return 5
+        if any(w in t for w in ("mannequin", "statue", "sculpture", "dummy", "anatomical", "marble")):
+            return 6
+        return 7
+
+    def embed_texts(self, texts):
+        v = np.zeros((len(texts), len(self.AXES)), np.float32)
+        for i, t in enumerate(texts):
+            v[i, self._axis(t)] = 1.0
+        return v
+
+
+def _onehot(axis: int, dim: int = 8) -> np.ndarray:
+    v = np.zeros((1, dim), np.float32)
+    v[0, axis] = 1.0
+    return v
+
+
+def test_the_review_taxonomy_is_versioned_data_in_moderation_json():
+    """The user's explicit ask: per-subcategory prompts live as DATA, not code."""
+    spec = nudity._review_spec()
+    subs = spec.get("review_subcategories") or {}
+    assert {"swimwear", "lingerie", "underwear", "bare-chest-male"} <= set(subs)
+    assert spec.get("scorer") == "margin" and "platt" in spec
+    assert spec.get("enforcement_ready") is False  # never fitted on labeled nudity GT
+
+
+def test_review_scorer_flags_swimwear_and_names_the_subcategory():
+    sc = nudity.NudityReviewScorer.build(ReviewFakeBackend())
+    out = sc.score(_onehot(0))  # a swimwear-axis image
+    assert out[0]["tier"] == "review"
+    assert out[0]["subcategory"] == "swimwear"
+    assert out[0]["category"] == "nudity" and out[0]["calibrated"] is False
+
+
+def test_review_scorer_keeps_the_mannequin_control_at_none():
+    """ADR-14 hard requirement: non-person figures never flag. The mannequin/statue
+    concepts are in the SUBTRACTED negatives, so a mannequin image maxes a negative and its
+    margin goes negative -> none."""
+    sc = nudity.NudityReviewScorer.build(ReviewFakeBackend())
+    assert sc.score(_onehot(6))[0]["tier"] == "none"   # mannequin axis
+    assert sc.score(_onehot(5))[0]["tier"] == "none"   # clothed axis
+
+
+def test_review_scorer_never_emits_violation():
+    sc = nudity.NudityReviewScorer.build(ReviewFakeBackend())
+    embs = np.eye(8, dtype=np.float32)  # one image per axis
+    tiers = {f["tier"] for f in sc.score(embs)}
+    assert "violation" not in tiers and tiers <= {"review", "none"}
+
+
+def test_review_margin_is_max_positive_minus_max_negative():
+    sc = nudity.NudityReviewScorer.build(ReviewFakeBackend())
+    m, best = sc.margins(_onehot(0))
+    assert m[0] == pytest.approx(1.0)          # swim concept dot 1, every negative dot 0
+    m2, _ = sc.margins(_onehot(6))
+    assert m2[0] == pytest.approx(-1.0)        # mannequin: no positive, one negative dot 1

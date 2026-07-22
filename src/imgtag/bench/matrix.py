@@ -122,10 +122,16 @@ def run_candidate(cid: str, do_perf: bool, do_quality: bool, quality_precs: tupl
         log("  BLOCKED: no vision artifact")
         return rec
 
-    # 2. perf matrix — precision x intra x batch, fresh process per config
+    # 2. perf matrix — precision x intra x batch, fresh process per config.
+    # When perf is skipped, still surface any CACHED perf rows so the B8 column composes
+    # (perf and quality run in separate passes; the cache is what joins them).
     if do_perf:
         log("  perf matrix (fresh process per config):")
         rec["perf"] = P.run_matrix(cid, precisions=tuple(avail), repeats=repeats, log=log)
+    else:
+        rec["perf"] = P.load_cached(cid, precisions=tuple(avail))
+        if rec["perf"]:
+            log(f"  perf: {len(rec['perf'])} cached rows composed (no fresh run)")
 
     # 3. B24 fidelity — int8 vs fp32 on 200 quick500 images
     quick = sorted(glob.glob(os.path.join(C.DATA, "quick500/images/*.jpg")))[:FIDELITY_N]

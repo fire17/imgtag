@@ -107,6 +107,23 @@ CANDIDATES: dict[str, Candidate] = {
             ctx=64, tok="siglip1",
             note="small text tower (ADR-4 target-profile candidate)",
         ),
+        # CEILING-REFERENCE ONLY (apple-amlr research license): never default, never in
+        # published defaults. mean=0/std=1 (identity normalize, config), BICUBIC, 256,
+        # shortest-side+center-crop; openai CLIP BPE tokenizer.
+        Candidate(
+            id="mobileclip2-s0", res=256, dim=512,
+            vision={"fp32": _m("mobileclip2/s0_vision_model.onnx")},
+            text={"fp32": _m("mobileclip2/s0_text_model.onnx")},
+            mean=(0.0, 0.0, 0.0), std=(1.0, 1.0, 1.0), resample=BICUBIC, squash=False,
+            ctx=77, tok="clip", license="apple-amlr", note="CEILING-REFERENCE only",
+        ),
+        Candidate(
+            id="mobileclip2-s2", res=256, dim=512,
+            vision={"fp32": _m("mobileclip2/s2_vision_model.onnx")},
+            text={"fp32": _m("mobileclip2/s2_text_model.onnx")},
+            mean=(0.0, 0.0, 0.0), std=(1.0, 1.0, 1.0), resample=BICUBIC, squash=False,
+            ctx=77, tok="clip", license="apple-amlr", note="CEILING-REFERENCE only",
+        ),
         Candidate(
             id="openclip-vitb32", res=224, dim=512,
             vision={"fp32": _m("openclip-vitb32-vision.onnx"),

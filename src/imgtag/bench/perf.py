@@ -70,9 +70,28 @@ def _worker(cand_id: str, prec: str, intra: int, batch: int) -> dict:
     }
 
 
+PERF_CACHE = os.path.join(C.ROOT, "bench", "cache", "perf")
+
+
+def _cache_path(cand_id: str, prec: str, intra: int, batch: int) -> str:
+    return os.path.join(PERF_CACHE, f"{cand_id}-{prec}-i{intra}-b{batch}.json")
+
+
 def run_config(cand_id: str, prec: str, intra: int, batch: int, repeats: int = 3,
-               timeout: int = 900) -> dict:
-    """Spawn `repeats` fresh processes; return the MEDIAN row + spread + advisory flag."""
+               timeout: int = 900, use_cache: bool = True) -> dict:
+    """Spawn `repeats` fresh processes; return the MEDIAN row + spread + advisory flag.
+
+    Perf rows are cached so a later quality-only run composes them into one report (perf
+    and quality run in separate passes; without this the B8 column reads empty). A cached
+    ADVISORY row is replaced whenever a fresh run beats its loadavg (a quiet-window pass
+    supersedes a contended one); an OK row is never overwritten by an ADVISORY one.
+    """
+    cache = _cache_path(cand_id, prec, intra, batch)
+    if use_cache and os.path.exists(cache):
+        try:
+            return json.load(open(cache))
+        except ValueError:
+            pass
     cores = C.usable_cores()[0]
     rows, errs = [], []
     for _ in range(repeats):
@@ -105,7 +124,31 @@ def run_config(cand_id: str, prec: str, intra: int, batch: int, repeats: int = 3
     med["loadavg_max"] = max(loads)
     # BUDGETS noise protocol: never fabricate a quiet-machine number.
     med["status"] = "ADVISORY" if max(loads) > cores * 0.6 else "OK"
+    # Cache, but never let an ADVISORY row overwrite a cached OK one.
+    prior = json.load(open(cache)) if os.path.exists(cache) else None
+    if not (prior and prior.get("status") == "OK" and med["status"] == "ADVISORY"):
+        os.makedirs(PERF_CACHE, exist_ok=True)
+        tmp = cache + ".tmp"
+        with open(tmp, "w") as fh:
+            json.dump(med, fh)
+        os.replace(tmp, cache)
     return med
+
+
+def load_cached(cand_id: str, precisions=("fp32", "int8"), intras=(1, 2, 4),
+                batches=(1, 2, 8)) -> list[dict]:
+    """Cached perf rows only (no spawning) — lets a quality-only run show the B8 column."""
+    out = []
+    for prec in precisions:
+        for intra in intras:
+            for batch in batches:
+                p = _cache_path(cand_id, prec, intra, batch)
+                if os.path.exists(p):
+                    try:
+                        out.append(json.load(open(p)))
+                    except ValueError:
+                        pass
+    return out
 
 
 def run_matrix(cand_id: str, precisions=("fp32", "int8"), intras=(1, 2, 4),
