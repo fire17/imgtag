@@ -677,6 +677,21 @@ label, or to compare a dev-machine number against a target-profile (🐧) budget
   before any file collision; successors TaskStop'd, originals kept (richer context).
   LAW: before spawning a successor for a dead lane, `ps aux | grep 'agent-id <name>'`
   AND TaskStop the original name first; a "dead" lane is one message away from alive.
+- 2026-07-22 16:00Z · **B17 RULING — gate re-based to the box that exists** (b-bench §7b
+  escalation): the +12pt R@10 gate was measured with fp32 TEXT (850MB resident — blows B8
+  on the 8GB target); shipping int8 text = R@10 74.2 = **+9.0pt over control**, and NO
+  roster model can satisfy both B8 and +12 simultaneously. Ruled option (a): B17 becomes
+  +9pt on the 8GB shipping config; fp32-text 77.2 stays published as the labeled
+  reference ceiling. Lesson (2nd occurrence): mean-cos parity HIDES rank shifts —
+  int8 text cos 0.982 yet 28% of query nearest-neighbor sets shifted; nn_agree is the
+  real gate metric. New darwin item D13: static/calibrated int8 text quant (or smaller
+  text projection) to close the 3pt gap. B24's nn-based clause vindicated again.
+- 2026-07-22 16:00Z · **violence 16-false-alerts root cause = a UNIT bug**, not the
+  intimate-pose residual: margin-space taus (≈0.05) banded a PLATT-p sidecar ([0,1]) and
+  tau_alert < tau_violation even INVERTED severity. Fix: p-space ascending taus via
+  per-model fitted file (recount-free re-derive); nudityprobe 16/79/9 → 0/0/10; every
+  confusable slice 0.00% alert. LAW REINFORCED: a tier τ must state its SCORE SPACE and
+  the derive path must assert it — the sports lesson's twin, now covered from both sides.
 - 2026-07-22 14:52Z · **git add -A sweeps recurred 3× in one afternoon** under parallel
   committers (45c10f6 hijacked sports2's stage; dd906c9 [b-bench] swept nudity3's test;
   755f8e9 [b-corpus] swept b-engine's indexer/store edits). All benign THIS time (content

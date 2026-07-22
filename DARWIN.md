@@ -34,3 +34,9 @@
   sports lesson — a round is not done until the serving path agrees); (b) require a
   person/object pre-filter step for pose/context tracks (the safety kitten lesson);
   (c) A/B-gate all prompt promotions (the drugs pattern — rejections are half the value).
+
+- **D13 — close the int8-text 3pt gap (2026-07-22, from bench parity).** Shipping int8
+  text costs R@10 77.2→74.2 (28% of query NN-sets shift at cos 0.982 — mean-cos lies,
+  nn_agree is the metric). Candidates: static/calibrated int8 text quant · smaller text
+  projection head · weight-only variants re-gated on nn_agree not cos. Success = ≥76 R@10
+  at ≤200MB resident text.
