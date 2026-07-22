@@ -123,8 +123,15 @@ highest-bar protocol — verbatim vision, budgets as tests, honest verification,
   Record both, ship the faster; do not "fix" the anomaly mid-bench, log it.
 - **Embeddings don't match reference / quality bench suddenly drops** → run the parity
   gate: `uv run imgtag bench parity`. Prime suspects: resize interpolation (must match
-  model card — usually bicubic), normalization constants, RGB/BGR, draft() decode scale,
-  missing L2-normalize (MobileCLIP2 exports are UNNORMALIZED — assert ‖v‖≈1 in tests).
+  the model's OWN preprocessor_config — e.g. SigLIP2 mandates resample=2 = BILINEAR,
+  measured 2026-07-22; never assume bicubic), normalization constants, RGB/BGR, draft()
+  decode scale, missing L2-normalize (MobileCLIP2 exports are UNNORMALIZED — assert
+  ‖v‖≈1 in tests). The config file wins over folklore, always.
+- **"Decode is the engine" vs "model is the engine" — BOTH are true, corpus-scoped**
+  (measured 2026-07-22): on 640×480 COCO, int8 inference (33.5ms) is 9× decode (3.7ms);
+  on 12MP photos, decode (163–287ms) dwarfs inference. The pipeline must profile per-
+  dataset (`bench index --profile` reports the split) and publish corpus-labeled claims
+  only. A 12MP real-photo decode case is a REQUIRED bench-suite member.
 - **"vehicle" recall looks great but FP rate exploded** → threshold calibration drifted;
   re-run `bench quality --negatives`; check LVIS scorer honors `neg_category_ids` (I2).
 - **Search returns results from a different model than the index** → manifest model-hash
