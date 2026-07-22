@@ -114,18 +114,60 @@ def structure(batch: np.ndarray) -> np.ndarray:
             + np.abs(g[:, :, :-2] - 2 * g[:, :, 1:-1] + g[:, :, 2:]).mean((1, 2)))
 
 
+#: The pre-made-view contract (ruling 2026-07-22). b-engine's decode worker may hand this
+#: track a second uint8 view at OUR geometry, eliminating the re-open. To make transform
+#: drift structurally impossible, the worker calls ``make_view`` BELOW — one implementation,
+#: not two-plus-a-parity-test.
+VIEW_KEY = "nudity-384crop"
+
+
+def make_view(im: Image.Image) -> np.ndarray:
+    """THE nudity view: PIL -> uint8 [384,384,3], shortest-side→384, centre-crop, BICUBIC.
+
+    ⚠️ **DRAFT-SCALE PRECONDITION — measured, and the whole correctness of the fast path.**
+    ``preprocess_image`` calls ``im.draft()``, which sets the JPEG's DCT-domain decode
+    scale, and that scale is part of the result. Measured on real photos:
+
+    ============================ =========================================
+    decode state when called     result vs a fresh open at our geometry
+    ============================ =========================================
+    drafted (384,384)            **bit-identical**
+    drafted (224,224) first      differs, max 33/255, mean 1.3  ← WRONG
+    fully decoded, never drafted differs, max 9/255
+    ============================ =========================================
+
+    So the worker may pass a view ONLY when its own decode was drafted at 384 — i.e. when
+    the active backend's size is 384 (pecore-s16-384, the default). Then ONE decode serves
+    both and both are bit-identical (verified on 4 images: our view AND the backend's own
+    view are each unchanged).
+
+    It is NOT free to force this for smaller backends: drafting at 384 to serve us
+    perturbs a 224-backend's OWN embeddings by up to **83/255** — corrupting the index to
+    speed up moderation. When the backend is not 384, ship no view; this track re-opens
+    (a partial 384 decode) and stays exactly as calibrated.
+    """
+    return preprocess_image(im, SIZE, SQUASH, Image.Resampling.BICUBIC)
+
+
 class NudityHead:
     """The dispatcher-facing head (imgtag.moderation.load_heads contract).
 
-    ``score(embeddings, images, ids) -> list[dict]`` — one dict per record, schema
-    ``{category, p, tier}`` plus provenance. Embeddings are ignored: this track answers
-    from pixels, which is exactly why it can answer at all.
+    ``score(embeddings, images, ids, views=None) -> list[dict]`` — one dict per record,
+    schema ``{category, p, tier}`` plus provenance. Embeddings are ignored: this track
+    answers from pixels, which is exactly why it can answer at all.
+
+    Pixel source, in priority order: an offered ``views[VIEW_KEY]`` → the coordinator slab
+    when its geometry already matches ours → re-open from ``rec["path"]``.
     """
 
     category = CATEGORY
     wants_images = True
     size, squash = SIZE, SQUASH
     resample = Image.Resampling.BICUBIC
+    #: Declared so the worker knows what to build and under which precondition.
+    view_key = VIEW_KEY
+    view_geometry = {"size": SIZE, "squash": SQUASH, "resample": "BICUBIC",
+                     "requires_draft": SIZE}
 
     def __init__(self, path: Path, profile: dict | None = None):
         profile = profile or {}
@@ -170,8 +212,24 @@ class NudityHead:
             out.append(f)
         return out
 
-    def score(self, embeddings, images=None, ids=None) -> list[dict]:
+    def _offered(self, views, n: int) -> np.ndarray | None:
+        """A pre-made view, if one was offered AND it is the right shape. Shape/dtype are
+        checked, not trusted — a mis-shaped view must fall back, never be fed to the model.
+        Its DECODE state cannot be checked here; that precondition is ``make_view``'s
+        contract and is covered by the parity test."""
+        v = (views or {}).get(VIEW_KEY)
+        if v is None:
+            return None
+        v = np.asarray(v)
+        if v.dtype != np.uint8 or v.shape != (n, self.size, self.size, 3):
+            return None
+        return v
+
+    def score(self, embeddings, images=None, ids=None, views=None) -> list[dict]:
         n = len(ids) if ids is not None else (len(images) if images is not None else len(embeddings))
+        offered = self._offered(views, n)
+        if offered is not None:
+            return self._flags(offered)
         if images is not None and images.shape[1:] == (self.size, self.size, 3) and self.squash:
             return self._flags(np.asarray(images, np.uint8))
         pix, slots = self._reopen(ids, n)

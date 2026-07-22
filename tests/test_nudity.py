@@ -213,6 +213,81 @@ def test_a_real_photograph_is_never_marked_content_free(tmp_path):
     assert "content_free" not in f
 
 
+# ---------------------------------------------------------------- pre-made view (B16)
+
+
+@pytest.fixture
+def photo(tmp_path):
+    """A real-ish JPEG big enough that draft() actually engages (>2× our 384)."""
+    rng = np.random.default_rng(7)
+    a = rng.integers(0, 256, (60, 100, 3), dtype=np.uint8).repeat(16, 0).repeat(16, 1)
+    p = tmp_path / "photo.jpg"
+    Image.fromarray(a).save(p, quality=95)
+    return p
+
+
+def test_worker_view_is_bit_identical_to_our_own_preprocess(photo):
+    """B16: the worker's view MUST equal what this track would have computed itself.
+    Guaranteed by construction — the worker calls our make_view — and asserted anyway, so
+    a future reimplementation on either side is caught here and not in production."""
+    with Image.open(photo) as im:
+        worker = nudity.make_view(im)
+    with Image.open(photo) as im:
+        ours = nudity.preprocess_image(im, nudity.SIZE, nudity.SQUASH, Image.Resampling.BICUBIC)
+    assert np.array_equal(worker, ours)
+    assert worker.dtype == np.uint8 and worker.shape == (384, 384, 3)
+
+
+def test_the_draft_precondition_is_real_and_would_change_the_pixels(photo):
+    """The hazard bit-parity alone cannot catch: the SAME transform on a differently
+    drafted decode is a different image. Documents why the worker may only ship a view
+    when its decode was drafted at 384 (measured: 224-first differs by up to 33/255)."""
+    with Image.open(photo) as im:
+        ref = nudity.make_view(im)
+    with Image.open(photo) as im:
+        im.draft("RGB", (224, 224))          # a 224 backend's decode
+        wrong = nudity.make_view(im)
+    assert not np.array_equal(ref, wrong), "draft scale no longer affects the view — re-check the contract"
+    with Image.open(photo) as im:
+        im.draft("RGB", (384, 384))          # a 384 backend's decode — the allowed case
+        right = nudity.make_view(im)
+    assert np.array_equal(ref, right)
+
+
+@needs_head
+def test_an_offered_view_is_used_and_matches_the_reopen_path(photo):
+    """The whole point: taking the offered view must not change a single score."""
+    h = nudity.load_nudity_head({"intra_op": 1})
+    ids = [{"path": str(photo)}]
+    with Image.open(photo) as im:
+        view = nudity.make_view(im)[None]
+    viaview = h.score(np.zeros((1, 512), np.float32), None, ids, views={nudity.VIEW_KEY: view})
+    reopen = h.score(np.zeros((1, 512), np.float32), None, ids)
+    assert viaview[0]["p"] == reopen[0]["p"] and viaview[0]["tier"] == reopen[0]["tier"]
+
+
+@needs_head
+def test_a_malformed_view_falls_back_instead_of_being_fed_to_the_model(photo):
+    h = nudity.load_nudity_head({"intra_op": 1})
+    ids = [{"path": str(photo)}]
+    good = h.score(np.zeros((1, 512), np.float32), None, ids)[0]
+    for bad in (np.zeros((1, 224, 224, 3), np.uint8),      # wrong geometry
+                np.zeros((2, 384, 384, 3), np.uint8),      # wrong batch length
+                np.zeros((1, 384, 384, 3), np.float32)):   # wrong dtype
+        f = h.score(np.zeros((1, 512), np.float32), None, ids, views={nudity.VIEW_KEY: bad})[0]
+        assert f["p"] == good["p"], f"malformed view {bad.shape}/{bad.dtype} was not rejected"
+    # an unrelated key is simply ignored
+    f = h.score(np.zeros((1, 512), np.float32), None, ids, views={"something-else": None})[0]
+    assert f["p"] == good["p"]
+
+
+@needs_head
+def test_score_still_works_when_the_caller_passes_no_views_at_all(photo):
+    """b-engine's current 3-positional-arg call site must keep working unchanged."""
+    h = nudity.load_nudity_head({"intra_op": 1})
+    assert h.score(np.zeros((1, 512), np.float32), None, [{"path": str(photo)}])[0]["category"] == "nudity"
+
+
 @needs_head
 def test_the_dispatcher_finds_this_track():
     heads = load_heads({"intra_op": 1})
