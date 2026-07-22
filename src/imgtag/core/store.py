@@ -242,6 +242,21 @@ def _derive_for_track(col, cfg: dict) -> list[str]:
     s = np.asarray(col, np.float32)
     if cfg.get("scorer") == "margin_arbitrated" or cfg.get("col_roles") == ["margin", "margin_review"]:
         return derive_tiers(s, cfg)  # arbitrated branch lives inside derive_tiers
+    roles = cfg.get("col_roles") or []
+    if s.ndim == 2 and roles and all(str(r).startswith("margin_") for r in roles):
+        # PER-TIER unfitted margins -> the ONE shared derivation (b-daemon owns it);
+        # lazy import because search imports store (no module-level cycle). Byte-identical
+        # to the reader by construction — both call this exact function.
+        from .search import derive_unfitted
+
+        margins = {r[len("margin_"):]: s[:, i] for i, r in enumerate(roles)}
+        res = derive_unfitted(margins)
+        masks, order = res["is"], ("alert", "violation", "review", "match")
+        out = []
+        for i in range(s.shape[0]):
+            fired = [t for t in res["tiers"] if masks[t][i]]
+            out.append(min(fired, key=lambda t: order.index(t) if t in order else 99) if fired else "none")
+        return out
     if cfg.get("scorer") == "margin" and cfg.get("calibration") != "fitted":
         n = s.shape[0] if s.ndim else 1
         return ["pending"] * n  # fail-open: fires nothing; the reader's current-scan is authoritative

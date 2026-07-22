@@ -399,3 +399,28 @@ def test_tier_margin_none_coalesces_to_nested():
             "tier_margin": None, "arbitrated_storage": {"tier_margin": 0.1}}
     # margin 0.30 vs margin_review 0.25: needs tier_margin 0.1 to demote (0.30 < 0.35)
     assert store.derive_tiers(np.array([[0.30, 0.25]], np.float32), spec) == ["review"]
+
+
+def test_per_tier_margins_go_through_shared_derive_unfitted():
+    """When a track stores PER-TIER margin columns, store-side derivation is the SAME
+    function as b-daemon's reader (search.derive_unfitted) — byte-identical by construction,
+    the permanent end of the tier split-brain. Proven both firing and vs a direct call."""
+    import numpy as np
+
+    from imgtag.core.search import derive_unfitted
+
+    rng = np.random.default_rng(0)
+    n = 40
+    mv = rng.normal(0.0, 0.01, n).astype(np.float32)
+    mv[0] = 0.6  # a clear violation outlier: high z AND above the abs-margin floor
+    mr = rng.normal(0.0, 0.01, n).astype(np.float32)
+    mr[1] = 0.6  # a clear review outlier
+    col = np.stack([mv, mr], 1)
+    cfg = {"col_roles": ["margin_violation", "margin_review"]}
+
+    got = store._derive_for_track(col, cfg)
+    res = derive_unfitted({"violation": mv, "review": mr})
+    ref = [next((t for t in res["tiers"] if res["is"][t][i]), "none") for i in range(n)]
+    assert got == ref, "store-side per-tier derive must equal derive_unfitted exactly"
+    assert got[0] == "violation" and got[1] == "review"       # it actually fires
+    assert got.count("none") == n - 2                          # and nothing else does
