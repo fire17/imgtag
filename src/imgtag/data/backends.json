@@ -130,18 +130,47 @@
     "subdir": "openclip-vitb32",
     "vision": {
       "fp32": "vision_model.onnx",
-      "int8": "vision_model_int8.onnx"
+      "int8": "vision_model_quantized.onnx"
     },
     "text": {
       "fp32": "text_model.onnx",
-      "int8": "text_model_int8.onnx"
+      "int8": "text_model_quantized.onnx"
     },
     "text_precision": "int8",
     "urls": {
       "vision_model.onnx": "https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/main/onnx/vision_model.onnx",
-      "vision_model_int8.onnx": "https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/main/onnx/vision_model_quantized.onnx",
+      "vision_model_quantized.onnx": "https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/main/onnx/vision_model_quantized.onnx",
       "text_model.onnx": "https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/main/onnx/text_model.onnx",
-      "text_model_int8.onnx": "https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/main/onnx/text_model_quantized.onnx"
+      "text_model_quantized.onnx": "https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/main/onnx/text_model_quantized.onnx"
     }
+  },
+  "siglip-base-224": {
+    "dim": 768,
+    "size": 224,
+    "ctx": 64,
+    "tokenizer": "sentencepiece-siglip",
+    "mean": [
+      0.5,
+      0.5,
+      0.5
+    ],
+    "std": [
+      0.5,
+      0.5,
+      0.5
+    ],
+    "resample": "BICUBIC",
+    "resize_mode": "squash",
+    "source": "models/siglip-base/preprocessor_config.json (fetched by l-logistics 2026-07-22)",
+    "subdir": "siglip-base",
+    "vision": {
+      "fp32": "vision_model.onnx",
+      "int8": "vision_model_quantized.onnx"
+    },
+    "text": {
+      "fp32": "text_model.onnx",
+      "int8": "text_model_quantized.onnx"
+    },
+    "text_precision": "int8"
   }
 }

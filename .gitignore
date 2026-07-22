@@ -10,3 +10,5 @@ models/**/*.bin
 models/**/tokenizer.json
 /data/
 .scratch/
+models/**/*.sha256
+models/*.sha256

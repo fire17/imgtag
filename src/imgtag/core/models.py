@@ -241,9 +241,15 @@ class ModelBackend:
             self._vin = i.name
             self._vout = _embed_output(self._vs)
             self._fixed_batch = i.shape[0] if isinstance(i.shape[0], int) else None
-            got = next(o.shape[-1] for o in self._vs.get_outputs() if o.name == self._vout)
-            if isinstance(got, int) and got != self.dim:  # the graph wins over the config
-                self.dim = got
+            out = next(o for o in self._vs.get_outputs() if o.name == self._vout)
+            if len(out.shape) != 2:  # never index a token grid as if it were an embedding
+                raise ModelUnavailableError(
+                    f"{name}: {path.name} exposes no pooled embedding output "
+                    f"(best was {out.name} with shape {out.shape}) — export or fetch a graph "
+                    f"with image_embeds/pooler_output"
+                )
+            if isinstance(out.shape[-1], int) and out.shape[-1] != self.dim:  # graph beats config
+                self.dim = out.shape[-1]
         self._ts = None
         self._tok = None
 

@@ -31,6 +31,7 @@ from .store import Writer, open_snapshot
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tif", ".tiff", ".heic", ".heif"}
 JPEG_EXTS = {".jpg", ".jpeg"}
+HEIC_EXTS = {".heic", ".heif"}
 MAX_PIXELS = 80_000_000  # B21: the decompression bomb is refused by a pixel cap, not by OOM
 FILE_TIMEOUT_S = 5  # B21: every file resolved or skipped within 5s
 
@@ -76,6 +77,13 @@ def _worker(task_q, ready_q, free_q, shm_name, size, squash, resample_name, sem,
 
     _polite(nice_level)
     Image.MAX_IMAGE_PIXELS = MAX_PIXELS
+    try:  # ADR-7: HEIC is an OPTIONAL extra, never a silent gap in the index
+        import pillow_heif
+
+        pillow_heif.register_heif_opener()
+        heic_ok = True
+    except ImportError:
+        heic_ok = False
     resample = getattr(Image.Resampling, resample_name)
     be = load_backend(*worker_be) if worker_be else None
     shm = slab = None
@@ -91,9 +99,12 @@ def _worker(task_q, ready_q, free_q, shm_name, size, squash, resample_name, sem,
             if path is None:
                 return
             p = Path(path)
-            heavy = p.suffix.lower() not in JPEG_EXTS  # PNG/HEIC full decodes are the RAM term
+            suffix = p.suffix.lower()
+            heavy = suffix not in JPEG_EXTS  # PNG/HEIC full decodes are the RAM term
             slot = None
             try:
+                if suffix in HEIC_EXTS and not heic_ok:
+                    raise RuntimeError("HEIC support is an optional extra — install `imgtag[heic]` (pillow-heif)")
                 if hasattr(signal, "SIGALRM"):
                     signal.alarm(FILE_TIMEOUT_S)
                 t_dec = time.perf_counter()
@@ -142,7 +153,8 @@ def _worker(task_q, ready_q, free_q, shm_name, size, squash, resample_name, sem,
             except BaseException as e:  # never kill the run for one bad file (B21)
                 if slot is not None:
                     free_q.put(slot)
-                ready_q.put({"error": f"{type(e).__name__}: {e}"[:200], "path": str(p), "pid": os.getpid()})
+                ready_q.put({"error": f"{type(e).__name__}: {e}"[:200].replace(str(p), p.name),
+                             "path": str(p), "pid": os.getpid()})
             finally:
                 if hasattr(signal, "SIGALRM"):
                     signal.alarm(0)
