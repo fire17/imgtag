@@ -51,6 +51,25 @@ NSFW_INDEX = 0  # config.json label_names == ["NSFW", "SFW"] — NOT alphabetica
 TAU_VIOLATION = 0.50
 TAU_REVIEW = 0.10
 
+#: CONTENT-FREE GUARD. Measured 2026-07-22: on content-free input this model degenerates
+#: to a COLOUR prior — a solid flesh tone filling the frame scores p=0.5498 and a
+#: flesh-toned linear gradient p=0.7612, i.e. VIOLATION tier from an image containing no
+#: subject at all. Reproduced identically in torch, and our preprocessed tensor matches
+#: timm's own transform bit-for-bit, so this is the model's out-of-distribution behaviour,
+#: not a bug on our side (research/track-nudity.md §9).
+#:
+#: Structure = mean |discrete Laplacian| of the preprocessed frame. Second-order on
+#: purpose: a solid colour AND a linear gradient both have zero second derivative, while
+#: every photograph has texture. Measured over 1,826 real photographs: min **1.171**,
+#: p0.1 1.413, p50 14.68. Synthetic probes: solid 0.000 · linear gradient 0.667 ·
+#: flesh gradient 0.637 · radial gradient 0.994 · noise 168. The floor sits in the gap:
+#: 1.006× above the highest synthetic probe, 1.171× below the lowest real photograph.
+#: Below it the record is re-TIERED to "none" and marked ``content_free`` — p is still
+#: reported and nothing is dropped, so an operator can always query what was set aside.
+#: KNOWN RESIDUAL RECALL HOLE: an image deliberately smoothed below this floor is set
+#: aside. Documented in research/track-nudity.md §9 rather than hidden.
+MIN_STRUCTURE = 1.0
+
 #: Zero-shot prompt ensemble — the research BASELINE and the no-artifact fallback, never
 #: the default. Scored against whichever text tower the index used, so it costs one text
 #: batch once and one dot product per image; its recall is UNMEASURABLE here, so anything
@@ -87,6 +106,14 @@ def tier_of(p: float, tau_violation: float = TAU_VIOLATION, tau_review: float = 
     return "violation" if p >= tau_violation else "review" if p >= tau_review else "none"
 
 
+def structure(batch: np.ndarray) -> np.ndarray:
+    """uint8 [n,H,W,3] -> f32 [n] mean |discrete Laplacian|, summed over both axes.
+    Two second-difference passes over 384² — sub-millisecond against a ~90ms forward."""
+    g = np.asarray(batch, np.uint8).astype(np.float32).mean(-1)
+    return (np.abs(g[:, :-2] - 2 * g[:, 1:-1] + g[:, 2:]).mean((1, 2))
+            + np.abs(g[:, :, :-2] - 2 * g[:, :, 1:-1] + g[:, :, 2:]).mean((1, 2)))
+
+
 class NudityHead:
     """The dispatcher-facing head (imgtag.moderation.load_heads contract).
 
@@ -113,6 +140,8 @@ class NudityHead:
                                    or self.calib.get("tau_violation") or TAU_VIOLATION)
         self.tau_review = float(profile.get("nudity_tau_review")
                                 or self.calib.get("tau_review") or TAU_REVIEW)
+        self.min_structure = float(profile.get("nudity_min_structure")
+                                   or self.calib.get("min_structure") or MIN_STRUCTURE)
         #: ADR-14: τ was never fitted against labeled nudity ground truth (EVAL DATA LAW),
         #: so this track never claims enforcement readiness, however good the FP side looks.
         self.calibrated = False
@@ -129,22 +158,29 @@ class NudityHead:
         x = np.ascontiguousarray(x.transpose(0, 3, 1, 2))
         return _softmax(np.asarray(self._s.run(None, {self._in: x})[0], np.float32))[:, NSFW_INDEX]
 
-    def _flag(self, p: float) -> dict:
-        return {"category": CATEGORY, "p": round(float(p), 4), "tier": tier_of(p, self.tau_violation, self.tau_review),
-                "model_id": self.model_id, "calibrated": self.calibrated}
+    def _flags(self, batch: np.ndarray) -> list[dict]:
+        """probs + the content-free guard, in one pass over the batch."""
+        out = []
+        for p, s in zip(self.probs(batch), structure(batch)):
+            f = {"category": CATEGORY, "p": round(float(p), 4),
+                 "tier": tier_of(p, self.tau_violation, self.tau_review),
+                 "model_id": self.model_id, "calibrated": self.calibrated}
+            if s < self.min_structure:  # no photograph of a person lives down here
+                f["tier"], f["content_free"] = "none", True
+            out.append(f)
+        return out
 
     def score(self, embeddings, images=None, ids=None) -> list[dict]:
         n = len(ids) if ids is not None else (len(images) if images is not None else len(embeddings))
         if images is not None and images.shape[1:] == (self.size, self.size, 3) and self.squash:
-            return [self._flag(v) for v in self.probs(np.asarray(images, np.uint8))]
+            return self._flags(np.asarray(images, np.uint8))
         pix, slots = self._reopen(ids, n)
         out = [{"category": CATEGORY, "p": 0.0, "tier": "none", "model_id": self.model_id,
                 "calibrated": self.calibrated, "unreadable": True} for _ in range(n)]
         if pix is None:
             return out
-        p = self.probs(pix)
-        for value, i in zip(p, slots):
-            out[i] = self._flag(value)
+        for f, i in zip(self._flags(pix), slots):
+            out[i] = f
         return out
 
     def _reopen(self, ids, n) -> tuple[np.ndarray | None, list[int]]:
@@ -167,7 +203,7 @@ class NudityHead:
         """Convenience path for callers holding PIL images (tests, CLI one-offs)."""
         if not images:
             return []
-        return [self._flag(v) for v in self.probs(np.stack([self.preprocess(im) for im in images]))]
+        return self._flags(np.stack([self.preprocess(im) for im in images]))
 
 
 class ZeroShotNudityHead:

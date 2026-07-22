@@ -34,6 +34,8 @@ sys.path.insert(0, str(ROOT / "src"))
 
 HARD = ["bikini", "swimwear", "lingerie", "underwear", "yoga", "dance", "sculpture",
         "portrait", "beach", "child", "baby", "shower", "bath", "tattoo", "muscle"]
+#: ADR-14's REQUIRED negative: non-person figures must never flag.
+FIGURES = ["mannequin", "statue", "doll", "figurine", "marble", "torso"]
 EASY = ["landscape", "architecture", "food", "car"]
 CAP = 200  # per-slice cap keeps the sweep honest about slice imbalance and quick
 
@@ -50,7 +52,7 @@ def unsplash_index() -> dict[str, Path]:
 
 def build_slices(rng: random.Random) -> dict[str, list[Path]]:
     have = unsplash_index()
-    want = set(HARD) | set(EASY)
+    want = set(HARD) | set(EASY) | set(FIGURES)
     kw: dict[str, list[str]] = defaultdict(list)
     with open(ROOT / "data/unsplash/keywords.tsv000", encoding="utf8") as fh:
         for row in csv.DictReader(fh, delimiter="\t"):
@@ -125,16 +127,52 @@ def run_zeroshot(slices: dict[str, list[Path]], backend_name: str) -> dict[str, 
     return out
 
 
+def negative_control(intra: int) -> int:
+    """PERMANENT negative control (team-lead ruling 2026-07-22): content-free input must
+    never reach the violation tier, and solid colours/gradients must not flag at all."""
+    from imgtag.moderation.nudity import load_nudity_head, structure
+
+    h = load_nudity_head({"intra_op": intra})
+    rng = np.random.default_rng(0)
+    g = np.tile(np.linspace(0, 255, 384, dtype=np.uint8)[None, :, None], (384, 1, 3))
+    probes = {
+        "solid-black": np.zeros((384, 384, 3), np.uint8),
+        "solid-white": np.full((384, 384, 3), 255, np.uint8),
+        "solid-flesh": np.full((384, 384, 3), (222, 180, 150), np.uint8),
+        "solid-worst": np.full((384, 384, 3), (255, 192, 255), np.uint8),
+        "gradient": g,
+        "gradient-flesh": np.clip(g * 0.6 + np.array([120, 70, 50]), 0, 255).astype(np.uint8),
+        "gradient-radial": (np.hypot(*(np.indices((384, 384)) - 192)) / 272 * 255).astype(np.uint8)[:, :, None].repeat(3, 2),
+        "noise-uniform": rng.integers(0, 256, (384, 384, 3), dtype=np.uint8),
+        "noise-gauss": np.clip(rng.normal(128, 30, (384, 384, 3)), 0, 255).astype(np.uint8),
+    }
+    batch = np.stack(list(probes.values()))
+    flags, st, bad = h._flags(batch), structure(batch), 0
+    print("\nNEGATIVE CONTROL (content-free probes)")
+    for name, f, s_ in zip(probes, flags, st):
+        note = " content_free" if f.get("content_free") else ""
+        print(f"  {name:16s} raw p={f['p']:.4f} structure={s_:7.3f} -> {f['tier']}{note}")
+        if f["tier"] == "violation":
+            bad += 1
+    print(f"  violation-tier leaks: {bad} (must be 0)")
+    return bad
+
+
 def sweep(scores: dict[str, np.ndarray], taus: list[float]) -> None:
     allv = np.concatenate([v for v in scores.values() if len(v)])
     hard = np.concatenate([v for k, v in scores.items() if k in HARD and len(v)])
     print(f"\nFLAG RATE vs threshold (safe corpus only — every flag here is a FALSE POSITIVE\n"
           f"except in the swimwear/lingerie slices, where a strict site rule may call some real):")
     print(f"{'tau':>6} {'all':>8} {'hard':>8}  " + "  ".join(f"{k[:9]:>9}" for k in scores))
+    figs = [v for k, v in scores.items() if k in FIGURES and len(v)]
+    figs = np.concatenate(figs) if figs else np.zeros(0, np.float32)
     for t in taus:
         row = f"{t:>6.2f} {100*(allv>=t).mean():>7.2f}% {100*(hard>=t).mean():>7.2f}%  "
         row += "  ".join(f"{100*(v>=t).mean():>8.2f}%" for v in scores.values())
         print(row)
+    if len(figs):  # ADR-14's required negative, called out on its own line
+        print("\nnon-person figures (mannequin/statue/doll/figurine/marble/torso), n=%d:" % len(figs)
+              + "  " + "  ".join(f"tau {t}: {100*(figs>=t).mean():.2f}%" for t in (0.10, 0.30, 0.50)))
 
 
 def main() -> int:
@@ -159,6 +197,9 @@ def main() -> int:
     if a.zeroshot:
         zs = run_zeroshot(slices, a.backend)
         sweep(zs, [0.0, 0.01, 0.02, 0.03, 0.05, 0.08])
+    if not a.skip_onnx and negative_control(a.intra):
+        print("NEGATIVE CONTROL FAILED", file=sys.stderr)
+        return 1
     if a.json:
         a.json.write_text(json.dumps({k: v.tolist() for k, v in scores.items()}))
     return 0

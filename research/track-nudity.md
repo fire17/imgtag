@@ -57,7 +57,7 @@ LAW forbids fetching positives — can never be honestly calibrated on this mach
   flat colour images score low, which is exactly what fails if this flips.
 - **No new runtime dependency.** onnxruntime + numpy + Pillow, all already in ADR-7.
 
-Code: `src/imgtag/moderation/nudity.py` · tests: `tests/test_nudity.py` (12, all green).
+Code: `src/imgtag/moderation/nudity.py` · tests: `tests/test_nudity.py` (15, all green).
 
 ---
 
@@ -93,12 +93,30 @@ by design — slices are views, not a partition). Over slice memberships the τ=
 (τ=0.05 sits *inside* the SFW mass — the whole safe corpus piles up at ~0.053. It is in
 the table only to show where the floor is; it is not a candidate operating point.)
 
-**Two ADR-14 predictions confirmed on our own data:**
-1. *Non-person nude figures (statues/mannequins) must not flag.* The **sculpture** slice
-   (n=88, classical statuary) tops out at **0.117** — below every candidate τ. The head
-   satisfies this boundary for free.
-2. *Landscape/architecture/car must be silent.* **landscape flags 0.00% at every τ ≥ 0.10**;
-   car 0.51%, architecture 1.00%.
+*Landscape/architecture/car must be silent:* **landscape flags 0.00% at every τ ≥ 0.10**;
+car 0.51%, architecture 1.00%.
+
+### ADR-14's required negative: non-person figures (measured)
+
+The team-lead named this "your detector's hardest required negative", after the v0
+prompt-set scorer flagged **a nude mannequin at p=0.957**. Unsplash keyword slices,
+scored by this head:
+
+| slice | n | mean | max | ≥ 0.10 (review) | ≥ 0.50 (violation) |
+|---|---|---|---|---|---|
+| **mannequin** | 26 | 0.0918 | **0.4515** | 4 | **0** |
+| statue | 68 | 0.0559 | 0.1172 | 2 | **0** |
+| sculpture | 88 | 0.0559 | 0.1172 | 2 | **0** |
+| marble | 48 | 0.0620 | 0.2108 | 2 | **0** |
+| figurine | 55 | 0.0628 | 0.3563 | 3 | **0** |
+| doll | 19 | 0.0722 | 0.3563 | 1 | **0** |
+| torso | 10 | 0.1226 | 0.4515 | 2 | **0** |
+| **union** | **314** | 0.0641 | **0.4515** | 16 (5.1%) | **0 (0.00%)** |
+
+**Zero violation-tier flags across all 314 non-person figures**, worst case 0.4515 — the
+v0 scorer's 0.957 mannequin becomes at most a review-tier hit here. The residual 5.1%
+review rate on this class is the honest cost of a recall-first review band; it is the
+class most worth re-checking if the operator ever supplies labeled data.
 
 ### The false-positive tail, characterised
 
@@ -218,7 +236,10 @@ the price of an instrument that can actually answer the question**.
 - `NudityHead.wants_images = True`.
 - `NudityHead.score(embeddings, images, ids) -> list[dict]`, one dict per record:
   `{"category": "nudity", "p": float, "tier": "violation"|"review"|"none",
-    "model_id": "marqo-nsfw-384-fp32", "calibrated": False}`.
+    "model_id": "marqo-nsfw-384-fp32", "calibrated": False}`, plus `"content_free": True`
+  on records the §9 guard set aside and `"unreadable": True` on files that would not open.
+  Both are additive markers — `category`/`p`/`tier` are always present, so the API, the UI
+  and the counts need no change to consume them.
   `embeddings` are **ignored** — this track answers from pixels, which is why it can answer.
 - **Pixel geometry — the one thing to get right.** The coordinator's slab carries the
   *backend's* geometry (squashed, sometimes 224²). That is a domain shift this model was
@@ -254,7 +275,13 @@ review-tier hits — emitting it would be worse than useless).
 - ✅ False-positive behaviour on 1,826 safe images — measured, first-party, reproducible.
 - ✅ ADR-14 statue/mannequin and landscape boundaries — measured, satisfied.
 - ✅ Zero-shot baseline is unfit for this category — measured, first-party.
-- ✅ 12 tests green (`tests/test_nudity.py`), incl. the label-order and geometry traps.
+- ✅ 15 tests green (`tests/test_nudity.py`), incl. the label-order and geometry traps and
+  the permanent content-free negative control.
+- ✅ ADR-14's required negative measured: **0 violation flags across 314 non-person figures**
+  (mannequin/statue/doll/figurine/marble/torso), worst case 0.4515 — vs the v0 scorer's
+  0.957 mannequin.
+- ✅ Preprocessing proven correct against timm's own transform (bit-identical tensors);
+  the solid-colour FP is the model's OOD colour prior, not our bug (§9).
 - ❌ **True-positive recall — NOT verified here.** Published metric only, cited above.
 - ❌ **τ not fitted on labeled ground truth** — `calibrated: False`, `enforcement_ready` false.
 - ⚠️ **Latency UNRELIABLE** (load 41.5 / 16 cores). Re-measure idle, then on the 🐧 target.
@@ -274,3 +301,77 @@ review-tier hits — emitting it would be worse than useless).
 supply a *labeled, lawfully-held* in-house sample on the target machine, fit τ there and only
 then flip `enforcement_ready`; (3) revisit Freepik/EVA-02 (severity levels map onto ADR-14
 tiers directly) once target-host throughput is known.
+
+---
+
+## 9. The out-of-distribution colour prior, and the content-free guard
+
+**Reported by b-engine:** 6 synthetic solid-colour JPEGs wired through this head produced
+4 nudity flags at p = 0.34–0.41. Investigated, reproduced, and worse than reported.
+
+**Measured.** Sweeping the RGB cube (125 solid colours, 384², n=125):
+mean **0.273**, 99% score ≥ 0.10, 4% score ≥ 0.50. Worst cases:
+
+| probe | raw p |
+|---|---|
+| solid flesh tone (222,180,150) | **0.5498** — violation tier, from an empty frame |
+| solid (255,192,255) | 0.5480 |
+| **flesh-toned linear gradient** | **0.7612** |
+| solid black | 0.3590 · solid white 0.2040 · solid grey 0.2100 |
+| solid green (0,255,0) | 0.0840 (the floor) |
+| uniform noise | 0.1259 · gaussian noise 0.0927 · checkerboard 0.0553 |
+
+The ordering is by **colour**, not content: pinks and flesh tones at the top, greens and
+blues at the bottom. On content-free input the model degenerates to a colour prior.
+
+**It is not our preprocessing** — this was the prime suspect and it was eliminated by
+direct comparison against timm's own transform in the export venv:
+
+| image | max &#124;our tensor − timm tensor&#124; | p (ours) | p (timm tensor → ONNX) | p (timm tensor → torch) |
+|---|---|---|---|---|
+| coco 000000185599 | **0.0000** | 0.6763 | 0.6763 | 0.6763 |
+| solid flesh 512² | **0.0000** | 0.5498 | 0.5498 | 0.5498 |
+| coco 000000463618 | 1.051 | 0.8247 | 0.8257 | 0.8257 |
+| unsplash 5L47XYRvGOo | 0.235 | 0.8019 | 0.8168 | 0.8168 |
+
+Bit-identical where the image needs no EXIF rotation and no `draft()` rescale; where
+`draft()` (the engine's partial-JPEG-decode speed win) does apply, it costs **≤ 0.015 p**.
+The published 98.56% simply never covered content-free input — this is the model's own
+out-of-distribution behaviour.
+
+**The guard.** `structure()` = mean |discrete Laplacian| of the preprocessed frame.
+Second-order deliberately: a solid colour *and* a linear gradient both have zero second
+derivative, while every photograph has texture.
+
+| | measured |
+|---|---|
+| 1,826 real photographs | min **1.171** · p0.1 1.413 · p1 2.396 · p50 14.68 |
+| solid colour | 0.000 |
+| linear gradient | 0.667 · flesh gradient 0.637 · radial gradient 0.994 |
+| white noise | 168.2 |
+
+`MIN_STRUCTURE = 1.0` sits in the gap — above every synthetic probe, **1.171× below the
+lowest real photograph in the corpus**. Below the floor a record is re-**tiered** to
+`none` and marked `content_free: true`; **p is still reported and nothing is dropped**, so
+an operator can always query what was set aside. **Zero of the 1,826 real images are
+affected.** Cost is two second-difference passes over 384² — sub-millisecond against a
+~90ms forward. Overridable via `profile["nudity_min_structure"]`.
+
+**Two honest limits, neither hidden:**
+- **White noise is NOT claimed by the guard** — it has genuine spatial structure — and the
+  model puts it at p≈0.16, i.e. *review* tier. That is by design: review is a human queue,
+  and moving τ_review above 0.16 to win against an input no camera produces would cost
+  real recall on the borderline cases the tier exists for. The permanent negative-control
+  test asserts the hard line (**nothing content-free may ever reach violation**) and full
+  silence on the solid/gradient class that actually breached it.
+- **Residual recall hole:** an image deliberately smoothed below structure 1.0 is set
+  aside. Bounded by the fact that such an image carries almost no visual information —
+  and it is recorded, not deleted.
+
+**A note on the review tier and swimwear.** ADR-14 puts swimwear/lingerie at review tier.
+This head is measured *not* to be a good swimwear detector — Marqo trained swimwear as SFW,
+so bikini tops out at 0.28 and the whole class sits in the 0.05–0.15 band. The tag path
+(b-daemon's `Searcher.track_scores`, whose vocabulary *does* carry swimsuit/bra/underwear)
+is the better instrument for that tier, and the two compose: **violation from this head,
+swimwear-review from the tag path**. This head's own review band should be read as
+"possible nudity, look at it", not as "swimwear".

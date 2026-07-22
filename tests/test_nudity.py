@@ -143,6 +143,76 @@ def test_slab_pixels_are_only_used_when_their_geometry_matches_ours():
     assert all(f.get("unreadable") for f in out)
 
 
+# ---------------------------------------------------------------- negative control
+
+
+def _probe_batch():
+    """Content-free probes. The model scores a solid flesh tone at p=0.55 and a flesh
+    gradient at 0.76 (its own OOD behaviour, reproduced in torch) — the guard, not the
+    threshold, is what must stop them."""
+    rng = np.random.default_rng(0)
+    g = np.tile(np.linspace(0, 255, 384, dtype=np.uint8)[None, :, None], (384, 1, 3))
+    return {
+        "black": np.zeros((384, 384, 3), np.uint8),
+        "white": np.full((384, 384, 3), 255, np.uint8),
+        "grey": np.full((384, 384, 3), 128, np.uint8),
+        "flesh": np.full((384, 384, 3), (222, 180, 150), np.uint8),
+        "worst-solid": np.full((384, 384, 3), (255, 192, 255), np.uint8),
+        "gradient": g,
+        "flesh-gradient": np.clip(g * 0.6 + np.array([120, 70, 50]), 0, 255).astype(np.uint8),
+        "noise": rng.integers(0, 256, (384, 384, 3), dtype=np.uint8),
+    }
+
+
+def test_structure_separates_synthetic_from_photographs():
+    p = _probe_batch()
+    s = dict(zip(p, nudity.structure(np.stack(list(p.values())))))
+    assert s["black"] == s["white"] == s["grey"] == s["flesh"] == 0.0
+    # second-order on purpose: a LINEAR gradient is as content-free as a solid colour
+    assert s["gradient"] < nudity.MIN_STRUCTURE
+    assert s["flesh-gradient"] < nudity.MIN_STRUCTURE
+    assert s["noise"] > 50  # unstructured but far from content-free
+    # the floor sits below the minimum measured over 1,826 real photographs (1.171)
+    assert nudity.MIN_STRUCTURE < 1.171
+
+
+@needs_head
+def test_negative_control_content_free_images_never_flag():
+    """PERMANENT negative control (team-lead 2026-07-22): flat colours, gradients and
+    noise must produce ZERO flags at the operating point."""
+    h = nudity.load_nudity_head({"intra_op": 1})
+    probes = _probe_batch()
+    by = dict(zip(probes, h._flags(np.stack(list(probes.values())))))
+
+    # NOTHING content-free may ever reach the violation tier — this is the hard line.
+    for name, f in by.items():
+        assert f["tier"] != "violation", f"{name} reached violation at p={f['p']}"
+
+    # Solid colours and gradients — the class that DID reach violation on raw p
+    # (flesh 0.55, flesh-gradient 0.76) — are silenced outright, and say why.
+    for name in ("black", "white", "grey", "flesh", "worst-solid", "gradient", "flesh-gradient"):
+        assert by[name]["tier"] == "none", f"{name} flagged {by[name]['tier']} at p={by[name]['p']}"
+    assert by["flesh"]["content_free"] is True and by["flesh"]["p"] > 0.5
+    assert by["flesh-gradient"]["content_free"] is True and by["flesh-gradient"]["p"] > 0.5
+
+    # White noise is the documented exception: it has genuine spatial structure, so the
+    # guard correctly does not claim it, and the model puts it at ~0.16 — review tier, by
+    # design (review is a human queue). Distorting τ to chase an input no camera produces
+    # would cost real recall. research/track-nudity.md §9.
+    assert "content_free" not in by["noise"]
+    assert by["noise"]["p"] < h.tau_violation
+
+
+@needs_head
+def test_a_real_photograph_is_never_marked_content_free(tmp_path):
+    h = nudity.load_nudity_head({"intra_op": 1})
+    rng = np.random.default_rng(1)
+    p = tmp_path / "photo.jpg"
+    Image.fromarray(rng.integers(60, 200, (300, 400, 3), dtype=np.uint8)).save(p, quality=92)
+    f = h.score(np.zeros((1, 512), np.float32), None, [{"path": str(p)}])[0]
+    assert "content_free" not in f
+
+
 @needs_head
 def test_the_dispatcher_finds_this_track():
     heads = load_heads({"intra_op": 1})
