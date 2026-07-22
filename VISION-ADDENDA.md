@@ -44,3 +44,7 @@ very important - make sure this is true and to also right it in the project's di
 ## 2026-07-22 ~13:28Z — people/face counting track (verbatim)
 
 i want track to be able to categorize images if they have 1 person in them (even if its their back with no face), more then one person, 1 visible face - and more than one visible face (even at angles for any)
+
+## 2026-07-22 ~13:29Z — violence/abuse track (verbatim)
+
+and one track for general violence or abuse
