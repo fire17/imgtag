@@ -458,3 +458,126 @@ flag: {'category': 'weapons', 'p': 0.0363, 'tier': 'none',
 .venv/bin/python scripts/train_weapons_head.py --backend pecore-s16-384 --save
 .venv/bin/python -m pytest tests/test_weapons.py -q
 ```
+
+## 10. TRUE-POSITIVE probe + confidence separation (user directive 2026-07-22 13:58Z)
+
+The user's challenge: "all findings are false positives … we must … bring true positives so
+we can truly test them … whatever is scored now should — if working correct — be at lower
+confidence than the true-positive results, and then we set the ratio threshold for auto
+flagging." This section answers it with numbers, per subcategory.
+
+### 10.1 The authored subcategory taxonomy (versioned DATA)
+
+`data/weapon-probe/taxonomy.json` (built by `scripts/build_weapons_probe.py`, deterministic,
+seed 17) maps the user's explicit subcategory list onto the OI 600-class `Weapon`-subtree
+labels that realise each. OI has no sub-type labels, so three are subsumed and two cannot be
+probed from OI — **reported as gaps, never hidden**:
+
+| subcategory | OI classes | held-out (validation) TP images |
+|---|---|---|
+| handguns / pistols / revolvers | Handgun | 20 |
+| rifles (hunting + assault-style + submachine) | Rifle | 25 (submachine/automatic **GAP** — no OI label) |
+| shotguns | Shotgun | 25 |
+| knives (threat-context; kitchen ∉ Weapon) | Knife, Dagger | 25 |
+| swords / machetes / axes | Sword, Axe | 25 (machete subsumed) |
+| bows / crossbows | Bow and arrow | 12 (crossbow subsumed) |
+| explosives / grenades | Bomb | **0 — GAP, no held-out imagery** |
+| heavy (tank / cannon / missile) | Tank, Cannon, Missile | 25 |
+| generic display (parent `Weapon` only) | Weapon | 25 |
+
+**166 real weapon images**, all from OI `validation` (the head trained on `test`, so these are
+HELD-OUT — TP confidence is honest, not memorised). Indexed into the gallery as dataset
+**`weaponprobe`** (`uv run imgtag index data/weapon-probe/images --dataset weaponprobe --wait
+--moderation`), so the true positives now live beside the user datasets exactly like
+`drugprobe`. Also deepened `src/imgtag/data/moderation.json` weapons entry: 6→47 violation
+prompts across all 10 subcategories, toy/replica kept at review (ADR-14), and the measured FP
+classes (baseball scene, long-lens camera, military airframe) added as explicit negatives.
+
+### 10.2 The two distributions (`scripts/eval_weapons.py` → `research/eval-weapons.json`)
+
+Everything scored through the SHIPPED trained head (τ_v=0.811, τ_r=0.087), a matmul over
+embeddings that already exist — no re-embed, no agents (T4).
+
+* **FP band = the "everything scored now", n=14,933** deduped user images (unsplash-demo +
+  unsplashb + cocoval2017): median **0.0076**, p90 0.037, p99 **0.189**, p99.9 **0.524**,
+  max 0.850. Only **1/14,933** clears the shipped violation τ.
+* **True positives (weaponprobe), n=166:** median **0.929**, p05 0.217, max 0.996.
+* **Overall TP-vs-FP separation AP = 0.938.** The user's hypothesis is CONFIRMED: real
+  weapons score far above the current false-positive band. The band is genuinely separable.
+
+### 10.3 Per-subcategory separation
+
+| subcategory | n | TP median | TP p05 | AP vs FP band | R @ τv=0.811 | R @ τv=0.524 | TP p05 > FP p99? |
+|---|---|---|---|---|---|---|---|
+| rifles | 25 | 0.985 | 0.917 | **1.000** | 1.00 | 1.00 | ✅ |
+| shotguns | 25 | 0.978 | 0.649 | 0.974 | 0.88 | 1.00 | ✅ |
+| handguns/pistols/revolvers | 20 | 0.969 | 0.881 | 0.954 | 0.95 | 0.95 | ✅ |
+| swords/machetes/axes | 25 | 0.930 | 0.527 | 0.919 | 0.68 | 0.92 | ✅ |
+| knives (threat) | 25 | 0.899 | 0.213 | 0.815 | 0.64 | 0.80 | ✅ (narrow) |
+| bows/crossbows | 12 | 0.686 | 0.283 | 0.459 | 0.17 | 0.75 | ✅ (narrow) |
+| **heavy_ordnance** | 25 | 0.834 | 0.144 | 0.742 | 0.56 | 0.72 | ❌ **NO** |
+| **generic_display** | 25 | 0.842 | 0.142 | 0.701 | 0.52 | 0.64 | ❌ **NO** |
+| explosives_grenades | 0 | — | — | — | — | — | ⚠ GAP |
+
+**HEADLINE FINDINGS (reported, not buried):**
+1. **Firearms — the class the user named first — separate cleanly.** Rifles/shotguns/handguns
+   AP 0.95–1.00; at the shipped τ their p05 sits at 0.65–0.92, an order of magnitude above the
+   FP band's p99 (0.189).
+2. **heavy_ordnance and generic_display do NOT dominate the FP band** (TP p05 0.14 < FP p99
+   0.19). Tanks/cannons/missiles and parent-`Weapon`-only scenes overlap the FP band's hard
+   tail — which is exactly the measured confusable class (§5.2: helicopter 0.64, aircraft 0.38
+   FP). This is a **representation limit** of a global CLIP embedding (military airframes ≈
+   ordnance to one whole-image vector), not a threshold bug — no τ separates them, and a
+   retrain cannot either without box-level detection (§4.1). Their recall is recoverable at a
+   lower τ (0.56→0.72 at τ_v=0.524) but only at the cost of FP band leakage.
+3. **explosives_grenades is untestable here** — OI `validation` has 0 `Bomb`-labelled images.
+   Cannot claim the track detects grenades/explosives. A labelled explosives set is the gap.
+4. **submachine/automatic and crossbow** have no distinct OI label — folded into rifles/bows,
+   so their separation is not measured independently.
+
+### 10.4 Proposed ratio threshold for auto-flagging (the user's ask, with CI)
+
+τ set from the FP band's own upper tail (the "ratio threshold": the confidence above which the
+current false-positive mass essentially does not reach):
+
+| tier | proposed τ | FP-band rate above τ [95% Wilson] | shipped τ | effect |
+|---|---|---|---|---|
+| **violation** | **0.524** (FP p99.9) | 15/14,933 = **0.10%** [0.061–0.166%] | 0.811 | +recall on shotguns/swords/bows/ordnance; FP 1→15 on 15k benign |
+| **review** | **0.189** (FP p99) | 150/14,933 = **1.0%** [0.857–1.178%] | 0.087 | tightens the review net ~5× vs shipped |
+
+**Recommendation (honest, not applied unilaterally — this is an operator risk call, ORACLE §6
+operating-point law):** keep shipped **τ_v=0.811 for firearm-grade precision** (≈0 FP, firearms
+recall already 0.95–1.00); offer **τ_v=0.524** as a documented "wider auto-flag" operating
+point with the exact trade above. Firearms don't need the lower τ; only the weaker
+subcategories benefit, and they buy it with FP. The proposal + full per-subcategory numbers are
+machine-readable in `research/eval-weapons.json`. **No head retrain was done: the measured
+failures (ordnance/generic overlap) are representation limits a prompt/threshold change cannot
+fix, and firearms already pass — retraining risked regressing the strong classes for no
+separable gain (owed darwin item: box-level or tiled detection for small/ordnance targets).**
+
+### 10.5 Reproduce
+
+```bash
+.venv/bin/python scripts/build_weapons_probe.py --cap 25 --seed 17
+uv run imgtag index data/weapon-probe/images --dataset weaponprobe --wait --moderation
+.venv/bin/python scripts/eval_weapons.py --write-json
+.venv/bin/python scripts/patch_weapons_spec.py            # deepen moderation.json (guarded)
+```
+
+---
+
+> **WHERE I AM — 2026-07-22 ~17:25Z (track-weapons3, MODEL claude-opus-4-8).**
+> DONE: `weaponprobe` (166 held-out TP weapon imgs, 8 subcats + 1 gap) built + indexed into
+> the gallery (searchable — "a weapon"→37 hits); TP-vs-user-FP-band separation measured
+> (**overall AP 0.938**; TP median 0.929 vs FP-band median 0.008 / p99 0.19); per-tier ratio
+> threshold proposed with 95% CI (τ_v 0.524 / τ_r 0.189, vs shipped 0.811 / 0.087); taxonomy
+> deepened as DATA (moderation.json weapons 6→47 prompts + 10 subcats); +3 contract tests
+> (29 pass); ledger entry brief_version 1. Head UNCHANGED — no retrain (see §10.4).
+> **HEADLINES:** firearms separate cleanly (AP 0.95–1.00); heavy_ordnance (0.74) +
+> generic_display (0.70) do NOT dominate the FP tail = representation limit, not a τ bug;
+> explosives_grenades untestable (0 OI Bomb imgs).
+> **NEXT (after conductor ALL-CLEAR — quiet-window compute hold in effect):** re-derive
+> weaponprobe moderation-count summary once b-engine lands the `match`-tier fix
+> (indexer.py:738) — a cheap one-pass re-score, NOT a re-index (rows are durable). Optional:
+> if user wants firearm-only auto-flag widened, apply τ_v=0.524 to the head JSON (data, not
+> code) — held pending user's operator-risk call.

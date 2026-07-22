@@ -297,3 +297,60 @@ def test_shipped_head_quality_does_not_regress():
     for firearm in ("Rifle", "Shotgun", "Handgun"):
         assert per_class.get(firearm, 0) >= 0.95, f"{firearm} recall regressed"
     assert per_class.get("Knife", 0) >= 0.80, "knife is the weakest class; floor it"
+
+
+# ── subcategory taxonomy + TP-probe separation (user directive 13:58Z) ────────
+from pathlib import Path  # noqa: E402
+
+_ROOT = Path(__file__).resolve().parents[1]
+
+# The user's explicit subcategory list — the taxonomy MUST cover every one of these.
+_REQUIRED_SUBCATS = {
+    "handguns_pistols_revolvers", "rifles", "shotguns", "knives_threat",
+    "swords_machetes_axes", "bows_crossbows", "explosives_grenades", "heavy_ordnance",
+}
+
+
+def test_probe_taxonomy_covers_the_user_subcategories():
+    """data/weapon-probe/taxonomy.json is versioned DATA and must span the asked-for list."""
+    f = _ROOT / "data" / "weapon-probe" / "taxonomy.json"
+    if not f.is_file():
+        pytest.skip("probe not built (run scripts/build_weapons_probe.py)")
+    tax = json.loads(f.read_text())
+    assert _REQUIRED_SUBCATS <= set(tax["subcategories"]), "taxonomy misses a user subcategory"
+    # every non-gap subcategory lists images; every image maps back to >=1 subcategory
+    gaps = {g["subcategory"] for g in tax.get("gaps", [])}
+    for name, spec in tax["subcategories"].items():
+        assert spec["oi_classes"], f"{name} has no OI class mapping"
+        if name not in gaps:
+            assert spec["n"] == len(spec["images"]) > 0, f"{name} claims images it lacks"
+    for img, subs in tax["image_subcategories"].items():
+        assert subs, f"{img} belongs to no subcategory"
+
+
+def test_moderation_spec_weapons_is_deepened_and_toys_stay_review():
+    """The moderation.json weapons entry carries the subcategory taxonomy as DATA, and
+    ADR-14's toy/replica-is-review boundary is asserted, not assumed."""
+    f = _ROOT / "src" / "imgtag" / "data" / "moderation.json"
+    w = json.loads(f.read_text())["categories"]["weapons"]
+    assert _REQUIRED_SUBCATS <= set(w.get("subcategories", {}))
+    assert w.get("toy_replica_tier") == "review"
+    # every subcategory's prompts are flattened into the violation set (no toy leakage)
+    flat = {p for ps in w["subcategories"].values() for p in ps}
+    assert flat <= set(w["violation"]), "a subcategory prompt is missing from violation"
+    toys = " ".join(w["review"]).lower()
+    assert "toy" in toys and "replica" in toys, "toy/replica must live in review, not violation"
+    assert not any("toy" in p or "replica" in p for p in w["violation"])
+
+
+def test_separation_result_is_ordered_and_honest():
+    """If eval-weapons.json exists, its proposed tiers must be well-ordered and its overall
+    true-positive mass must beat the false-positive band — the whole point of the exercise."""
+    f = _ROOT / "research" / "eval-weapons.json"
+    if not f.is_file():
+        pytest.skip("separation not measured (run scripts/eval_weapons.py --write-json)")
+    r = json.loads(f.read_text())
+    assert 0 < r["proposed"]["tau_review"] < r["proposed"]["tau_violation"] < 1
+    assert r["tp_overall"]["median"] > r["fp_band"]["distribution"]["p99"], \
+        "true positives must out-score the FP band's tail — else the track cannot be trusted"
+    assert r["separation_overall_ap"] >= 0.85, "overall TP-vs-FP separation regressed"

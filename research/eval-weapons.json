@@ -1,0 +1,253 @@
+{
+ "backend": "pecore-s16-384",
+ "shipped": {
+  "tau_violation": 0.8114,
+  "tau_review": 0.0872,
+  "ap_oi_val": 0.8986
+ },
+ "fp_band": {
+  "datasets": "unsplash-demo,unsplashb,cocoval2017",
+  "per_dataset": {
+   "unsplash-demo": {
+    "n": 2000,
+    "ge_shipped_tau_v": 0,
+    "ge_shipped_tau_r": 15
+   },
+   "unsplashb": {
+    "n": 7933,
+    "ge_shipped_tau_v": 0,
+    "ge_shipped_tau_r": 64
+   },
+   "cocoval2017": {
+    "n": 5000,
+    "ge_shipped_tau_v": 1,
+    "ge_shipped_tau_r": 418
+   }
+  },
+  "n_total": 14933,
+  "distribution": {
+   "n": 14933,
+   "min": 0.0005,
+   "p05": 0.002,
+   "p25": 0.0041,
+   "median": 0.0076,
+   "p75": 0.0161,
+   "p90": 0.037,
+   "p99": 0.1891,
+   "p999": 0.524,
+   "max": 0.8504
+  }
+ },
+ "tp_overall": {
+  "n": 166,
+  "min": 0.0464,
+  "p05": 0.217,
+  "p25": 0.7043,
+  "median": 0.9289,
+  "p75": 0.9722,
+  "p90": 0.9905,
+  "p99": 0.9958,
+  "p999": 0.9961,
+  "max": 0.9961
+ },
+ "separation_overall_ap": 0.9379,
+ "proposed": {
+  "tau_violation": 0.524,
+  "tau_violation_fp_rate": "15/14933",
+  "tau_violation_fp_ci95": [
+   0.00061,
+   0.00166
+  ],
+  "tau_review": 0.1891,
+  "tau_review_fp_rate": "150/14933",
+  "tau_review_fp_ci95": [
+   0.00857,
+   0.01178
+  ],
+  "fp_budget_v": 0.001,
+  "fp_budget_r": 0.01
+ },
+ "subcategories": {
+  "handguns_pistols_revolvers": {
+   "n": 20,
+   "tp_distribution": {
+    "n": 20,
+    "min": 0.1482,
+    "p05": 0.881,
+    "p25": 0.9466,
+    "median": 0.9692,
+    "p75": 0.98,
+    "p90": 0.9905,
+    "p99": 0.9912,
+    "p999": 0.9914,
+    "max": 0.9914
+   },
+   "ap_vs_fp_band": 0.9543,
+   "recall_at_shipped_tau_v": 0.95,
+   "recall_at_shipped_tau_r": 1.0,
+   "recall_at_proposed_tau_v": 0.95,
+   "tp_p05_over_fp_p99": true,
+   "separation_margin_median_minus_fp_p99": 0.7801
+  },
+  "rifles": {
+   "n": 25,
+   "tp_distribution": {
+    "n": 25,
+    "min": 0.895,
+    "p05": 0.9173,
+    "p25": 0.9687,
+    "median": 0.9854,
+    "p75": 0.992,
+    "p90": 0.9946,
+    "p99": 0.996,
+    "p999": 0.9961,
+    "max": 0.9961
+   },
+   "ap_vs_fp_band": 1.0,
+   "recall_at_shipped_tau_v": 1.0,
+   "recall_at_shipped_tau_r": 1.0,
+   "recall_at_proposed_tau_v": 1.0,
+   "tp_p05_over_fp_p99": true,
+   "separation_margin_median_minus_fp_p99": 0.7963
+  },
+  "shotguns": {
+   "n": 25,
+   "tp_distribution": {
+    "n": 25,
+    "min": 0.6143,
+    "p05": 0.6488,
+    "p25": 0.9577,
+    "median": 0.9784,
+    "p75": 0.9905,
+    "p90": 0.9937,
+    "p99": 0.9958,
+    "p999": 0.9961,
+    "max": 0.9961
+   },
+   "ap_vs_fp_band": 0.9744,
+   "recall_at_shipped_tau_v": 0.88,
+   "recall_at_shipped_tau_r": 1.0,
+   "recall_at_proposed_tau_v": 1.0,
+   "tp_p05_over_fp_p99": true,
+   "separation_margin_median_minus_fp_p99": 0.7893
+  },
+  "knives_threat": {
+   "n": 25,
+   "tp_distribution": {
+    "n": 25,
+    "min": 0.0709,
+    "p05": 0.2129,
+    "p25": 0.6468,
+    "median": 0.8991,
+    "p75": 0.9339,
+    "p90": 0.9506,
+    "p99": 0.9879,
+    "p999": 0.9933,
+    "max": 0.9939
+   },
+   "ap_vs_fp_band": 0.8148,
+   "recall_at_shipped_tau_v": 0.64,
+   "recall_at_shipped_tau_r": 0.96,
+   "recall_at_proposed_tau_v": 0.8,
+   "tp_p05_over_fp_p99": true,
+   "separation_margin_median_minus_fp_p99": 0.71
+  },
+  "swords_machetes_axes": {
+   "n": 25,
+   "tp_distribution": {
+    "n": 25,
+    "min": 0.4877,
+    "p05": 0.5266,
+    "p25": 0.7398,
+    "median": 0.9297,
+    "p75": 0.9679,
+    "p90": 0.9835,
+    "p99": 0.9946,
+    "p999": 0.9948,
+    "max": 0.9948
+   },
+   "ap_vs_fp_band": 0.9195,
+   "recall_at_shipped_tau_v": 0.68,
+   "recall_at_shipped_tau_r": 1.0,
+   "recall_at_proposed_tau_v": 0.92,
+   "tp_p05_over_fp_p99": true,
+   "separation_margin_median_minus_fp_p99": 0.7406
+  },
+  "bows_crossbows": {
+   "n": 12,
+   "tp_distribution": {
+    "n": 12,
+    "min": 0.1858,
+    "p05": 0.283,
+    "p25": 0.5278,
+    "median": 0.6861,
+    "p75": 0.7256,
+    "p90": 0.837,
+    "p99": 0.8497,
+    "p999": 0.8501,
+    "max": 0.8502
+   },
+   "ap_vs_fp_band": 0.4588,
+   "recall_at_shipped_tau_v": 0.167,
+   "recall_at_shipped_tau_r": 1.0,
+   "recall_at_proposed_tau_v": 0.75,
+   "tp_p05_over_fp_p99": true,
+   "separation_margin_median_minus_fp_p99": 0.497
+  },
+  "explosives_grenades": {
+   "n": 0,
+   "status": "NO PROBE IMAGERY (gap)"
+  },
+  "heavy_ordnance": {
+   "n": 25,
+   "tp_distribution": {
+    "n": 25,
+    "min": 0.0464,
+    "p05": 0.144,
+    "p25": 0.4407,
+    "median": 0.8344,
+    "p75": 0.9001,
+    "p90": 0.931,
+    "p99": 0.9402,
+    "p999": 0.9411,
+    "max": 0.9412
+   },
+   "ap_vs_fp_band": 0.7423,
+   "recall_at_shipped_tau_v": 0.56,
+   "recall_at_shipped_tau_r": 0.96,
+   "recall_at_proposed_tau_v": 0.72,
+   "tp_p05_over_fp_p99": false,
+   "separation_margin_median_minus_fp_p99": 0.6453
+  },
+  "generic_display": {
+   "n": 25,
+   "tp_distribution": {
+    "n": 25,
+    "min": 0.1221,
+    "p05": 0.1423,
+    "p25": 0.3882,
+    "median": 0.8415,
+    "p75": 0.9488,
+    "p90": 0.9693,
+    "p99": 0.9924,
+    "p999": 0.9954,
+    "max": 0.9958
+   },
+   "ap_vs_fp_band": 0.7007,
+   "recall_at_shipped_tau_v": 0.52,
+   "recall_at_shipped_tau_r": 1.0,
+   "recall_at_proposed_tau_v": 0.64,
+   "tp_p05_over_fp_p99": false,
+   "separation_margin_median_minus_fp_p99": 0.6524
+  }
+ },
+ "gaps": [
+  {
+   "subcategory": "explosives_grenades",
+   "oi_classes": [
+    "Bomb"
+   ],
+   "reason": "0 images with these labels in the held-out split"
+  }
+ ]
+}
