@@ -32,3 +32,7 @@ both tiers distinctly.
 ## 2026-07-22 ~13:20Z — safety track: people lying down + danger escalation (verbatim)
 
 make another track to identify people lying down (even if part of their body is obstructed) and even higher flagging if either detecting injury, things broken, distruction distress high stress or anything dangorous - does that makes sense ?
+
+## 2026-07-22 ~13:23Z — sports content track (verbatim)
+
+make another dedicated track to identify all sports related images
