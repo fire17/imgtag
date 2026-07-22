@@ -36,7 +36,13 @@ from .store import (
 
 # -- calibration constants (ADR-3). PROVISIONAL until b-bench's fit lands; every one of
 # them is overridable per-model by tags.json so the fitted values win automatically.
-TEXT_A, TEXT_B = 1.6, -4.0  # p_text = sigmoid(A*z + B) over the per-query corpus z-score
+TEXT_A, TEXT_B = 1.6, -4.0  # p_text = sigmoid(A*x + B); x is TEXT_FEATURE
+TEXT_FEATURE = "z"  # "z" = per-query corpus z-score (ADR-3 as written) | "cos" = raw cosine.
+# MEASURED 2026-07-22 on unsplash-demo (N=2000, pecore-s16-384-fp32), 15 real vs 15 nonsense
+# queries: best single threshold separates at 77% on "cos" but only 60% on "z" (chance = 50%)
+# — nonsense max-z (med 4.16) actually EXCEEDS real max-z (med 3.81), so no (A,B) on the z
+# feature can produce an honest no-match. Escalated; the default stays ADR-3's "z" until the
+# conductor rules and b-bench fits the winner on CAL-SET. Both are shipped, tags.json picks.
 TAU = 0.5  # probability floor for "this is a match"
 THETA_SYN = 0.90  # near-tag rule: inherit a tag's calibration only at cos >= theta_syn
 K_STD = 3.0  # dataset-layer effective tau = max(tau_tag, mean + K_STD*std)
@@ -117,6 +123,7 @@ class TagTable:
         self.platt = np.asarray(meta.get("platt") or [[1.0, 0.0]] * n, np.float32)
         self.theta_syn = float(meta.get("theta_syn", THETA_SYN))
         self.text_logistic = tuple(meta.get("text_logistic") or (TEXT_A, TEXT_B))
+        self.text_feature = meta.get("text_feature", TEXT_FEATURE)
         self.emb = np.memmap(d / "tags.f32", np.float32, "r", shape=(n, self.dim))
         self.index = {name: i for i, name in enumerate(self.names)}
 
@@ -304,7 +311,8 @@ class Searcher:
             s = np.asarray(snap.emb @ q, np.float32)  # cosine: both sides are L2-normalized
             a, b = table.text_logistic if table else (TEXT_A, TEXT_B)
             z = (s - s.mean()) / max(float(s.std()), 1e-6)
-            p_text = _sigmoid(a * z + b)
+            feature = table.text_feature if table else TEXT_FEATURE
+            p_text = _sigmoid(a * (s if feature == "cos" else z) + b)
             if table is not None:
                 cands = sorted(dict(cands + self._near_candidates(table, query, q)).items())[:MAX_TAGS]
 

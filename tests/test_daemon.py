@@ -294,3 +294,23 @@ def test_named_tag_query_never_wakes_the_text_tower(live):
     # text=never + an unnamed query = an honest no-match, still no encoder
     st, r = get(live, "/api/search?q=some+unnamed+thing&dataset=d1&text=never")
     assert st == 200 and r["hits"] == [] and r["no_match"] is True and not boom
+
+
+def test_status_and_images_endpoints(live):
+    """The app's health strip + gallery listing (b-app calls both)."""
+    st, r = get(live, "/api/status")
+    assert st == 200 and r["rss"] > 0 and r["rss_mb"] > 0
+    assert r["text_tower"] in ("loaded", "unloaded") and r["jobs"] == 0
+    assert [d["dataset"] for d in r["datasets"]] == ["d1"]
+    assert r["datasets"][0]["bytes"] > 0  # index-on-disk metric
+
+    st, r = get(live, "/api/images?dataset=d1&offset=0&limit=4")
+    assert st == 200 and r["total"] == 30 and len(r["items"]) == 4
+    for it in r["items"]:  # B18 provenance on the gallery path too
+        assert it["image_id"] and it["path"] and it["dataset"] == "d1" and it["dataset_slug"] == "d1"
+    st, r2 = get(live, "/api/images?dataset=d1&offset=2&limit=2")
+    assert [i["image_id"] for i in r2["items"]] == [i["image_id"] for i in r["items"][2:4]]  # stable paging
+    st, r = get(live, "/api/images")
+    assert st == 400 and r["exit_code"] == 1
+    st, r = get(live, "/api/images?dataset=ghost")
+    assert st == 404 and r["exit_code"] == 4

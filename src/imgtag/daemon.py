@@ -23,6 +23,8 @@ Endpoints::
                                                  text_tower_load_ms so a warm budget (B3)
                                                  can exclude the one-time load
     GET  /api/datasets                           fleet view (B18f: exactly what is on disk)
+    GET  /api/status                             footprint + fleet + job count (app health)
+    GET  /api/images?dataset=&offset=&limit=     paged snapshot listing (gallery view)
     GET  /api/jobs                               job status files (progress.list_jobs)
     GET  /api/events                             SSE, <=1s freshness, from the job files
     GET  /api/thumb/<dataset>/<image_id>?s=256   draft-decoded JPEG, LRU disk cache <=200MB
@@ -186,6 +188,8 @@ class Daemon:
                     "model_sha": m.get("model_sha"),
                     "dim": m.get("dim"),
                     "shards": len(m.get("shards", [])),
+                    "bytes": sum(sh.get("emb_bytes", 0) + sh.get("ids_bytes", 0)
+                                 for sh in m.get("shards", [])),
                     "calibrated": bool(m.get("calib_sha")),
                     "created": m.get("created"),
                     "updated": m.get("updated"),
@@ -198,6 +202,34 @@ class Daemon:
         js = list_jobs(self.home)
         mirrored = {j.get("engine_job_id") for j in js if j.get("engine_job_id")}
         return [j for j in js if j.get("job_id") not in mirrored]
+
+    def status(self) -> dict:
+        """One call for the app's health strip: footprint + fleet + job count."""
+        mb = rss_mb()
+        return {
+            "version": VERSION, "pid": os.getpid(),
+            "uptime_s": round(time.time() - self.started, 1),
+            "rss": int(mb * 1024 * 1024), "rss_mb": round(mb, 1),
+            "text_tower": "loaded" if self.searcher.text_loaded else "unloaded",
+            "text_ttl_s": self.text_ttl, "rss_watermark_mb": self.watermark_mb,
+            "datasets": self.datasets(), "jobs": len(self.jobs()),
+        }
+
+    def images(self, dataset: str, offset: int, limit: int) -> dict:
+        """Paged listing straight off the snapshot — the gallery view's source. Rows are
+        manifest order (= index order), so paging is stable while a job appends."""
+        snap = self.searcher.snapshot(dataset)
+        ids = snap.ids[offset : offset + limit]
+        return {
+            "dataset": dataset, "total": len(snap.ids), "offset": offset, "limit": limit,
+            "items": [
+                {"image_id": r["image_id"], "path": r["path"],
+                 "dataset": r.get("dataset") or dataset,          # B18: never null
+                 "dataset_slug": r.get("dataset") or dataset,
+                 "w": r.get("w"), "h": r.get("h")}
+                for r in ids
+            ],
+        }
 
     def record(self, ids, dataset: str, image_id: str) -> dict:
         for rec in ids:
@@ -315,6 +347,14 @@ class Handler(BaseHTTPRequestHandler):
                     strict=(q.get("strict") or ["0"])[0] in ("1", "true", "yes"),
                     text=(q.get("text") or ["auto"])[0],
                 ))
+            elif u.path == "/api/status":
+                self.json(d.status())
+            elif u.path == "/api/images":
+                ds = (q.get("dataset") or [None])[0]
+                if not ds:
+                    raise ValueError("dataset is required")
+                self.json(d.images(ds, max(0, int((q.get("offset") or [0])[0])),
+                                   max(1, min(2000, int((q.get("limit") or [300])[0])))))
             elif u.path == "/api/datasets":
                 self.json({"datasets": d.datasets()})
             elif u.path == "/api/jobs":
@@ -485,20 +525,31 @@ def serve(home: Path | None = None, tcp: int | None = None, backend: str | None 
     servers = []
     if tcp is not None:
         servers.append(LoopbackHTTPServer(("127.0.0.1", tcp), Handler))  # loopback ONLY (B22)
+    # Bind on a side path and rename into place: bind() creates the socket file BEFORE
+    # listen(), so a client polling for daemon.sock could connect in that window and take
+    # an ECONNREFUSED (observed once in the test suite). Renaming publishes an already
+    # listening socket — anything that sees the path can talk to it.
+    staging = sock_p.with_name(f".{sock_p.name}.{os.getpid()}")
+    staging.unlink(missing_ok=True)
     umask = os.umask(0o177)  # socket is created 0600
     try:
-        unix = UnixHTTPServer(str(sock_p), Handler)
+        unix = UnixHTTPServer(str(staging), Handler)
     finally:
         os.umask(umask)
     servers.append(unix)
     port = servers[0].server_address[1] if tcp is not None else None
 
+    # daemon.json is "the endpoint record every door reads" (ADR-13) — it must exist BEFORE
+    # the socket is reachable, or a client that polls the socket path wins the race and
+    # reads a missing record.
     rec = {"pid": os.getpid(), "version": VERSION, "socket": str(sock_p), "http_port": port,
            "started_at": d.started, "models": d.model_shas()}
     tmp = rec_p.with_suffix(".tmp")
     tmp.write_text(json.dumps(rec, indent=1))
     os.chmod(tmp, 0o600)
     os.replace(tmp, rec_p)
+    os.rename(staging, sock_p)  # publish last: whoever sees the socket sees a ready daemon
+    unix.server_address = str(sock_p)
     log(f"imgtag daemon {VERSION} pid={os.getpid()} socket={sock_p}"
         + (f" http=127.0.0.1:{port}" if port else ""))
 
