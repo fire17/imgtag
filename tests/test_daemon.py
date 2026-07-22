@@ -354,17 +354,24 @@ def test_moderation_endpoint_and_track_filter(live):
     """Moderation tracks (VISION-ADDENDA 12:33Z): per-dataset counts, opt-in only, and
     never advertised as enforcement-ready while the tracks are unfitted."""
     st, r = get(live, "/api/moderation?dataset=d1")
-    assert st == 200 and r["enforcement_ready"] is False
-    assert r["calibration"] == "unfitted"
+    assert st == 200 and r["calibration"] == "unfitted"
+    # ADR-14 item 3: enforcement readiness is PER CATEGORY, and false until tau is fitted
+    assert r["enforcement_ready"] == {"nudity": False, "weapons": False, "drugs": False}
     d = r["datasets"][0]
     assert set(d["counts"]) == {"nudity", "weapons", "drugs"} and d["indexed"] == 30
-    assert all(isinstance(v, int) for v in d["counts"].values())
+    # ADR-14: the two tiers are counted SEPARATELY and never merged into one number
+    for c in d["counts"].values():
+        assert set(c) == {"violation", "review"} and all(isinstance(v, int) for v in c.values())
     assert r["totals"] == d["counts"]
+    assert r["enforcement_ready"] == {"nudity": False, "weapons": False, "drugs": False}
+    assert r["source"] == "current-scan"
 
     st, r = get(live, "/api/search?q=cat&dataset=d1&track=weapons&k=5")
     assert st == 200  # filter applies; a fake backend flags nothing, so an honest empty set
+    st, r = get(live, "/api/search?q=cat&dataset=d1&track=weapons&tier=violation&k=5")
+    assert st == 200
     st, r = get(live, "/api/search?q=cat&dataset=d1&track=nope")
-    assert st == 400 and r["exit_code"] == 1 and "unknown moderation track" in r["error"]
+    assert st == 400 and r["exit_code"] == 1 and "unknown moderation category" in r["error"]
 
 
 def test_plain_search_never_triggers_moderation(live):

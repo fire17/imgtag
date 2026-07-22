@@ -24,8 +24,11 @@ Endpoints::
                                                  can exclude the one-time load
     GET  /api/datasets                           fleet view (B18f: exactly what is on disk)
     GET  /api/status                             footprint + fleet + job count (app health)
-    GET  /api/moderation?dataset=&limit=         nudity/weapons/drugs counts per dataset
-                                                 (+ flagged images when limit>0)
+    GET  /api/moderation?dataset=&limit=         ADR-14 two-tier counts per category
+                                                 ("N violations, M for review") + flagged
+                                                 images when limit>0. LIVE scan; b-engine's
+                                                 stored index-time flags are a separate,
+                                                 separately-labelled source.
     GET  /api/images?dataset=&offset=&limit=     paged snapshot listing (gallery view)
     GET  /api/jobs                               job status files (progress.list_jobs)
     GET  /api/events                             SSE, <=1s freshness, from the job files
@@ -371,10 +374,11 @@ class Handler(BaseHTTPRequestHandler):
                     # that track, ranked by track probability instead of query relevance.
                     ds = (q.get("dataset") or [None])[0]
                     names = [ds] if ds else list_datasets(d.home)
+                    want_tier = (q.get("tier") or [None])[0] or None
                     hits = [h for nm in names
                             for h in d.searcher.moderation(nm, limit=k).get("flagged", [])
-                            if h["track"] == trk]
-                    hits.sort(key=lambda h: (-h["p"], h["image_id"]))
+                            if h["category"] == trk and (not want_tier or h["tier"] == want_tier)]
+                    hits.sort(key=lambda h: (h["tier"] != "violation", -h["p"], h["image_id"]))
                     self.json({"query": "", "track": trk, "tookMs": 0.0, "hits": hits[:k],
                                "no_match": not hits, "calibration": "unfitted",
                                "enforcement_ready": False,
@@ -391,19 +395,25 @@ class Handler(BaseHTTPRequestHandler):
                     strict=(q.get("strict") or ["0"])[0] in ("1", "true", "yes"),
                     text=(q.get("text") or ["auto"])[0],
                     track=trk,
+                    tier=(q.get("tier") or [None])[0] or None,
                 ))
             elif u.path == "/api/moderation":
                 ds = (q.get("dataset") or [None])[0]
                 limit = max(0, min(200, int((q.get("limit") or [0])[0])))
                 names = [ds] if ds else list_datasets(d.home)
                 per = [d.searcher.moderation(nm, limit) for nm in names]
-                totals: dict[str, int] = {}
-                for r in per:
-                    for tname, c in r["counts"].items():
-                        totals[tname] = totals.get(tname, 0) + c
+                totals: dict[str, dict] = {}
+                for r in per:  # ADR-14: violations and review counts never merge into one
+                    for cat, c in r["counts"].items():
+                        t = totals.setdefault(cat, {"violation": 0, "review": 0})
+                        t["violation"] += c["violation"]
+                        t["review"] += c["review"]
                 self.json({"datasets": per, "totals": totals,
                            "indexed": sum(r["indexed"] for r in per),
-                           "calibration": "unfitted", "enforcement_ready": False})
+                           "source": "current-scan",  # live; b-engine's stored flags are
+                           # "flagged at indexing" and come from `imgtag info --flags`
+                           "calibration": "unfitted",
+                           "enforcement_ready": {c: False for c in totals}})
             elif u.path == "/api/status":
                 self.json(d.status())
             elif u.path == "/api/images":

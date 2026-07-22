@@ -400,3 +400,59 @@ def test_common_term_undercounts_until_tau_is_fitted(home):
     r = searcher(home, be).search("cat dog", "d1", k=5)
     assert r["hits"]  # ranking still works; the tier is what degrades
     assert r["hits"][0]["why"]["terms"]["n"] == 2
+
+
+# ---------------------------------------------------------- ADR-14 two-tier moderation
+
+
+def _fake_tracks(monkeypatch):
+    """A track spec expressed in FakeBackend's vocabulary so tiering is deterministic."""
+    spec = {"version": 2, "enforcement_ready": False, "categories": {"x": {
+        "label": "x", "violation": ["cat"], "review": ["dog"], "negatives": ["sky"]}}}
+    monkeypatch.setattr(S, "tracks", lambda: spec)
+    return spec
+
+
+def test_tier_is_decided_by_which_prompt_set_the_image_resembles_more(home, monkeypatch):
+    """ADR-14: the review set IS the look-alike, so 'violation first' mislabels it. A row
+    goes to the tier whose prompt set it scores HIGHER on."""
+    _fake_tracks(monkeypatch)
+    be = build(home, "d1", ["cat"] + ["dog"] + ["tree"] * 18)
+    s = searcher(home, be)
+    t = s.track_scores("d1")
+    ids = [r["image_id"] for r in s.snapshot("d1").ids]
+    cat_row, dog_row = 0, 1
+    assert t["categories"]["x"]["is_violation"][cat_row] and not t["categories"]["x"]["is_review"][cat_row]
+    assert t["categories"]["x"]["is_review"][dog_row] and not t["categories"]["x"]["is_violation"][dog_row]
+    assert t["counts"]["x"] == {"violation": 1, "review": 1}
+    assert ids  # provenance intact
+
+    flags = s.flags_for(t, dog_row)
+    assert flags == [{"category": "x", "p": flags[0]["p"], "tier": "review"}]
+    assert 0.0 < flags[0]["p"] <= 1.0
+
+
+def test_moderation_summary_splits_tiers_and_never_claims_enforcement(home, monkeypatch):
+    _fake_tracks(monkeypatch)
+    be = build(home, "d1", ["cat", "dog"] + ["tree"] * 18)
+    m = searcher(home, be).moderation("d1", limit=5)
+    assert m["counts"]["x"] == {"violation": 1, "review": 1}
+    assert m["enforcement_ready"] == {"x": False} and m["calibration"] == "unfitted"
+    assert m["source"] == "current-scan"  # distinct from b-engine's stored index-time flags
+    tiers = {f["tier"] for f in m["flagged"]}
+    assert tiers == {"violation", "review"}
+    assert m["flagged"][0]["tier"] == "violation"  # violations sort first within a category
+
+
+def test_stored_index_time_flags_pass_through_under_their_own_name(home):
+    """Two legitimate sources: b-engine's stored flags and my live scan never merge."""
+    be = FakeBackend()
+    recs = [{"image_id": f"{i:016x}", "path": f"/img/{i}.jpg", "dataset": "d1", "w": 1, "h": 1,
+             "flags": [{"category": "weapons", "p": 0.9, "tier": "violation"}]} for i in range(6)]
+    with Writer("d1", be, home) as w:
+        w.append(np.stack([be._vec("cat")] * 6), recs)
+    r = S.Searcher(home, backend=be).search("cat", "d1", k=3)
+    h = r["hits"][0]
+    assert h["flags_stored"] == [{"category": "weapons", "p": 0.9, "tier": "violation"}]
+    assert "flags" not in h  # nothing scanned live in this process -> no live flags invented
+    assert "flags" not in h.get("meta", {})  # and it does not leak into generic metadata

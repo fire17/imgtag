@@ -293,89 +293,115 @@ class Searcher:
 
     # -- moderation ------------------------------------------------
     def track_scores(self, dataset: str) -> dict:
-        """Per-image probability for every moderation track, cached per manifest state.
+        """Per-image probability for every moderation category, in BOTH ADR-14 tiers.
 
-        Costs ONE text-tower batch per model (all prompts at once, cached on disk beside
-        nothing else) and one [N, P] matmul per dataset generation. `flags` are honest
-        probabilities, never a verdict: an unfitted track cannot enforce anything.
+        Costs one text-tower batch per model and one [N, 2*C] matmul per dataset
+        generation, then caches. `violation` is the policy breach; `review` is the
+        look-alike a human should judge. A row is `none` unless one of them clears.
         """
         snap = self.snapshot(dataset)
         stamp = self._manifest_stamp(dataset)
         hit = self._tracks.get(dataset)
         if hit and hit[0] == stamp:
             return hit[1]
-        spec = tracks().get("tracks") or {}
+        spec = tracks().get("categories") or {}
         if not spec or not len(snap.ids):
-            out = {"tracks": {}, "counts": {}, "n": len(snap.ids)}
+            out = {"categories": {}, "counts": {}, "n": len(snap.ids), "floor": 1.0}
             self._tracks[dataset] = (stamp, out)
             return out
         table = self.tags(snap.manifest)
         za, zb = table.z_logistic if table else (Z_A, Z_B)
         floor = float(_sigmoid(za * K_STD + zb))
         names = list(spec)
-        vecs = self._track_vectors(snap.manifest, names, spec)  # [T, D], one tower batch
-        cos = np.asarray(snap.emb @ vecs.T, np.float32).reshape(len(snap.ids), len(names))
+        vecs = self._track_vectors(snap.manifest, names, spec)  # [2C, D]
+        cos = np.asarray(snap.emb @ vecs.T, np.float32).reshape(len(snap.ids), 2 * len(names))
         P = np.empty_like(cos)
-        for j in range(len(names)):  # dataset layer: each track vs THIS corpus
+        for j in range(cos.shape[1]):  # dataset layer: each prompt set vs THIS corpus
             c = cos[:, j]
             P[:, j] = _sigmoid(za * ((c - c.mean()) / max(float(c.std()), 1e-6)) + zb)
-        out = {
-            "tracks": {n: P[:, j] for j, n in enumerate(names)},
-            "counts": {n: int((P[:, j] >= floor).sum()) for j, n in enumerate(names)},
-            "floor": floor,
-            "n": len(snap.ids),
-            "labels": {n: spec[n].get("label", n) for n in names},
-        }
+        cats, counts = {}, {}
+        for i, name in enumerate(names):
+            pv, pr = P[:, 2 * i], P[:, 2 * i + 1]
+            # The tier is whichever prompt set the image resembles MORE — not "violation
+            # first". The review set IS the look-alike (swimwear, toy gun, vape), so a
+            # bikini scores above the nudity floor no matter what; only the comparison
+            # separates it from actual nudity. Measured: violation-first mislabels all
+            # three ADR-14 review classes; comparison puts them where the policy wants.
+            fires = np.maximum(pv, pr) >= floor
+            is_v = fires & (pv > pr)
+            is_r = fires & ~is_v
+            cats[name] = {"violation_p": pv, "review_p": pr, "is_violation": is_v, "is_review": is_r}
+            counts[name] = {"violation": int(is_v.sum()), "review": int(is_r.sum())}
+        out = {"categories": cats, "counts": counts, "floor": floor, "n": len(snap.ids),
+               "labels": {n: spec[n].get("label", n) for n in names}}
         self._tracks[dataset] = (stamp, out)
         return out
 
     def _track_vectors(self, manifest: dict, names: list[str], spec: dict) -> np.ndarray:
-        """One L2-normalized vector per track: mean of its prompt embeddings minus the
-        mean of its negatives (the negatives are what stop 'swimsuit' reading as nudity)."""
-        sha = manifest["model_sha"]
-        key = (sha, tuple(names))
+        """Two L2-normalized vectors per category (violation, review), each the mean of its
+        prompts minus half the mean of the shared negatives — the negatives are what stop a
+        mannequin or a statue reading as a nude person (ADR-14's true false-positive class)."""
+        key = (manifest["model_sha"], tuple(names), tracks().get("version"))
         if self._track_vecs.get("key") == key:
             return self._track_vecs["vecs"]
         flat, spans = [], []
         for n in names:
-            pos, neg = spec[n].get("prompts") or [], spec[n].get("negatives") or []
-            spans.append((len(flat), len(pos), len(neg)))
-            flat += list(pos) + list(neg)
+            v, r, neg = spec[n].get("violation") or [], spec[n].get("review") or [], spec[n].get("negatives") or []
+            spans.append((len(flat), len(v), len(r), len(neg)))
+            flat += list(v) + list(r) + list(neg)
         self.backend(manifest)
         emb = np.asarray(self._backend.embed_texts(flat), np.float32)
         self.text_loaded = True
         rows = []
-        for off, npos, nneg in spans:
-            v = emb[off : off + npos].mean(0)
-            if nneg:
-                v = v - 0.5 * emb[off + npos : off + npos + nneg].mean(0)
-            rows.append(v / max(float(np.linalg.norm(v)), 1e-12))
+        for off, nv, nr, nn in spans:
+            neg = emb[off + nv + nr : off + nv + nr + nn].mean(0) if nn else 0.0
+            for a, b in ((off, nv), (off + nv, nr)):
+                v = (emb[a : a + b].mean(0) if b else np.zeros(emb.shape[1], np.float32)) - 0.5 * neg
+                rows.append(v / max(float(np.linalg.norm(v)), 1e-12))
         vecs = np.ascontiguousarray(rows, np.float32)
         self._track_vecs = {"key": key, "vecs": vecs}
         return vecs
 
+    def flags_for(self, tr: dict, i: int) -> list[dict]:
+        """ADR-14 per-image payload: [{category, p, tier}] for whatever actually fired."""
+        out = []
+        for name, c in (tr.get("categories") or {}).items():
+            if c["is_violation"][i]:
+                out.append({"category": name, "p": round(float(c["violation_p"][i]), 4),
+                            "tier": "violation"})
+            elif c["is_review"][i]:
+                out.append({"category": name, "p": round(float(c["review_p"][i]), 4),
+                            "tier": "review"})
+        return out
+
     def moderation(self, dataset: str, limit: int = 0) -> dict:
-        """Per-dataset moderation summary: "Found 10 images with drugs, 7 with weapons…"."""
+        """Per-dataset summary: "N violations, M for review" per category (ADR-14)."""
         snap = self.snapshot(dataset)
         t = self.track_scores(dataset)
         out = {
             "dataset": dataset, "indexed": t["n"], "counts": t.get("counts", {}),
             "labels": t.get("labels", {}), "threshold": t.get("floor"),
-            # the ONLY honest stance until b-bench fits per-track tau on CAL-SET
-            "calibration": "unfitted", "enforcement_ready": False,
+            "source": "current-scan",  # live: today's detectors over today's embeddings
+            # per-category, and false until per-TIER tau is fitted (ADR-14 item 3)
+            "calibration": "unfitted",
+            "enforcement_ready": {n: False for n in (t.get("counts") or {})},
         }
-        if limit and t.get("tracks"):
+        if limit and t.get("categories"):
             flagged = []
-            for name, p in t["tracks"].items():
-                for i in np.argsort(-p)[:limit]:
-                    if p[i] < t["floor"]:
-                        break
-                    r = snap.ids[int(i)]
-                    flagged.append({"track": name, "p": round(float(p[i]), 4),
-                                    "image_id": r["image_id"], "path": r["path"],
-                                    "dataset": r.get("dataset") or dataset,
-                                    "dataset_slug": r.get("dataset") or dataset})
-            flagged.sort(key=lambda f: (f["track"], -f["p"], f["image_id"]))
+            for name, c in t["categories"].items():
+                for tier, p, mask in (("violation", c["violation_p"], c["is_violation"]),
+                                      ("review", c["review_p"], c["is_review"])):
+                    idx = np.argsort(-np.where(mask, p, -1.0))[:limit]
+                    for i in idx:
+                        if not mask[i]:
+                            break
+                        r = snap.ids[int(i)]
+                        flagged.append({"category": name, "tier": tier,
+                                        "p": round(float(p[i]), 4),
+                                        "image_id": r["image_id"], "path": r["path"],
+                                        "dataset": r.get("dataset") or dataset,
+                                        "dataset_slug": r.get("dataset") or dataset})
+            flagged.sort(key=lambda f: (f["category"], f["tier"] != "violation", -f["p"], f["image_id"]))
             out["flagged"] = flagged
         return out
 
@@ -518,7 +544,8 @@ class Searcher:
 
     # -- the query -------------------------------------------------
     def search_one(self, query: str, dataset: str, k: int = 50, strict: bool = False,
-                   text: str = "auto", track: str | None = None) -> dict:
+                   text: str = "auto", track: str | None = None,
+                   tier: str | None = None) -> dict:
         """One dataset. ``text`` selects the encoder policy (ADR-5, revised resident set):
 
         * ``auto`` (default) — a query that NAMES a tag is served from the tag table alone,
@@ -614,18 +641,21 @@ class Searcher:
         # Moderation costs a text-tower batch, so a plain query NEVER triggers it: scores
         # are used only when explicitly filtered on, or when this generation is already in
         # cache (an earlier /api/moderation). ADR-5's no-tower named-tag path stays intact.
-        tr = {"tracks": {}, "floor": 1.0}
+        tr = {"categories": {}, "floor": 1.0}
         if track:
             tr = self.track_scores(dataset)
         else:
             cached = self._tracks.get(dataset)
             if cached and cached[0] == self._manifest_stamp(dataset):
                 tr = cached[1] or tr
-        if track:  # moderation filter: only images this track flags, ranked by the query
-            tp = tr["tracks"].get(track)
-            if tp is None:
-                raise ValueError(f"unknown moderation track {track!r}; known: {sorted(tr['tracks'])}")
-            p = np.where(tp >= tr["floor"], p, 0.0).astype(np.float32)
+        if track:  # moderation filter: only images this category flags, ranked by the query
+            c = (tr.get("categories") or {}).get(track)
+            if c is None:
+                raise ValueError(
+                    f"unknown moderation category {track!r}; known: {sorted(tr.get('categories') or {})}")
+            keep = c["is_violation"] | c["is_review"] if tier is None else (
+                c["is_violation"] if tier == "violation" else c["is_review"])
+            p = np.where(keep, p, 0.0).astype(np.float32)
         # ALL-SOME-ANY ordering (VISION-ADDENDA): tag-count is the PRIMARY key, probability
         # the tiebreak. p is in [0,1), so `matched + p` orders both in one pass.
         rank = matched.astype(np.float32) + (mean_p if n_concepts else p)
@@ -658,10 +688,9 @@ class Searcher:
                 why.update(terms=payload, tags_matched=int(matched[i]), tags_total=n_concepts,
                            spectrum="all" if matched[i] == n_concepts else
                                     ("some" if matched[i] > 1 else "any"))
-            flags = {n: round(float(v[i]), 4) for n, v in (tr.get("tracks") or {}).items()
-                     if v[i] >= tr["floor"]}
+            flags = self.flags_for(tr, i) if tr.get("categories") else []
             extra = {kk: vv for kk, vv in rec.items()
-                     if kk not in ("image_id", "path", "dataset", "row", "w", "h")}
+                     if kk not in ("image_id", "path", "dataset", "row", "w", "h", "flags")}
             hits.append(
                 {
                     "image_id": rec["image_id"],
@@ -673,8 +702,11 @@ class Searcher:
                     "w": rec.get("w"),
                     "h": rec.get("h"),
                     "why": why,
-                    # moderation tracks that fire on this image (probabilities, not verdicts)
+                    # LIVE scan: categories firing now, [{category, p, tier}] (ADR-14)
                     **({"flags": flags} if flags else {}),
+                    # STORED: what the indexer recorded when this row was written. Kept
+                    # under its own name so a UI can never show two numbers as one.
+                    **({"flags_stored": rec["flags"]} if rec.get("flags") else {}),
                     # generic index-time metadata (account ids, dates, ...) passed through
                     # verbatim from the ids record — whatever b-engine writes, we return
                     **({"meta": extra} if extra else {}),
@@ -687,7 +719,7 @@ class Searcher:
                 "calibration": "fitted" if fitted else "unfitted"}
 
     def search(self, query: str, dataset: str | None = None, k: int = 50, strict: bool = False,
-               text: str = "auto", track: str | None = None) -> dict:
+               text: str = "auto", track: str | None = None, tier: str | None = None) -> dict:
         """Search one dataset, or every dataset on disk when ``dataset`` is None."""
         t0 = time.perf_counter()
         self.last_query = time.time()
@@ -696,7 +728,7 @@ class Searcher:
         indexed, gated, best_text, load_ms = 0, False, 0.0, 0.0
         tower, terms, calibration = "skipped", [], "unfitted"
         for name in names:
-            r = self.search_one(query, name, k=k, strict=strict, text=text, track=track)
+            r = self.search_one(query, name, k=k, strict=strict, text=text, track=track, tier=tier)
             hits += r["hits"]
             indexed += r["indexed"]
             gated |= r["gated"]

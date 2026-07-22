@@ -95,3 +95,23 @@ tells the caller whether any p may be trusted. (b) Named-tag queries are served 
 table with `served_by: "tag-table"` and no text tower (ADR-5 revised resident set).
 (c) `terms`/`why.terms` are absent, never null, for single-term queries. (d) Moderation
 payloads always carry `enforcement_ready: false` until per-track tau is fitted.
+
+### Moderation: TWO flag sources, never one number (ADR-14)
+
+| source | where it comes from | shape | label for the UI |
+|---|---|---|---|
+| **stored** | b-engine writes it into the ids record at index time; manifest carries the batch counts; surfaced by `imgtag info --flags`. Reflects the detector version that ran THEN. | rides on a hit as `flags_stored` (verbatim passthrough — b-daemon never rewrites it) | **"flagged at indexing"** |
+| **current scan** | b-daemon's `/api/moderation` and `?track=`, computed live from track prompt-sets over today's embeddings. Reflects TODAY's detectors. | hit field `flags: [{category, p, tier}]`; summary `counts: {cat: {violation, review}}` + `"source": "current-scan"` | **"current scan"** |
+
+The app's moderation view defaults to the STORED flags (they are what the user's batch
+summaries referenced) with a "re-scan now" affordance calling `/api/moderation`. The two
+numbers may legitimately differ; showing them under one name is the bug this table exists
+to prevent.
+
+**Tier semantics (ADR-14):** `violation` = the policy breach (human nudity/explicit, REAL
+weapons, illegal drugs/paraphernalia) · `review` = the look-alike a human should judge
+(swimwear/lingerie, toy/replica weapons, tobacco/vape) · no flag at all for mannequins,
+statues and other non-person figures. A row takes the tier whose prompt set it scores
+HIGHER on — "violation first" was MEASURED to mislabel every review class, because the
+review set is by construction the look-alike. `enforcement_ready` is reported PER CATEGORY
+and stays false until per-tier tau is fitted on labelled ground truth.
