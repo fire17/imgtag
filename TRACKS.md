@@ -30,8 +30,13 @@ instrument hierarchy, in order of preference:
 3. **Dedicated per-image models** (extra forward pass per image): EXCEPTION, budgeted —
    the SUM of all dedicated-model FLOPs must stay ≤30% of the encoder's FLOPs (B25).
    Permitted only while a distillation (2) hasn't yet matched its quality, with the
-   distillation logged as an open darwin item. Current sole occupant: nudity's Marqo
-   head (4.5 GFLOPs ≈ 25% of PE-Core-S16) — darwin item D11 distills it.
+   distillation logged as an open darwin item — and a track EARNS a dedicated model only
+   when the shared embedding provably cannot carry its signal (measured, like nudity's
+   food-above-lingerie zero-shot failure; never assumed). Current sole occupant:
+   nudity's Marqo head (4.5 GFLOPs ≈ 25% of PE-Core-S16) — darwin item D11 distills it.
+   **Escape hatch if dedicated heads ever multiply: one shared small backbone + N linear
+   classifier heads** (one extra forward total, not N) — recorded here so nobody
+   rediscovers it (track-nudity §6b).
 
 **T3 — Per-track auto-improvement.** Each track's spec (prompts, negatives, τ, tier
 bands, head weights) is versioned data, not code (`data/moderation.json` + per-model
