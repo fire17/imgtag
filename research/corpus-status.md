@@ -4,6 +4,24 @@
 > Everything lands under `data/` (gitignored — verified: `git check-ignore data/…` hits).
 > **Unsplash images are LOCAL RESEARCH ONLY — never redistributed, never committed.**
 
+## CORPUS-E karpathy-test — 5,000 val2014 (Karpathy TEST split, B17) — 🟡 fetching (added 17:51)
+
+Location `data/karpathy-test/`. b-bench needs the canonical Karpathy test split for B17's
+"within-2pts-of-card" retrieval clause — our CORPUS-A (val2017) overlaps it only 593/5000, so
+the published card number isn't reproducible without these. Extracted from
+`data/karpathy/dataset_coco.json` (`split=="test"` → exactly **5,000 images, all val2014**),
+deterministic by cocoid. URL `http://images.cocodataset.org/val2014/<filename>` (206-probe
+confirmed). Scripts: `scripts/build_karpathy_testE.py` (writes `.fetch.tsv` +
+`karpathy_test_ids.json` — the auditable cocoid list) · `scripts/fetch_karpathy_test.sh`
+(POLITE PAR=8, idempotent/resumable, curl/certifi).
+
+```
+sample n=20: 20/20 ok, width median 511, mean 0.13MB → 5,000 ≈ 650MB. launched nohup 17:51.
+```
+Held-out note: Karpathy test is a val2014 slice; disjoint from CAL-SET (train2017). Overlaps
+CORPUS-A only where a val2017 image shares a cocoid with the test set (593) — that overlap is
+expected and is exactly why E exists.
+
 ## ✅ CHECKPOINT 2026-07-22 17:10 — ALL FOUR CORPORA COMPLETE
 
 | Tag | Name | Location | Target | Final | Size | Sample verify |
