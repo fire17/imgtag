@@ -217,18 +217,6 @@ def expand(term: str, depth: int = 3) -> list[str]:
 # ---------------------------------------------------------------- moderation
 
 
-@lru_cache(maxsize=32)
-def fitted_head(category: str, model_id: str) -> dict:
-    """Per-MODEL fitted thresholds for a track (TRACKS.md T3: tau is per-model, so it lives
-    beside the spec, not in it). ``data/moderation/<category>-<model_id>.json`` ->
-    {calibration, scorer, tau, tau_<tier>, platt}. Absent = the track is unfitted."""
-    f = DATA / "moderation" / f"{category}-{model_id}.json"
-    try:
-        return json.loads(f.read_bytes())
-    except (OSError, ValueError):
-        return {}
-
-
 @lru_cache(maxsize=1)
 def tracks() -> dict:
     """Moderation track definitions (VISION-ADDENDA 2026-07-22 ~12:33Z).
@@ -400,13 +388,16 @@ class Searcher:
         def best(sl):  # max similarity over a concept group (empty group -> -inf)
             return cos[:, sl].max(1) if sl.stop > sl.start else np.full(n, -1e9, np.float32)
 
-        from .store import resolve_track_cfg  # ONE loader, shared with store-side (no split-brain)
+        from .store import fitted_tau  # the ONE fitted-file loader, shared with store-side
 
         model_id = snap.manifest.get("model_id", "")
+        base_model = model_id.rsplit("-", 1)[0] if model_id else ""
         cats, counts = {}, {}
         for name, g in groups.items():
-            # fitted-file-WINS precedence, byte-identical to store-side derivation
-            cfg = resolve_track_cfg(name, model_id, spec[name])
+            # fitted-file-WINS over the spec, same precedence + same loader store-side uses
+            # (the split-brain source was the fitted file, not the base spec). The base is
+            # the spec I already hold from tracks() — authoritative, never re-read from disk.
+            cfg = {**spec[name], **fitted_tau(name, base_model), **fitted_tau(name, model_id)}
             tiers = [t for t in TIER_ORDER if t in g and g[t].stop > g[t].start]
             if not tiers:
                 continue
@@ -492,7 +483,16 @@ class Searcher:
         Returns (groups, matrix): groups[name][role] is a slice into the concept matrix, so
         scoring is one [N, C] matmul and `max over a role` is a slice-max.
         """
-        key = (manifest["model_sha"], tracks().get("version"), tuple(sorted(spec)))
+        # Key on the PROMPT CONTENT, not just (model, version, category names): a spec whose
+        # prompts change without a version bump must invalidate, or the cache serves stale
+        # vectors (caught by two tests reusing the same category name with different prompts).
+        import hashlib
+
+        digest = hashlib.sha256(
+            json.dumps({n: {r: spec[n].get(r) for r in TIER_ORDER + ("negatives", "policy_neighbours")}
+                        for n in sorted(spec)}, sort_keys=True, default=str).encode()
+        ).hexdigest()[:16]
+        key = (manifest["model_sha"], digest)
         if self._track_vecs.get("key") == key:
             return self._track_vecs["groups"], self._track_vecs["cols"]
         roles = TIER_ORDER + ("negatives", "policy_neighbours")
