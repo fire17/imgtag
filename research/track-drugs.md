@@ -9,15 +9,21 @@
 ## 0. The one-paragraph answer
 
 Drugs is the hardest of the three tracks because **the labels do not exist** and the
-category is defined by context, not pixels. What we could measure, we measured on 5,328
-images: it ranks drug imagery at **AP 0.726 (recall .944 at a 1% false-positive budget)**,
-and at the shipped ADR-14 tiering it surfaces **18/18 hand-verified drug images** while
-calling **0.92% of ordinary photos a violation** and 1.3% a review. End-to-end through the
-real pipeline on a deliberately adversarial 200-image set: **18 violations (15 true, 2
-ambiguous, 1 false) + 6 reviews (3 true, 3 ambiguous) — every one of the 18 drug images
-surfaced, none missed**. What we could NOT measure — recall on cocaine/heroin/meth imagery specifically,
-and any tobacco (review-tier) recall worth shipping — is stated as unmeasured, not
-smoothed over. **Verdict: ship as a recall-first REVIEW QUEUE, `enforcement_ready: false`.**
+category is defined by context, not pixels. Measured on **15,010 deduped real-photo
+negatives** (COCO + Unsplash-demo + Unsplash-b; the v2 refit corpus, ~2× b-app's) vs 17
+hand-verified drug images: it ranks drug imagery at **AP 0.47 (recall .88 at a 1%
+false-positive budget)**, and at the shipped ADR-14 tiering surfaces **94% of drug images**
+(88% as violation, the rest as review) while calling **1.06% of ordinary photos a
+violation** + 0.69% review — with **0 tobacco images wrongly called a violation**. The score
+distribution is calibrated, not saturated: an evidence cap makes p≥0.95 unreachable (the
+fix for b-app's "218 violations all at p=0.99"). End-to-end through the real pipeline on the
+200-image drug-probe set: manifest reports **16 drug violations + 6 review**; both regression
+images pass (vape→review, raspberry-leaf→none). *(The earlier v1 headline — AP 0.726 on 5k
+COCO only, 18 "positives" — is retired: one of those 18 was a mislabelled bramble leaf, and
+0.73 was corpus-inflated; §3a has the full before/after.)* What we could NOT measure —
+recall on cocaine/heroin/meth imagery specifically, and any tobacco (review-tier) recall
+worth shipping — is stated as unmeasured, not smoothed over. **Verdict: ship as a
+recall-first REVIEW QUEUE, `enforcement_ready: false`.**
 
 ## 1. Approaches, ranked (what was tried, what won, what died)
 
