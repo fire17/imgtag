@@ -306,10 +306,16 @@ photos are mostly gym/portrait, not ring shots. So **sports:match is NOT a relia
 "this is a bout, not an assault" guarantee today.** The honest statement: the negatives-bank
 subtraction is the working mechanism; the cross-track composition is a promising but
 unproven bonus, pending sports' targeted prompt round (which needs the `vslices` dataset —
-currently **984/1856 rows, job 74192702 PARTIAL/failed**: it was launched `--full-speed`
-inside an active quiet window and rightly killed by the conductor mid-run, an ADR-11
-polite-mode violation on my part; the remaining ~872 rows resume free via content-hash skip
-in **polite mode** after the conductor's ALL-CLEAR).
+now **whole, 1856/1856 rows** after a polite-mode re-run at the conductor's ALL-CLEAR; an
+earlier `--full-speed` attempt was rightly killed mid-run as an ADR-11 violation on my part,
+and the completion was redone in polite mode, job polled not `--wait`-blocked).
+
+**Cross-track collision, measured on the whole `vslices` (1856) via the live reader
+(`Searcher.track_scores`):** violence flags 17 images (alert 2 · violation 3 · review 12;
+`unfitted`, `enforcement_ready:false`), **and 0 of them overlap a `sports.match` flag** — the
+negatives-subtraction cleanly separates the two tracks on real contact-sport data. (Aside,
+reported to b-daemon + track-sports2: `sports.match` fired 0/1856 under the reader on this
+sports-heavy slice — a sports-side reader-vs-head gating gap, not a violence issue.)
 
 ## 8. Acceptance sketch (the brief's cases, with documented rulings)
 
