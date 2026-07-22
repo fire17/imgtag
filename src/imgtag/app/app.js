@@ -111,7 +111,7 @@ const API = {
   },
   async moderation({ source, dataset } = {}) {
     const p = new URLSearchParams();
-    if (source) p.set('source', source);
+    if (source) p.set('source', source);   // both "stored" and "current-scan" accepted by the daemon
     if (dataset) p.set('dataset', dataset);
     const qs = p.toString();
     return this.get(`/api/moderation${qs ? `?${qs}` : ''}`);
@@ -125,8 +125,12 @@ const API = {
       hits: (j.hits || []).map(normHit),
       tookMs: Number.isFinite(j.tookMs) ? j.tookMs : null,
       rttMs: performance.now() - t0,
-      enforcementReady: j.enforcement_ready || null,
-      calibration: j.calibration || null,
+      enforcementReady: j.enforcement_ready ?? null,
+      // the track's own state, now the SAME value /api/moderation reports for this category
+      calibration: j.track_calibration || j.calibration || null,
+      // what the track's spec claims for itself — kept apart, because a spec claiming
+      // "proxy-fitted" while the engine refuses to gate on it is exactly the gap to show
+      specCalibration: j.spec_calibration || null,
       coverage: j.coverage || null,
     };
   },
@@ -183,9 +187,14 @@ function normHitTerms(why) {
 // travels with the number everywhere in this app.
 function normFlags(h) {
   const list = Array.isArray(h.flags) ? h.flags
-    : h.category ? [{ category: h.category, tier: h.tier, p: h.p }]   // track-browse row
+    : h.category ? [{ category: h.category, tier: h.tier, p: h.p, kind: h.kind }]   // track-browse row
       : null;
-  return list ? list.map((f) => ({ category: f.category, tier: f.tier || 'review', p: f.p ?? null })) : null;
+  // kind is "moderation" | "content"; when absent, a content-only tier (match) still reads
+  // as content so a descriptive label never renders like a safety flag
+  return list ? list.map((f) => ({
+    category: f.category, tier: f.tier || 'review', p: f.p ?? null,
+    kind: f.kind || (f.tier === 'match' ? 'content' : 'moderation'),
+  })) : null;
 }
 function normStoredFlags(f) {
   if (Array.isArray(f)) return f.map((x) => ({ category: x.category, tier: x.tier || null, p: x.p ?? null }));
@@ -444,10 +453,12 @@ class VirtualGrid {
     if (item.flags || item.flagsStored) {
       const row = el('div', { className: 'tile__flags' });
       for (const f of (item.flags || []).slice(0, 2)) {
+        const content = f.kind === 'content';
         row.append(el('span', {
-          className: `flag flag--${f.tier}`,
+          className: `flag flag--${content ? 'content' : f.tier}`,
           textContent: `${f.category}${f.p != null ? ` ${f.p.toFixed(2)}` : ''}`,
-          title: `${f.tier === 'violation' ? 'matched the violation prompt set' : 'needs a human look'} · current scan`,
+          title: content ? `content label · current scan`
+            : `${f.tier === 'alert' ? 'safety alert' : f.tier === 'violation' ? 'matched the violation prompt set' : 'needs a human look'} · current scan`,
         }));
       }
       for (const f of (item.flagsStored || []).slice(0, 2)) {
@@ -1059,6 +1070,25 @@ async function viewModeration() {
         ' The two are never added together.'),
     );
 
+    // An empty stored map means "nothing was RECORDED at index time" — the batch ran without
+    // --moderation. It does NOT mean "nothing was found", and a table of zeros would say
+    // exactly the wrong thing, so the zeros are refused and the reason is named instead.
+    if (stored && !tiers.length) {
+      body.replaceChildren(el('div', { className: 'empty' },
+        el('h2', { textContent: 'Nothing was recorded at indexing time' }),
+        el('p', { textContent: 'These datasets were indexed without moderation enabled, so there are no stored flags to total. This is an absence of records, not a finding of nothing — the images have never been checked at index time.' }),
+        el('p', { className: 'sub' }, 'Scan the existing index now:'),
+        el('p', null, el('button', {
+          className: 'btn', type: 'button', style: 'margin:0',
+          textContent: 'Run the current scan',
+          onclick: () => { source = 'current-scan'; load(); },
+        })),
+        el('p', { className: 'sub', style: 'margin-top:16px' }, 'Or record flags for future batches:'),
+        el('p', null, el('code', { className: 'k', textContent: 'imgtag index <path> --dataset <name> --moderation' })),
+      ));
+      paintStatus({ latency: '', hits: '', coverage: 'source: stored · no flags recorded at index time' });
+      return;
+    }
     const cell = (cat, tier, count) => {
       if (!count) return el('td', { className: 'n', textContent: '0' });
       const a = el('a', { href: `#/track/${encodeURIComponent(cat)}?tier=${tier}`, textContent: n0(count) });
@@ -1110,6 +1140,29 @@ async function viewModeration() {
             ...tiers.map((tier) => el('th', { className: 'n', textContent: TIER_LABEL[tier] || tier })),
             el('th', { className: 'n', textContent: 'scanned' }))),
           dtb));
+    }
+    // content tracks (kind:"content", e.g. a "sports" match) live in their OWN map and are
+    // never mixed into moderation totals — a content match must not read as a safety concern
+    const cc = m.content_counts || {};
+    const ccats = Object.keys(cc);
+    if (ccats.length) {
+      const ctiers = [...new Set(Object.values(cc).flatMap((t) => Object.keys(t)))].sort((a, b) => tierRank(a) - tierRank(b));
+      const ctb = el('tbody');
+      for (const cat of ccats) {
+        const t = cc[cat] || {};
+        ctb.append(el('tr', null,
+          el('td', null, el('a', { href: `#/track/${encodeURIComponent(cat)}`, textContent: labels[cat] || cat, style: 'color:inherit' })),
+          ...ctiers.map((tier) => cell(cat, tier, t[tier]))));
+      }
+      body.append(
+        el('h2', { textContent: 'Content tracks', style: 'margin-top:32px' }),
+        el('p', { className: 'hint', style: 'margin:4px 0 12px' },
+          'Descriptive labels, not moderation — counted separately and never added to the totals above.'),
+        el('table', null,
+          el('thead', null, el('tr', null,
+            el('th', { textContent: 'category' }),
+            ...ctiers.map((tier) => el('th', { className: 'n', textContent: TIER_LABEL[tier] || tier })))),
+          ctb));
     }
     const thr = m.datasets?.[0]?.threshold;
     paintStatus({
@@ -1169,18 +1222,21 @@ async function viewTrack(category, tier) {
   $('#trackSum').textContent = res.hits.length
     ? `${n0(res.hits.length)} flagged · ${res.tookMs != null ? `${res.tookMs.toFixed(1)} ms server` : ''}`
     : '';
-  // This track's own maturity. The τ value comes ONLY from /api/moderation, which reports it
-  // per category; the track endpoint returns a single scalar that can disagree with it
-  // (observed: moderation says drugs "proxy-fitted", track says "unfitted"). Showing the
-  // scalar would make two screens of this app contradict each other, so when the per-category
-  // value has not been loaded the chip is simply absent — never guessed.
+  // This track's own maturity, straight from the track response — it now carries the same
+  // per-category values /api/moderation reports, so the two screens cannot disagree.
   const pick = (v) => (v && typeof v === 'object' ? v[category] : v);
   const ready = pick(res.enforcementReady);
-  const cal = (S.modCalibration || {})[category];
+  const cal = pick(res.calibration) || (S.modCalibration || {})[category];
+  const spec = pick(res.specCalibration);
   caveat.append(el('span', { className: `chip ${ready ? '' : 'chip--warn'}`, style: 'margin-left:8px', textContent: ready ? 'enforcement-ready' : 'not enforcement-ready' }));
-  caveat.append(cal
-    ? el('span', { className: 'chip', style: 'margin-left:8px', textContent: `τ ${cal}` })
-    : el('a', { href: '#/moderation', className: 'sub', style: 'margin-left:8px', textContent: 'threshold state → Moderation' }));
+  if (cal) caveat.append(el('span', { className: 'chip', style: 'margin-left:8px', textContent: `τ ${cal}` }));
+  // a spec claiming more maturity than the engine will act on is worth seeing, not hiding
+  if (spec && spec !== cal) {
+    caveat.append(el('span', {
+      className: 'chip', style: 'margin-left:8px', textContent: `spec claims ${spec}`,
+      title: `This track's spec reports ${spec}, but the engine gates on ${cal} — the stricter of the two wins.`,
+    }));
+  }
   if (!res.hits.length) {
     gridMount.classList.remove('grid');
     gridMount.replaceChildren(el('div', { className: 'empty' },
