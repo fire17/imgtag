@@ -436,11 +436,11 @@ class Handler(BaseHTTPRequestHandler):
                 per = [(d.searcher.stored_moderation(nm, limit) if src == "stored"
                         else d.searcher.moderation(nm, limit)) for nm in names]
                 totals: dict[str, dict] = {}
-                for r in per:  # ADR-14: violations and review counts never merge into one
+                for r in per:  # tiers are per-track; sum each tier the track actually has
                     for cat, c in r["counts"].items():
-                        t = totals.setdefault(cat, {"violation": 0, "review": 0})
-                        t["violation"] += c["violation"]
-                        t["review"] += c["review"]
+                        t = totals.setdefault(cat, {})
+                        for tier, v in c.items():
+                            t[tier] = t.get(tier, 0) + v
                 self.json({"datasets": per, "totals": totals,
                            "indexed": sum(r["indexed"] for r in per),
                            # "stored" = flagged at indexing (survives a threshold change);
