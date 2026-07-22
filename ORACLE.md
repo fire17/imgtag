@@ -309,6 +309,15 @@ highest-bar protocol — verbatim vision, budgets as tests, honest verification,
 
 ## 3. Dead ends (do not rediscover)
 
+- **fp16 ONNX on the ORT CPU EP — dead across the board** (measured 2026-07-22, clean
+  method): CPU EP has no native fp16 kernels — casts to fp32 and pays for it (fp16 4.28
+  vs fp32 4.89 img/s at intra=2); official SigLIP2 fp16 export additionally FAILS TO LOAD
+  at ORT_ENABLE_ALL (SimplifiedLayerNormFusion bug; loads at ENABLE_EXTENDED). fp16 is a
+  GPU/ANE format. Do not spend bench slots on it.
+- **Batch>1 for CLIP-class vision on CPU at low thread counts** — monotonically HURTS
+  (int8 intra=2: 13.14→12.95→11.18 img/s for b=1→8→32; independently, pecore b8 ≈ b1
+  with 2× RSS). Batch=1/2 streaming + per-image process parallelism is the law; a batch-32
+  design is a regression on two axes. (2 model families, clean method, 2026-07-22.)
 - ggml/clip.cpp path — dormant, slower on CPU than ORT MLAS, quant regresses on x86.
 - ORT CoreML EP — partition thrash (14 round-trips on Pad-reflect), silent fp16, minutes
   of recompile without ModelCacheDirectory. Even the accel lane should use coremltools.
