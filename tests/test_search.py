@@ -315,8 +315,10 @@ def test_unfitted_tags_fall_back_to_dataset_layer_and_never_gate(home):
     table = s.tags(s.snapshot("d1").manifest)
     assert table.calibrated(0) is False  # no fit -> not gating-eligible, whatever the tier
     r = s.search("cat", "d1", k=5)
-    assert r["hits"] and r["hits"][0]["why"]["path"] == "tag"  # still ranks
-    assert r["hits"][0]["p"] > 0.5
+    # an unfitted tag still RANKS the cat images first (boost) — but its confidence is
+    # capped at the honest dense score, never an inflated tag probability
+    assert r["hits"] and all(h["path"].endswith(("0.jpg", "1.jpg")) for h in r["hits"][:2])
+    assert r["hits"][0]["p"] > 0.5 and r["no_match"] is False
 
 
 def test_all_outranks_a_higher_probability_any(home):
@@ -660,3 +662,47 @@ def test_image_tracks_unknown_image_404s(home, monkeypatch):
     be = build(home, "d1", ["cat"] * 3)
     with pytest.raises(FileNotFoundError):
         searcher(home, be).image_tracks("d1", "deadbeefdeadbeef")
+
+
+def test_uncalibrated_tag_never_saturates_above_calibrated_or_dense(home):
+    """P1 (weapon/weapo): an unfitted hypernym must never present fake ~0.99 confidence and
+    outrank calibrated tags / the dense honest score on a homogeneous corpus."""
+    # 20 near-identical "cat" images (homogeneous, like weaponprobe's all-guns): an
+    # uncalibrated tag's corpus-relative z-score would saturate on the tail here.
+    be = build(home, "d1", ["cat"] * 20)
+    d = home / "models" / be.model_sha
+    d.mkdir(parents=True, exist_ok=True)
+    # one calibrated tag ("cat", fitted low so its p is modest) + one uncalibrated ("dog")
+    np.stack([be._vec("cat"), be._vec("dog")]).astype(np.float32).tofile(d / "tags.f32")
+    (d / "tags.json").write_text(json.dumps({
+        "names": ["cat", "dog"], "dim": DIM, "model_sha": be.model_sha,
+        "tier": ["calibrated", "uncalibrated"],
+        "tau": [0.5, None], "platt": [[-4.0, 2.0], None]}))
+    s = searcher(home, be)
+    # a query that resolves to the uncalibrated "dog" tag on a corpus of cats: its p must
+    # be bounded, never a saturated 0.99 that would dominate the ranking
+    r = s.search("dog", "d1", k=5)
+    if r["hits"]:
+        assert all(h["p"] <= 0.5 + 1e-6 for h in r["hits"]), [h["p"] for h in r["hits"]]
+        # and it must never gate (no_match verdict) from an uncalibrated tag
+        assert r["calibration"] == "unfitted"
+
+
+def test_fitted_head_sha_guard_rejects_wrong_model(home, monkeypatch, tmp_path):
+    """SHA-GUARD: a fitted file whose model_sha != the dataset's is ignored (a base-model
+    fit must not contaminate a same-base variant with a different model_sha)."""
+    import imgtag.core.store as ST
+    fitdir = tmp_path / "moderation"
+    fitdir.mkdir()
+    # a fitted file that CLAIMS a different model than the dataset's FakeBackend ("f"*64)
+    (fitdir / "sports-fake.json").write_text(json.dumps(
+        {"calibration": "fitted", "scorer": "margin", "tau_match": -9.9,
+         "model_sha": "0" * 64}))  # wrong sha
+    monkeypatch.setattr(ST, "_DATA", tmp_path)
+    spec = {"version": 2, "categories": {"sports": {
+        "label": "s", "content_track": True, "match": ["cat"], "negatives": ["sky"]}}}
+    monkeypatch.setattr(S, "tracks", lambda: spec)
+    be = build(home, "d1", ["cat"] * 3 + ["misc"] * 5)
+    t = S.Searcher(home, backend=be).track_scores("d1")
+    # the wrong-sha fitted file is IGNORED -> track stays unfitted, its bogus tau never gates
+    assert t["categories"]["sports"]["calibration"] == "unfitted"

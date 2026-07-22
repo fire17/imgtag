@@ -391,13 +391,25 @@ class Searcher:
         from .store import fitted_tau  # the ONE fitted-file loader, shared with store-side
 
         model_id = snap.manifest.get("model_id", "")
+        model_sha = snap.manifest.get("model_sha", "")
         base_model = model_id.rsplit("-", 1)[0] if model_id else ""
+
+        def fit(cat: str, mid: str) -> dict:
+            # SHA-GUARD: a fitted file is keyed by model_id (filename), but the base-model
+            # fallback could apply an fp32 fit to a same-base int8 dataset. If the file
+            # declares a model_sha, it must match the dataset's or it is ignored — no
+            # wrong-model contamination (track-sports2's flag; mirrors their load_head).
+            f = fitted_tau(cat, mid)
+            if f.get("model_sha") and model_sha and f["model_sha"] != model_sha:
+                return {}
+            return f
+
         cats, counts = {}, {}
         for name, g in groups.items():
             # fitted-file-WINS over the spec, same precedence + same loader store-side uses
             # (the split-brain source was the fitted file, not the base spec). The base is
             # the spec I already hold from tracks() — authoritative, never re-read from disk.
-            cfg = {**spec[name], **fitted_tau(name, base_model), **fitted_tau(name, model_id)}
+            cfg = {**spec[name], **fit(name, base_model), **fit(name, model_id)}
             tiers = [t for t in TIER_ORDER if t in g and g[t].stop > g[t].start]
             if not tiers:
                 continue
@@ -804,12 +816,25 @@ class Searcher:
                 if st:  # dataset layer can only RAISE the bar, never lower it
                     floor = max(floor, float(st.get("mean", 0.0)) + K_STD * float(st.get("std", 0.0)))
                 eff[j] = present[j] = floor  # a fitted tau is the right bar for both
-            else:  # dataset layer alone
-                mu = float(st["mean"]) if "mean" in st else float(cos[:, j].mean())
-                sd = float(st["std"]) if "std" in st else float(cos[:, j].std())
-                P[:, j] = _sigmoid(za * ((cos[:, j] - mu) / max(sd, 1e-6)) + zb)
-                eff[j] = float(_sigmoid(za * K_STD + zb))
-                present[j] = float(_sigmoid(za * SPECTRUM_K + zb))
+            else:
+                # UNCALIBRATED tag: score on ABSOLUTE cosine through the same logistic the
+                # free-text path uses — NEVER the corpus-relative z-score. The z-score
+                # saturates on a topically-homogeneous corpus (weaponprobe = all guns), so
+                # an unfitted hypernym like "axe"/"cannon" hits p~0.8 on modest cosine and
+                # OUTRANKS calibrated tags AND the dense honest score (the weapon/weapo P1).
+                # The absolute-cos score is by construction <= what the dense path gives for
+                # the same image, so ADR-3's law holds: uncalibrated boosts rank, never
+                # dominates. (Falls back to z-score only if this build runs the "z" feature.)
+                a2, b2 = table.text_logistic
+                if table.text_feature == "cos":
+                    P[:, j] = _sigmoid(a2 * cos[:, j] + b2)
+                    present[j] = float(_sigmoid(a2 * THETA_SYN + b2))
+                else:
+                    mu = float(st["mean"]) if "mean" in st else float(cos[:, j].mean())
+                    sd = float(st["std"]) if "std" in st else float(cos[:, j].std())
+                    P[:, j] = _sigmoid(za * ((cos[:, j] - mu) / max(sd, 1e-6)) + zb)
+                    present[j] = float(_sigmoid(za * SPECTRUM_K + zb))
+                eff[j] = 2.0  # unreachable: an uncalibrated tag can NEVER gate (ADR-3 tiers)
         return P, eff, cos, present
 
     # -- the query -------------------------------------------------
@@ -852,7 +877,18 @@ class Searcher:
             named = {i: "tag-list" for _, idxs in groups for i in idxs}
             named.update(dict(cands))
             cands = sorted(named.items())[:MAX_TAGS]
-        use_text = text == "always" or (text != "never" and not cands)
+        # If the query resolves ONLY to UNCALIBRATED tags, we still need the dense score to
+        # CAP them (ADR-3: uncalibrated tags boost rank + explain, never dominate). Without
+        # it an unfitted hypernym ("weapon" -> axe/cannon) presents fake ~0.99 confidence and
+        # buries the honest dense ranking (the weapon/weapo P1). One extra text batch on such
+        # a query is the honest cost; a query with any CALIBRATED tag keeps the no-tower path.
+        has_uncal = bool(table) and any(not table.calibrated(i) for i, _ in cands)
+        has_calib = bool(table) and any(table.calibrated(i) for i, _ in cands)
+        # Need the dense score to cap uncalibrated tags ONLY when there is no calibrated
+        # anchor to cap against (a pure-uncalibrated query like "weapon"->all-unfitted, or a
+        # non-tag query). A query with a calibrated tag (car, or weapon via knife) caps the
+        # uncalibrated expansions at that tag's per-image score with no text load.
+        use_text = text == "always" or (text != "never" and (not cands or (has_uncal and not has_calib)))
 
         q, load_ms, s, z = None, 0.0, None, np.zeros(n, np.float32)
         p_text = np.zeros(n, np.float32)
@@ -880,9 +916,24 @@ class Searcher:
         if cands:
             idx = [i for i, _ in cands]
             P, eff, tag_cos, present = self._tag_scores(snap, table, idx, man)
+            calib = np.asarray([table.calibrated(i) for i in idx])
+            # ADR-3 tier law: an UNCALIBRATED tag may boost rank + explain, but its p is
+            # CAPPED at the image's honest score, so it can never outrank a calibrated tag or
+            # the dense free-text ranking (the weapon/weapo P1: an unfitted hypernym like
+            # "axe" saturating to p~0.99 on a homogeneous corpus). The cap per image is the
+            # best HONEST signal available: the max calibrated-tag p (if any calibrated tag
+            # is in the query) and/or the dense p_text (loaded only when there is no
+            # calibrated anchor). A calibrated tag keeps its own fitted probability.
+            if has_uncal:
+                cap = np.zeros(n, np.float32)
+                if calib.any():
+                    cap = np.maximum(cap, P[:, calib].max(1))
+                if use_text:
+                    cap = np.maximum(cap, p_text)
+                uncal = ~calib
+                P = np.where(uncal[None, :], np.minimum(P, cap[:, None]), P)
             col = P.argmax(1).astype(np.int32)
             p_tag = P[np.arange(n), col].astype(np.float32)
-            calib = np.asarray([table.calibrated(i) for i in idx])
             if calib.any():
                 gated = bool((P[:, calib] >= eff[calib]).any())
             if n_concepts:  # rank by ALL first, then m/n descending, then ANY
