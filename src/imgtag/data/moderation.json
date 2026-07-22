@@ -438,7 +438,11 @@
     "a close-up photo of {}.",
     "{}"
    ],
-   "scorer": "margin",
+   "scorer": "margin_arbitrated",
+   "col_roles": [
+    "margin",
+    "margin_review"
+   ],
    "platt": [
     -103.018,
     5.6314

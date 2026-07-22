@@ -481,11 +481,10 @@ class DrugsHead:
     """
 
     wants_images = False
-    # STORAGE ROLES. `None` => single-col sidecar of `p` (today's behaviour, and what
-    # b-engine's current derive_tiers bands). When b-engine's derive_tiers honours the
-    # `arbitrated_storage` contract, set this to ["margin", "margin_review"] and the head
-    # already emits both columns below — a two-line flip + one re-backfill, no other change.
-    col_roles = None
+    # STORAGE ROLES — FLIPPED 2026-07-22 (b-engine's margin_arbitrated derive is in, 164763c;
+    # emitted platt sign fixed in f2c82fa). Two-margin sidecar so derive_tiers reproduces the
+    # tobacco-vs-drug arbitration exactly, WITHOUT freezing tau (ADR-15 free re-derive holds).
+    col_roles = ["margin", "margin_review"]
 
     def __init__(self, scorer: DrugsScorer, model_sha: str):
         self.scorer, self.model_sha = scorer, model_sha
@@ -568,7 +567,8 @@ def track_spec() -> dict:
         "negatives": bg,
         "policy_neighbours": POLICY_NEIGHBOURS,
         "templates": list(TEMPLATES),
-        "scorer": "margin",
+        "scorer": "margin_arbitrated",   # FLIPPED: two-margin arbitrated derive (b-engine 164763c)
+        "col_roles": ["margin", "margin_review"],
         # PLATT CONVENTION FIX (b-engine caught it, 2026-07-22): this module scores with the
         # STANDARD sigmoid `p = 1/(1+exp(-(A·m+B)))`, but the whole project — tags.platt_apply,
         # search._margin_p, and b-engine's derive_tiers — uses `p = 1/(1+exp(A·m+B))` =
