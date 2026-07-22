@@ -253,6 +253,46 @@ Two findings worth more than the headline numbers:
    OI `hard`-tier knife confusions came from genuinely ambiguous blade imagery, not from
    ordinary kitchen scenes.
 
+### 5.3b Live gallery verification (user challenge, 2026-07-22 ~16:4xZ)
+
+User: "currently everything that is flagged is false positives and im not even sure you
+fetched some true ones in the dataset." Both halves checked with eyes, not stats:
+
+**True positives exist and score correctly — VISUALLY verified.** Random firearm-positive
+OI eval images opened and inspected: `041ec0633447b467` = police display board with 4
+rifles + 3 handguns; `054bc2ae75258366` = soldiers carrying AK rifles. Real weapons,
+correctly labeled. Head scores through shipped artifact:
+
+| image (inspected) | content | p | tier |
+|---|---|---|---|
+| 041ec0633447b467 | gun board: rifles+pistols | 0.984 | violation |
+| 054bc2ae75258366 | soldiers w/ AKs | 0.993 | violation |
+| 018d4a117c1d7e16 | rifle+shotgun | 0.963 | violation |
+| 06aabc23f48f9eaa | rifle | 0.991 | violation |
+
+**User galleries — flags measured through the trained head:**
+
+| dataset | n | violation | review | review rate |
+|---|---|---|---|---|
+| unsplashb | 4,340 | **0** | 33 | 0.8% |
+| unsplash-demo | 2,000 | **0** | 15 | 0.8% |
+| quick50 (COCO) | 50 | 0 | 4 | 8% |
+
+Galleries contain ~zero real weapons → **every flag there is review-tier and false or
+toy — expected behaviour of a recall-first net at π≈0, and the violation tier stays
+SILENT (0 flags in 6,390 unsplash images).** Top unsplash hit inspected:
+`h2PgB8xb8AI.jpg` = toy dinosaur vs plastic toy soldiers with toy rifles, p=0.758 →
+**review, below violation τ=0.811**. Same image b-daemon's v0 prompt scaffold scored
+0.833 with no tier split — the trained head lands it exactly where ADR-14's ruling wants
+toy weapons: surfaced for review, never a violation. If "everything flagged" was observed
+through the v0 prompt-set scaffold (`enforcement_ready:false` by design), that scaffold
+is superseded by this head behind the same interface.
+
+**Toy-vs-real (ADR-14 directive):** not a separate classifier — measured behaviour is
+that toys land in [review, violation) band while real weapons cluster ≥0.96 (see tables
+above). n is small (1 toy scene + OI Toy-tier FP rate 0.17); a labeled toy-weapon eval
+set remains the gap named in §7.
+
 ### 5.4 A note on the discarded clean-corpus probe
 
 A 2,000-image OI clean-corpus probe was fetched to tighten the FPR interval (n=177 → 2,174).
