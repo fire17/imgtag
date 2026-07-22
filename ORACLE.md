@@ -325,7 +325,9 @@ highest-bar protocol — verbatim vision, budgets as tests, honest verification,
   flags: `violation` = human nudity/explicit · real weapons · illegal drugs/paraphernalia;
   `review` = swimwear/lingerie · toy/replica weapons · tobacco/vape/smoking. Non-person
   nude figures (mannequins/statues) = no flag. Per-image schema: {category, p, tier:
-  violation|review|none}; counts/API/UI always report tiers separately; recall-first
+  alert|violation|review|none} — `alert` added 13:20Z (user safety-track directive): the
+  HIGHEST tier, reserved for safety-class signals (person-down + danger context);
+  sorts above violation in every count, view, and summary; counts/API/UI always report tiers separately; recall-first
   operating points per tier; enforcement_ready stays false per category until its τ is
   fitted on labeled ground truth honoring these boundaries. The measured v0 failures
   re-grade under policy: bikini/toy-rifle/vape flags were CORRECT at review tier; the

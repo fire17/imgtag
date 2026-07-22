@@ -28,3 +28,7 @@ these are very important to indentify correctly - please make sure to create 3 t
 → Two-tier flag model: `violation` (human nudity/explicit, real weapons, illegal drugs +
 paraphernalia) vs `review` (swimwear, toy weapons, tobacco/vape). Counts and views report
 both tiers distinctly.
+
+## 2026-07-22 ~13:20Z — safety track: people lying down + danger escalation (verbatim)
+
+make another track to identify people lying down (even if part of their body is obstructed) and even higher flagging if either detecting injury, things broken, distruction distress high stress or anything dangorous - does that makes sense ?
