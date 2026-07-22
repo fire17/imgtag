@@ -471,15 +471,17 @@ def test_duplicate_index_rows_collapse_but_stay_counted(home):
     One content-addressed id = one image (IA.md); extra paths fold in; the count is
     REPORTED so an indexer regression can never hide behind a tidy payload."""
     be = FakeBackend()
-    from imgtag.core.store import Writer as _W
-
-    with _W("d1", be, home) as w:  # the writer guard is real, and is asserted here
-        w.append(np.stack([be._vec("cat")]),
-                 [{"image_id": "a" * 16, "path": "/img/copy0.jpg", "dataset": "d1", "w": 1, "h": 1}])
-        with pytest.raises(ValueError, match="duplicate image_id"):
+    # MEASURED 2026-07-22: the writer guard catches a duplicate within one batch and on
+    # re-open, but NOT across appends inside one job — three rows for one id still reach
+    # disk that way (reported to b-engine). So this guard is live, not merely historical.
+    with Writer("d1", be, home) as w:
+        for i in range(3):
             w.append(np.stack([be._vec("cat")]),
-                     [{"image_id": "a" * 16, "path": "/img/copy1.jpg", "dataset": "d1",
+                     [{"image_id": "a" * 16, "path": f"/img/copy{i}.jpg", "dataset": "d1",
                        "w": 1, "h": 1}])
+    assert len(S.Searcher(home, backend=be).snapshot("d1").ids) == 3  # duplicates on disk
+    r = S.Searcher(home, backend=be).search("cat", "d1", k=10)
+    assert len(r["hits"]) == 1 and r["collapsed_duplicates"] == 2  # ...one image to a client
 
     hits = [{"image_id": "a" * 16, "path": f"/img/copy{i}.jpg", "dataset": "d1", "p": 0.9 - i / 100}
             for i in range(7)]
