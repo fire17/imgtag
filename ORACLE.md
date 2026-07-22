@@ -537,6 +537,12 @@ label, or to compare a dev-machine number against a target-profile (🐧) budget
   lane complete-via-cross-checks in the gap. Lesson: disk truth led message truth by 20
   minutes — check the file BEFORE pinging, and re-check before declaring a lane missing.
 
+- 2026-07-22 12:52Z · Truncated-fetch incident closed: openclip/siglip-base fp32 towers
+  were truncated by the parallel fetch storm; SHAs recorded the truncated files as
+  baseline; INVALID_PROTOBUF was the symptom; re-fetch produced full files (sizes match
+  params×4B arithmetic) verified by ORT load+forward. LAW: fetch validation must include
+  expected-size-or-load-test — ">1MB and binary" passes truncated files. SHA256SUMS.fp32-
+  verified is the new baseline in both dirs.
 - 2026-07-22 12:25Z · b-daemon falsified ADR-3's z-score free-text calibration with a
   15-real-vs-15-nonsense probe (nonsense max-z median 4.16 > real 3.81) and shipped the
   fix behind a selector without touching the ADR — escalation contract §7(b) honored
