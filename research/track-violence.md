@@ -298,14 +298,17 @@ measurement).** The BACKGROUND bank lifts sports.py's martial-arts and team-spor
 strings (commit 45c10f6) with a sync-on-retune ping to this lane. **The mechanism that
 delivers boxing → 0% violation is THIS track's subtraction of those prompts from its own
 margin — measured, first-party, solid (§3a).** The *composition* "sports:match exculpates
-the bout" is a WEAKER, secondary signal and must not be over-stated: track-sports2 measures
-its own match recall on contact sports at **only ~0.10–0.15** (boxing 0.102, martial-arts
-0.146 on the `unsplashb` slice, at τ_match 0.1809), inside its documented "activity-only,
-under-measured" blind spot — its prompts are equipment/scene-biased and weak-keyword boxing
-photos are mostly gym/portrait, not ring shots. So **sports:match is NOT a reliable
-"this is a bout, not an assault" guarantee today.** The honest statement: the negatives-bank
-subtraction is the working mechanism; the cross-track composition is a promising but
-unproven bonus, pending sports' targeted prompt round (which needs the `vslices` dataset —
+the bout" is a WEAKER, secondary signal and must not be over-stated: track-sports2, measured
+on the SAME whole `vslices` slice dataset (τ_match 0.0415 margin-space, after fixing a
+reader-gating bug this lane's collision probe surfaced — see below), scores its own match
+recall on real ring/dojo/mat shots at **only ~0.12–0.16** (boxing 0.122, martial-arts 0.128,
+football/soccer 0.157, hockey/rugby 0.130, basketball 0.029), inside its documented
+"activity-only, under-measured" blind spot — and its argmax content label is unreliable on
+contact sports (boxing images argmax to "frisbee"/"surfing" for lack of a strong
+boxing/football prompt). So **sports:match is NOT a reliable "this is a bout, not an assault"
+guarantee today.** The honest statement: the negatives-bank subtraction is the working
+mechanism; the cross-track composition is a promising but unproven bonus, pending sports'
+targeted prompt round (which needs the `vslices` dataset —
 now **whole, 1856/1856 rows** after a polite-mode re-run at the conductor's ALL-CLEAR; an
 earlier `--full-speed` attempt was rightly killed mid-run as an ADR-11 violation on my part,
 and the completion was redone in polite mode, job polled not `--wait`-blocked).
