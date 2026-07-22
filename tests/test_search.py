@@ -437,7 +437,7 @@ def test_moderation_summary_splits_tiers_and_never_claims_enforcement(home, monk
     be = build(home, "d1", ["cat", "dog"] + ["tree"] * 18)
     m = searcher(home, be).moderation("d1", limit=5)
     assert m["counts"]["x"] == {"violation": 1, "review": 1}
-    assert m["enforcement_ready"] == {"x": False} and m["calibration"] == "unfitted"
+    assert m["enforcement_ready"] == {"x": False} and m["calibration"] == {"x": "unfitted"}
     assert m["source"] == "current-scan"  # distinct from b-engine's stored index-time flags
     tiers = {f["tier"] for f in m["flagged"]}
     assert tiers == {"violation", "review"}

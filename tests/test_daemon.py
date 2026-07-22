@@ -354,7 +354,7 @@ def test_moderation_endpoint_and_track_filter(live):
     """Moderation tracks (VISION-ADDENDA 12:33Z): per-dataset counts, opt-in only, and
     never advertised as enforcement-ready while the tracks are unfitted."""
     st, r = get(live, "/api/moderation?dataset=d1")
-    assert st == 200 and r["calibration"] == "unfitted"
+    assert st == 200 and r["datasets"][0]["calibration"]["nudity"] == "unfitted"
     # ADR-14 item 3: enforcement readiness is PER CATEGORY, and false until tau is fitted
     assert r["enforcement_ready"] == {"nudity": False, "weapons": False, "drugs": False}
     d = r["datasets"][0]

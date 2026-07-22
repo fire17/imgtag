@@ -412,8 +412,11 @@ class Handler(BaseHTTPRequestHandler):
                            "indexed": sum(r["indexed"] for r in per),
                            "source": "current-scan",  # live; b-engine's stored flags are
                            # "flagged at indexing" and come from `imgtag info --flags`
-                           "calibration": "unfitted",
-                           "enforcement_ready": {c: False for c in totals}})
+                           # per-category, straight from each track's spec (a fitted track
+                           # says so; an unfitted one can never claim otherwise)
+                           "calibration": {c: v for r in per for c, v in r["calibration"].items()},
+                           "enforcement_ready": {c: v for r in per
+                                                 for c, v in r["enforcement_ready"].items()}})
             elif u.path == "/api/status":
                 self.json(d.status())
             elif u.path == "/api/images":

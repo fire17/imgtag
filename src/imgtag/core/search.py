@@ -314,11 +314,17 @@ class Searcher:
 
     # -- moderation ------------------------------------------------
     def track_scores(self, dataset: str) -> dict:
-        """Per-image probability for every moderation category, in BOTH ADR-14 tiers.
+        """Per-image scores for every moderation category, in BOTH ADR-14 tiers.
 
-        Costs one text-tower batch per model and one [N, 2*C] matmul per dataset
-        generation, then caches. `violation` is the policy breach; `review` is the
-        look-alike a human should judge. A row is `none` unless one of them clears.
+        Two spec shapes are honoured, per category:
+
+        * **fitted** (``scorer: "margin"`` + ``tau``/``tau_review``, e.g. the drugs track):
+          feature = max(positive concepts) - max(background concepts), thresholded at the
+          FITTED taus in margin space. ``policy_neighbours`` are scored for EXPLANATION
+          ONLY and never subtracted — measured by that lane, subtracting them collapses AP
+          0.58 to 0.04, because a clinical syringe is visually identical to a drug syringe.
+        * **unfitted**: the same margin feature, z-scored against THIS corpus, tiered by
+          which prompt set the image resembles more (ADR-14).
         """
         snap = self.snapshot(dataset)
         stamp = self._manifest_stamp(dataset)
@@ -332,56 +338,103 @@ class Searcher:
             return out
         table = self.tags(snap.manifest)
         za, zb = table.z_logistic if table else (Z_A, Z_B)
-        floor = float(_sigmoid(za * K_STD + zb))
-        names = list(spec)
-        vecs = self._track_vectors(snap.manifest, names, spec)  # [2C, D]
-        cos = np.asarray(snap.emb @ vecs.T, np.float32).reshape(len(snap.ids), 2 * len(names))
-        P = np.empty_like(cos)
-        for j in range(cos.shape[1]):  # dataset layer: each prompt set vs THIS corpus
-            c = cos[:, j]
-            P[:, j] = _sigmoid(za * ((c - c.mean()) / max(float(c.std()), 1e-6)) + zb)
+        zfloor = float(_sigmoid(za * K_STD + zb))
+        groups, cols = self._track_concepts(snap.manifest, spec)
+        cos = np.asarray(snap.emb @ cols.T, np.float32).reshape(len(snap.ids), cols.shape[0])
+
+        def best(sl):  # max similarity over a concept group (empty group -> -inf)
+            return cos[:, sl].max(1) if sl.stop > sl.start else np.full(len(snap.ids), -1e9, np.float32)
+
         cats, counts = {}, {}
-        for i, name in enumerate(names):
-            pv, pr = P[:, 2 * i], P[:, 2 * i + 1]
-            # The tier is whichever prompt set the image resembles MORE — not "violation
-            # first". The review set IS the look-alike (swimwear, toy gun, vape), so a
-            # bikini scores above the nudity floor no matter what; only the comparison
-            # separates it from actual nudity. Measured: violation-first mislabels all
-            # three ADR-14 review classes; comparison puts them where the policy wants.
-            fires = np.maximum(pv, pr) >= floor
-            is_v = fires & (pv > pr)
-            is_r = fires & ~is_v
-            cats[name] = {"violation_p": pv, "review_p": pr, "is_violation": is_v, "is_review": is_r}
+        for name, g in groups.items():
+            cfg = spec[name]
+            fitted = cfg.get("scorer") == "margin" and cfg.get("tau") is not None
+            if fitted:
+                # margin ONLY where the spec was fitted for it: its negative set is a
+                # background for a max-margin, not a mean to subtract. Applying margin to a
+                # spec written the other way MEASURABLY broke nudity — "a clothed person"
+                # dominates the background of any photo containing a person, so a genuine
+                # topless image scored no flag at all.
+                bg = best(g["negatives"])
+                mv, mr = best(g["violation"]) - bg, best(g["review"]) - bg
+                tv = float(cfg["tau"])
+                tr_ = float(cfg.get("tau_review", tv))
+                over_v, over_r = mv - tv, mr - tr_
+                # tier by which threshold is exceeded MORE. `tau_review` above `tau` would
+                # otherwise make the review tier unreachable (everything clearing the higher
+                # review bar has already cleared the lower violation bar) — measured on the
+                # drugs spec, where a vape landed in `violation` against ADR-14.
+                is_v = (over_v >= 0) & (over_v >= over_r)
+                is_r = (over_r >= 0) & ~is_v
+                pv, pr = self._margin_p(mv, cfg), self._margin_p(mr, cfg)
+            else:  # unfitted spec: mean-of-prompts minus half the mean of the negatives,
+                # z-scored against THIS corpus (the shape those prompt sets were written for)
+                neg = cos[:, g["negatives"]].mean(1) if g["negatives"].stop > g["negatives"].start else 0.0
+                mv = (cos[:, g["violation"]].mean(1) if g["violation"].stop > g["violation"].start
+                      else np.zeros(len(snap.ids), np.float32)) - 0.5 * neg
+                mr = (cos[:, g["review"]].mean(1) if g["review"].stop > g["review"].start
+                      else np.zeros(len(snap.ids), np.float32)) - 0.5 * neg
+                pv = _sigmoid(za * ((mv - mv.mean()) / max(float(mv.std()), 1e-6)) + zb)
+                pr = _sigmoid(za * ((mr - mr.mean()) / max(float(mr.std()), 1e-6)) + zb)
+                fires = np.maximum(pv, pr) >= zfloor
+                is_v = fires & (pv > pr)
+                is_r = fires & ~is_v
+            cats[name] = {"violation_p": pv, "review_p": pr, "is_violation": is_v,
+                          "is_review": is_r, "calibration": cfg.get("calibration", "unfitted"),
+                          "enforcement_ready": bool(cfg.get("enforcement_ready", False)),
+                          # explanation-only signal, never subtracted, never a gate
+                          "neighbour": best(g["policy_neighbours"]) if g["policy_neighbours"].stop
+                          > g["policy_neighbours"].start else None}
             counts[name] = {"violation": int(is_v.sum()), "review": int(is_r.sum())}
-        out = {"categories": cats, "counts": counts, "floor": floor, "n": len(snap.ids),
-               "labels": {n: spec[n].get("label", n) for n in names}}
+        out = {"categories": cats, "counts": counts, "floor": zfloor, "n": len(snap.ids),
+               "labels": {n: spec[n].get("label", n) for n in spec}}
         self._tracks[dataset] = (stamp, out)
         return out
 
-    def _track_vectors(self, manifest: dict, names: list[str], spec: dict) -> np.ndarray:
-        """Two L2-normalized vectors per category (violation, review), each the mean of its
-        prompts minus half the mean of the shared negatives — the negatives are what stop a
-        mannequin or a statue reading as a nude person (ADR-14's true false-positive class)."""
-        key = (manifest["model_sha"], tuple(names), tracks().get("version"))
+    @staticmethod
+    def _margin_p(m: np.ndarray, cfg: dict) -> np.ndarray:
+        """Fitted margin -> probability via that track's Platt pair (project convention:
+        ``p = sigmoid(-(A*s + B))``, tags.platt_apply). Cosmetic next to the fitted tau,
+        which does the gating in margin space."""
+        ab = cfg.get("platt")
+        if not ab:
+            return _sigmoid(m)
+        from .tags import platt_apply
+
+        return np.asarray(platt_apply(m, ab), np.float32)
+
+    def _track_concepts(self, manifest: dict, spec: dict):
+        """Embed every concept of every category ONCE (templates expanded and averaged).
+
+        Returns (groups, matrix): groups[name][role] is a slice into the concept matrix, so
+        scoring is one [N, C] matmul and `max over a role` is a slice-max.
+        """
+        key = (manifest["model_sha"], tracks().get("version"), tuple(sorted(spec)))
         if self._track_vecs.get("key") == key:
-            return self._track_vecs["vecs"]
-        flat, spans = [], []
-        for n in names:
-            v, r, neg = spec[n].get("violation") or [], spec[n].get("review") or [], spec[n].get("negatives") or []
-            spans.append((len(flat), len(v), len(r), len(neg)))
-            flat += list(v) + list(r) + list(neg)
+            return self._track_vecs["groups"], self._track_vecs["cols"]
+        roles = ("violation", "review", "negatives", "policy_neighbours")
+        texts, groups, n = [], {}, 0
+        for name, cfg in spec.items():
+            tpl = cfg.get("templates") or ["{}"]
+            groups[name] = {}
+            for role in roles:
+                start = n
+                for concept in cfg.get(role) or []:
+                    texts.append([t.format(concept) for t in tpl])
+                    n += 1
+                groups[name][role] = slice(start, n)
         self.backend(manifest)
+        flat = [t for group in texts for t in group]
         emb = np.asarray(self._backend.embed_texts(flat), np.float32)
         self.text_loaded = True
-        rows = []
-        for off, nv, nr, nn in spans:
-            neg = emb[off + nv + nr : off + nv + nr + nn].mean(0) if nn else 0.0
-            for a, b in ((off, nv), (off + nv, nr)):
-                v = (emb[a : a + b].mean(0) if b else np.zeros(emb.shape[1], np.float32)) - 0.5 * neg
-                rows.append(v / max(float(np.linalg.norm(v)), 1e-12))
-        vecs = np.ascontiguousarray(rows, np.float32)
-        self._track_vecs = {"key": key, "vecs": vecs}
-        return vecs
+        rows, at = [], 0
+        for group in texts:  # average the templates, renormalize: one vector per concept
+            v = emb[at : at + len(group)].mean(0)
+            at += len(group)
+            rows.append(v / max(float(np.linalg.norm(v)), 1e-12))
+        cols = np.ascontiguousarray(rows, np.float32) if rows else np.zeros((0, emb.shape[1]), np.float32)
+        self._track_vecs = {"key": key, "groups": groups, "cols": cols}
+        return groups, cols
 
     def flags_for(self, tr: dict, i: int) -> list[dict]:
         """ADR-14 per-image payload: [{category, p, tier}] for whatever actually fired."""
@@ -404,8 +457,9 @@ class Searcher:
             "labels": t.get("labels", {}), "threshold": t.get("floor"),
             "source": "current-scan",  # live: today's detectors over today's embeddings
             # per-category, and false until per-TIER tau is fitted (ADR-14 item 3)
-            "calibration": "unfitted",
-            "enforcement_ready": {n: False for n in (t.get("counts") or {})},
+            "calibration": {n: c["calibration"] for n, c in (t.get("categories") or {}).items()},
+            "enforcement_ready": {n: c["enforcement_ready"]
+                                  for n, c in (t.get("categories") or {}).items()},
         }
         if limit and t.get("categories"):
             flagged = []
