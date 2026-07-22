@@ -13,7 +13,10 @@ Two paths, fused in PROBABILITY SPACE ONLY (ADR-3 calibration contract §2):
   Works standalone: with no tag table on disk every query takes this path.
 
 ``p = max(p_tag, p_text)`` and the winning path is the ``why`` payload. Zero results above
-tau is an honest ``no_match``, never an empty list pretending to be a miss.
+tau is an honest ``no_match``, never an empty list pretending to be a miss — but ONLY when
+a real fit exists. **Fail-open law:** with no CAL-SET fit for the loaded model_sha the
+engine returns the ranking labeled ``"calibration": "unfitted"`` and never no-matches;
+"I cannot judge" must never be dressed up as "nothing matched".
 """
 
 from __future__ import annotations
@@ -46,7 +49,8 @@ TEXT_A, TEXT_B = 60.0, -17.6  # p_text = sigmoid(A*x + B); x is TEXT_FEATURE
 # slope that spans the measured real/nonsense gap (real med 0.300 vs nonsense med 0.277).
 # MODEL-SPECIFIC and PROVISIONAL: cosine scale differs per model, so these hold only for
 # pecore-s16-384 until b-bench's CAL-SET fit lands in tags.json per model_sha. Any result
-# scored this way is labeled `"calibration": "measured-default"` — never "fitted".
+# scored this way is labeled `"calibration": "unfitted"` — never "fitted" — and, per the
+# FAIL-OPEN law, an unfitted threshold NEVER vetoes: it ranks and says it cannot judge.
 Z_A, Z_B = 1.6, -4.0  # the Z-SCALE pair: p = sigmoid(Z_A*z + Z_B). Used by the dataset
 # layer (an unfitted tag's own score distribution over this corpus) and by the "z" text
 # feature. Kept SEPARATE from (TEXT_A, TEXT_B) because the two features live on different
@@ -61,6 +65,13 @@ K_STD = 3.0  # dataset-layer effective tau = max(tau_tag, mean + K_STD*std)
 # the whole spectrum collapse to ANY. Applies ONLY to unfitted tags; a CAL-SET-fitted tau
 # replaces it. Uncalibrated tags still may never gate or veto (ADR-3 tiers).
 SPECTRUM_K = 2.0
+# ...plus a CORPUS-INDEPENDENT presence test, because the z-score one structurally cannot
+# see a COMMON concept: quick50 is 58% "person", so no image with a person stands 2 sigma
+# above a corpus made of persons, and "car person" could never reach the ALL tier. A term
+# also counts as present when it ranks inside the image's own top-R tags — that asks "is
+# this one of the things this image is about?", which is invariant to corpus composition
+# and needs no fitted threshold. Ranking only; it may never gate or veto (ADR-3 tiers).
+SPECTRUM_RANK = 25
 MAX_TAGS = 32  # candidate tags per query (bounds the [N,C] tag matmul)
 NGRAM = 3  # longest multi-word tag a space-separated tag list may name ("night sky")
 DATA = Path(__file__).resolve().parent.parent / "data"
@@ -194,6 +205,10 @@ class TagTable:
         self.theta_syn = float(meta.get("theta_syn", THETA_SYN))
         self.text_logistic = tuple(meta.get("text_logistic") or (TEXT_A, TEXT_B))
         self.text_feature = meta.get("text_feature", TEXT_FEATURE)
+        # A fit exists only if someone FITTED it: an explicit text logistic in the file, or
+        # at least one tag carrying both a Platt pair and a tau (b-bench's CAL-SET output).
+        self.fitted = bool(meta.get("text_logistic")) or any(
+            bool(a) and t is not None for a, t in zip(self.platt, self.tau))
         self.z_logistic = tuple(meta.get("z_logistic") or (Z_A, Z_B))
         self.emb = np.memmap(d / "tags.f32", np.float32, "r", shape=(n, self.dim))
         self.index = {name: i for i, name in enumerate(self.names)}
@@ -342,6 +357,28 @@ class Searcher:
         self._track_vecs = {"key": key, "vecs": vecs}
         return vecs
 
+    def _rank_presence(self, snap, table: TagTable, groups, rows, term_hit) -> None:
+        """Mark a term present when it is among the image's OWN top-R tags.
+
+        Only the rows we are about to return are scored against the full vocabulary
+        ([len(rows), T] — 50x2177 here), so this is a rounding error next to the scan.
+        """
+        if not len(rows):
+            return
+        M = np.asarray(table.emb, np.float32)
+        X = np.stack([np.asarray(snap.emb[int(i)], np.float32) for i in rows])
+        sc = X @ M.T  # [rows, T]
+        # R scales with the vocabulary (top-25 of 2177 is selective; top-25 of 3 is not)
+        r = max(1, min(SPECTRUM_RANK, sc.shape[1] // 10))
+        top = np.argpartition(-sc, r - 1, axis=1)[:, :r]
+        base = sc.mean(1)  # a tag below the image's own average is not what it is "about"
+        for gi, (_, tag_idxs) in enumerate(groups):
+            want = set(tag_idxs)
+            for ri, row in enumerate(rows):
+                inside = want & set(top[ri].tolist())
+                if inside and max(sc[ri, j] for j in inside) > base[ri]:
+                    term_hit[int(row), gi] = True
+
     def moderation(self, dataset: str, limit: int = 0) -> dict:
         """Per-dataset moderation summary: "Found 10 images with drugs, 7 with weapons…"."""
         snap = self.snapshot(dataset)
@@ -350,7 +387,7 @@ class Searcher:
             "dataset": dataset, "indexed": t["n"], "counts": t.get("counts", {}),
             "labels": t.get("labels", {}), "threshold": t.get("floor"),
             # the ONLY honest stance until b-bench fits per-track tau on CAL-SET
-            "calibration": "measured-default", "enforcement_ready": False,
+            "calibration": "unfitted", "enforcement_ready": False,
         }
         if limit and t.get("tracks"):
             flagged = []
@@ -523,8 +560,13 @@ class Searcher:
         if n == 0:
             return {"hits": [], "gated": False, "indexed": 0, "best_p_text": 0.0,
                     "text_tower": "skipped", "load_ms": 0.0, "terms": [],
-                    "calibration": "measured-default"}
+                    "calibration": "unfitted"}
         table = self.tags(man)
+        # FAIL-OPEN LAW: an UNFITTED threshold may never veto a result. Without a CAL-SET
+        # fit for this model_sha the engine returns the honest ranking and says so; it does
+        # not pretend that "nothing matched" when what it really means is "I cannot judge".
+        fitted = bool(table and table.fitted)
+        floor = TAU if fitted else -1.0
         cands = self._name_candidates(table, query) if table is not None else []
         groups = self.concepts(table, query) if table is not None else []
         if groups:
@@ -582,6 +624,9 @@ class Searcher:
                     term_hit[:, gi] = (P[:, cols] >= present[cols]).any(1)
                     names = {table.names[idx[c]] for c in cols}
                     term_via.append({} if term in names else {"via": sorted(names)[:4]})
+                # union with the image-relative test over the rows we will actually return
+                top_rows = np.argpartition(-p_tag, min(k, n) - 1)[:k] if k < n else np.arange(n)
+                self._rank_presence(snap, table, groups, top_rows, term_hit)
                 matched = term_hit.sum(1).astype(np.int32)
                 mean_p = np.where(matched > 0,
                                   (term_p * term_hit).sum(1) / np.maximum(matched, 1), 0.0)
@@ -616,7 +661,7 @@ class Searcher:
         hits = []
         for i in top:
             i = int(i)
-            if p[i] < TAU:
+            if p[i] < floor:
                 continue
             rec = snap.ids[i]
             if p_tag[i] > p_text[i] and col[i] >= 0:
@@ -667,8 +712,7 @@ class Searcher:
         return {"hits": hits[:k], "gated": gated, "indexed": n, "best_p_text": float(p_text.max()),
                 "text_tower": ("loaded" if load_ms else "warm") if use_text else "skipped",
                 "load_ms": load_ms, "terms": [t for t, _ in groups],
-                "calibration": "fitted" if (table and any(table.calibrated(i) for i, _ in cands))
-                               else "measured-default"}
+                "calibration": "fitted" if fitted else "unfitted"}
 
     def search(self, query: str, dataset: str | None = None, k: int = 50, strict: bool = False,
                text: str = "auto", track: str | None = None) -> dict:
@@ -678,7 +722,7 @@ class Searcher:
         names = [dataset] if dataset else list_datasets(self.home)
         hits: list[dict] = []
         indexed, gated, best_text, load_ms = 0, False, 0.0, 0.0
-        tower, terms, calibration = "skipped", [], "measured-default"
+        tower, terms, calibration = "skipped", [], "unfitted"
         for name in names:
             r = self.search_one(query, name, k=k, strict=strict, text=text, track=track)
             hits += r["hits"]
@@ -697,6 +741,10 @@ class Searcher:
             # budget (B3) can exclude it instead of silently absorbing a B13-shaped cost.
             "text_tower": tower,
             "text_tower_load_ms": round(load_ms, 2),
+            # honest latency attribution: a query that paid a model load says so, so a
+            # warm-latency budget (B3) never silently absorbs a B13-shaped cost.
+            "served_by": ("tag-table" if tower == "skipped" else
+                          "warm-tower" if not load_ms else "cold-load"),
             # how the probabilities were produced: a CAL-SET fit, or this build's measured
             # defaults. Never let a caller mistake one for the other.
             "calibration": calibration,
@@ -705,9 +753,11 @@ class Searcher:
             # parsed multi-term query (quoted spans stay ONE element); absent when n < 2
             **({"terms": terms} if terms else {}),
             "hits": hits[:k],
-            # honest no-match: no calibrated tag cleared its tau AND nothing cleared the
-            # free-text floor. Uncalibrated tags may never veto (ADR-3 tiers).
-            "no_match": not hits and not gated and best_text < TAU,
+            # An honest no-match requires a real threshold to have rejected everything:
+            # no calibrated tag cleared its tau AND nothing cleared the free-text floor.
+            # Unfitted calibration can only ever report "no rows", never "no match".
+            "no_match": (not hits) if calibration != "fitted"
+                        else (not hits and not gated and best_text < TAU),
         }
 
 

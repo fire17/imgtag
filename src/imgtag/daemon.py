@@ -57,7 +57,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from .core import models as _models
-from .core.progress import Job, list_jobs
+from .core.progress import Job, list_jobs, read_job
 from .core.search import CalibrationMismatchError, Searcher
 from .core.store import (
     CorruptIndexError,
@@ -170,6 +170,14 @@ class Daemon:
         self.stop = threading.Event()
         self.evictions: list[dict] = []  # ADR-5 model-eviction audit trail (last 20)
 
+    def eviction_policy(self) -> str:
+        """ADR-5 ruled default: KEEP the model while RSS stays under the watermark. A time
+        TTL is the opt-in override, so `text_ttl_s: null` means "no timer", not "evict now"
+        — paying a ~400ms load after every idle period is immich's sin with extra steps."""
+        if self.text_ttl > 0:
+            return f"idle-ttl {self.text_ttl:g}s or rss>{self.watermark_mb:g}MB"
+        return f"keep-while-rss<{self.watermark_mb:g}MB" if self.watermark_mb > 0 else "keep"
+
     def model_shas(self) -> dict:
         b = self.searcher._backend
         return {b.model_id: b.model_sha} if b else {}
@@ -232,7 +240,8 @@ class Daemon:
             "text_tower": "loaded" if self.searcher.text_loaded else "unloaded",
             "text_tower_resident": bool(self.searcher.text_loaded),
             "models_loaded": sorted(self.model_shas()),
-            "text_ttl_s": self.text_ttl, "rss_watermark_mb": self.watermark_mb,
+            "eviction_policy": self.eviction_policy(),
+            "text_ttl_s": self.text_ttl or None, "rss_watermark_mb": self.watermark_mb,
             "datasets": self.datasets(), "jobs": len(self.jobs()),
         }
 
@@ -263,13 +272,13 @@ class Daemon:
                 return rec
         raise FileNotFoundError(f"image {image_id!r} not in dataset {dataset!r}")
 
-    def start_index(self, path: str, dataset: str) -> dict:
-        """Spawn `imgtag index` as a subprocess and return a job id (<=500ms, B20).
+    def start_index(self, path: str, dataset: str, meta: dict | None = None,
+                    moderation: bool = False) -> dict:
+        """Spawn `imgtag index` and return its job id (<=500ms, B20).
 
-        The engine mints its own job id only once its Writer exists (seconds later, after
-        the model loads), so the daemon opens the job record itself and a watcher mirrors
-        the engine's numbers into it. One record per job for the client either way.
-        (Deletable the day `imgtag index` accepts `--job-id`; that is b-engine's file.)
+        The engine accepts `--job-id` now, so the daemon mints the id, opens the job record
+        and hands the SAME id to the CLI — one record, no mirroring. A watcher only exists
+        to mark the job failed if the child dies before writing its own status.
         """
         import importlib.util
         import uuid
@@ -281,36 +290,26 @@ class Daemon:
             raise NotImplementedError("imgtag.cli is not installed — nothing to spawn")
         job_id = uuid.uuid4().hex[:8]
         job = Job(job_id, dataset, total=0, home=self.home, source=str(src), origin="daemon")
-        t0 = time.time()
+        argv = [sys.executable, "-m", "imgtag.cli", "index", str(src), "--dataset", dataset,
+                "--wait", "--job-id", job_id]
+        for k, v in (meta or {}).items():  # generic index-time metadata (VISION 12:33Z)
+            argv += ["--meta", f"{k}={v}"]
+        if moderation:
+            argv.append("--moderation")
         proc = subprocess.Popen(
-            [sys.executable, "-m", "imgtag.cli", "--json", "index", str(src), dataset],
-            env={**os.environ, "IMGTAG_HOME": str(self.home)},
-            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, start_new_session=True,
-        )
-        threading.Thread(target=self._mirror, args=(proc, job, dataset, t0), daemon=True).start()
+            argv, env={**os.environ, "IMGTAG_HOME": str(self.home)},
+            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, start_new_session=True)
+        threading.Thread(target=self._reap, args=(proc, job), daemon=True).start()
         return {"job_id": job_id, "dataset": dataset, "path": str(src), "pid": proc.pid}
 
-    def _mirror(self, proc, job: Job, dataset: str, t0: float) -> None:
-        """Copy the engine job's durable counts into the daemon's record until it exits."""
-        job.start()
-        eng_id = None
-        while True:
-            for j in list_jobs(self.home):
-                if eng_id is None and j.get("dataset") == dataset and j.get("job_id") != job.state["job_id"] \
-                        and float(j.get("started") or 0) >= t0 - 1:
-                    eng_id = j["job_id"]
-                if j.get("job_id") == eng_id:
-                    job.state.update(total=j.get("total", 0), failed=j.get("failed", 0),
-                                     engine_job_id=eng_id, stages_ms=j.get("stages_ms", {}))
-                    job.update(int(j.get("done", 0)), int(j.get("inflight", 0)), force=True)
-            if proc.poll() is not None:
-                break
-            time.sleep(0.5)
-        err = (proc.stderr.read() or b"").decode()[-500:] if proc.stderr else ""
-        if proc.returncode == 0:
-            job.finish(engine_job_id=eng_id)
-        else:
-            job.fail(f"imgtag index exited {proc.returncode}: {err.strip()}")
+    def _reap(self, proc, job: Job) -> None:
+        """Only failure handling: a child that dies without writing its own status would
+        otherwise leave the job 'queued' forever."""
+        err = (proc.communicate()[1] or b"").decode()[-500:]
+        if proc.returncode:
+            fresh = read_job(job.state["job_id"], self.home) or {}
+            if fresh.get("state") not in ("done", "failed"):
+                job.fail(f"imgtag index exited {proc.returncode}: {err.strip()}")
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -360,7 +359,8 @@ class Handler(BaseHTTPRequestHandler):
                            # idle; the model is a transient the eviction policy owns.
                            "rss_mb": round(rss_mb(), 1),
                            "text_tower": "loaded" if d.searcher.text_loaded else "unloaded",
-                           "text_ttl_s": d.text_ttl, "rss_watermark_mb": d.watermark_mb,
+                           "eviction_policy": d.eviction_policy(),
+                           "text_ttl_s": d.text_ttl or None, "rss_watermark_mb": d.watermark_mb,
                            "evictions": d.evictions[-5:]})
             elif u.path == "/api/search":
                 query = (q.get("q") or [""])[0]
@@ -376,7 +376,7 @@ class Handler(BaseHTTPRequestHandler):
                             if h["track"] == trk]
                     hits.sort(key=lambda h: (-h["p"], h["image_id"]))
                     self.json({"query": "", "track": trk, "tookMs": 0.0, "hits": hits[:k],
-                               "no_match": not hits, "calibration": "measured-default",
+                               "no_match": not hits, "calibration": "unfitted",
                                "enforcement_ready": False,
                                "coverage": {"indexed": sum(d.searcher.snapshot(n).count
                                                            for n in names)},
@@ -403,7 +403,7 @@ class Handler(BaseHTTPRequestHandler):
                         totals[tname] = totals.get(tname, 0) + c
                 self.json({"datasets": per, "totals": totals,
                            "indexed": sum(r["indexed"] for r in per),
-                           "calibration": "measured-default", "enforcement_ready": False})
+                           "calibration": "unfitted", "enforcement_ready": False})
             elif u.path == "/api/status":
                 self.json(d.status())
             elif u.path == "/api/images":
@@ -437,7 +437,9 @@ class Handler(BaseHTTPRequestHandler):
             if u.path == "/api/index":
                 if not body.get("path") or not body.get("dataset"):
                     raise ValueError("path and dataset are required")
-                self.json(self.daemon.start_index(str(body["path"]), str(body["dataset"])), 202)
+                self.json(self.daemon.start_index(
+                    str(body["path"]), str(body["dataset"]),
+                    meta=body.get("meta") or None, moderation=bool(body.get("moderation"))), 202)
             elif u.path == "/api/shutdown":
                 self.json({"stopping": True, "pid": os.getpid()})
                 self.daemon.stop.set()

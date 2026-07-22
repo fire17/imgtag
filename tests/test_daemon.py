@@ -138,8 +138,10 @@ def test_search_endpoint_provenance_and_no_match(live):
         assert h["why"]["path"] in ("tag", "text")
     assert r["coverage"] == {"indexed": 30, "total": 30}
 
+    # unfitted calibration on this fixture -> fail-open: a ranking, never a false no-match
     st, r = get(live, "/api/search?q=boat&dataset=d1")
-    assert st == 200 and r["hits"] == [] and r["no_match"] is True  # honest no-match, HTTP 200
+    assert st == 200 and r["calibration"] == "unfitted"
+    assert r["hits"] and r["no_match"] is False
 
 
 def test_datasets_and_jobs_endpoints(live):
@@ -353,7 +355,7 @@ def test_moderation_endpoint_and_track_filter(live):
     never advertised as enforcement-ready while the tracks are unfitted."""
     st, r = get(live, "/api/moderation?dataset=d1")
     assert st == 200 and r["enforcement_ready"] is False
-    assert r["calibration"] == "measured-default"
+    assert r["calibration"] == "unfitted"
     d = r["datasets"][0]
     assert set(d["counts"]) == {"nudity", "weapons", "drugs"} and d["indexed"] == 30
     assert all(isinstance(v, int) for v in d["counts"].values())

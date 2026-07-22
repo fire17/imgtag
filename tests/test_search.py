@@ -87,11 +87,29 @@ def test_provenance_complete_over_20_queries(home):
     assert seen >= 20
 
 
-def test_no_match_is_honest(home):
-    """A query orthogonal to every row must return zero hits AND say so."""
+def test_no_match_is_honest_only_when_calibration_is_fitted(home):
+    """A query orthogonal to every row returns zero hits AND says so — but only once a
+    real fit exists to justify the veto."""
     be = build(home, "d1", ["cat"] * 20)
+    write_tags(home, be.model_sha, ["cat"], ["calibrated"], [[-12.0, 6.0]], [0.5])
     r = searcher(home, be).search("boat", "d1", k=5)
+    assert r["calibration"] == "fitted"
     assert r["hits"] == [] and r["no_match"] is True
+
+
+def test_unfitted_calibration_fails_OPEN(home):
+    """FAIL-OPEN LAW: with no CAL-SET fit on disk the engine ranks and admits it cannot
+    judge. An unfitted threshold must NEVER turn a real query into 'nothing matched'."""
+    be = build(home, "d1", ["cat"] * 3 + ["car"] * 10 + ["tree"] * 10)
+    r = searcher(home, be).search("car", "d1", k=5)  # fresh home: no tags.json anywhere
+    assert r["calibration"] == "unfitted"
+    assert len(r["hits"]) == 5 and r["no_match"] is False
+    assert r["hits"][0]["p"] >= r["hits"][-1]["p"]  # still a ranking, just an unjudged one
+    # an unfitted TAG table does not rescue the gate either
+    write_tags(home, be.model_sha, ["car"], ["calibrated"], [None], [None])
+    s = searcher(home, be)
+    r = s.search("boat", "d1", k=3)
+    assert r["calibration"] == "unfitted" and r["hits"] and r["no_match"] is False
 
 
 def test_determinism_ties_broken_by_image_id(home):
@@ -369,3 +387,14 @@ def test_generic_metadata_passthrough(home):
     for h in r["hits"]:
         assert h["meta"] == {"account_id": "acct-7", "captured": "2026-07-01"}
         assert h["w"] == 4 and h["h"] == 4  # known fields stay top-level, not in meta
+
+
+def test_common_term_still_counts_via_image_relative_presence(home):
+    """A term present in MOST of the corpus can never stand 2 sigma above it, so presence
+    also asks 'is this among the image's own top tags?' — corpus-composition invariant."""
+    labels = ["cat"] * 18 + ["cat dog"] * 2  # "cat" is 100% of the corpus: z-score is blind
+    be = build(home, "d1", labels)
+    write_tags(home, be.model_sha, ["cat", "dog"] + [f"filler{i}" for i in range(28)],
+               ["calibrated"] * 30, [[-12.0, 6.0]] * 30, [0.5] * 30)
+    r = searcher(home, be).search("cat dog", "d1", k=5)
+    assert r["hits"][0]["why"]["terms"]["m"] == 2  # the cat+dog rows still reach ALL
