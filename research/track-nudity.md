@@ -57,7 +57,7 @@ LAW forbids fetching positives — can never be honestly calibrated on this mach
   flat colour images score low, which is exactly what fails if this flips.
 - **No new runtime dependency.** onnxruntime + numpy + Pillow, all already in ADR-7.
 
-Code: `src/imgtag/moderation/nudity.py` · tests: `tests/test_nudity.py` (15, all green).
+Code: `src/imgtag/moderation/nudity.py` · tests: `tests/test_nudity.py` (20, all green).
 
 ---
 
@@ -270,6 +270,21 @@ noted here so it is not rediscovered.
   Both are additive markers — `category`/`p`/`tier` are always present, so the API, the UI
   and the counts need no change to consume them.
   `embeddings` are **ignored** — this track answers from pixels, which is why it can answer.
+- **Pre-made view (landed 2026-07-22, commit `8cd2778`).** `score()` accepts an optional
+  `views=` kwarg and uses `views["nudity-384crop"]` when offered. The worker builds it by
+  calling **our** `nudity.make_view(im)` — one implementation, so transform drift is
+  impossible by construction rather than policed by a test. The head declares
+  `view_key` + `view_geometry`. Offered views are shape/dtype-checked and fall back to
+  re-open if malformed. The old 3-positional call site is unchanged.
+  **PRECONDITION, measured — `draft()` sets the JPEG DCT decode scale and that scale is
+  part of the pixels.** Same transform, different decode state: drafted (384,384) →
+  **bit-identical**; drafted (224,224) first → differs **max 33/255**; full decode, no
+  draft → differs max 9/255. So a view may be shipped ONLY when the worker's decode was
+  drafted at 384, i.e. the backend's size is 384 (`pecore-s16-384`, the default) — verified
+  on 4 images that one decode then serves both bit-identically. **Forcing it for smaller
+  backends is not free and must not be done:** drafting at 384 to serve this track perturbs
+  a 224-backend's OWN embeddings by up to **83/255** — corrupting the index to speed up
+  moderation. Not-384 backend → ship no view, this track re-opens, calibration holds.
 - **Pixel geometry — the one thing to get right.** The coordinator's slab carries the
   *backend's* geometry (squashed, sometimes 224²). That is a domain shift this model was
   never trained for, so unless the slab is already 384² **and** the backend squashes, the
@@ -304,7 +319,7 @@ review-tier hits — emitting it would be worse than useless).
 - ✅ False-positive behaviour on 1,826 safe images — measured, first-party, reproducible.
 - ✅ ADR-14 statue/mannequin and landscape boundaries — measured, satisfied.
 - ✅ Zero-shot baseline is unfit for this category — measured, first-party.
-- ✅ 15 tests green (`tests/test_nudity.py`), incl. the label-order and geometry traps and
+- ✅ 20 tests green (`tests/test_nudity.py`), incl. the label-order and geometry traps and
   the permanent content-free negative control.
 - ✅ ADR-14's required negative measured: **0 violation flags across 314 non-person figures**
   (mannequin/statue/doll/figurine/marble/torso), worst case 0.4515 — vs the v0 scorer's
