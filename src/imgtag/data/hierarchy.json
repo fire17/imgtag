@@ -1,0 +1,806 @@
+{
+ "version": 1,
+ "sources": [
+  "data/coco/annotations/instances_val2017.json",
+  "data/openimages/bbox_labels_600_hierarchy.json"
+ ],
+ "note": "hypernym -> direct hyponyms, lowercase; LVIS closure pending (b-bench)",
+ "children": {
+  "accessory": [
+   "backpack",
+   "handbag",
+   "suitcase",
+   "tie",
+   "umbrella"
+  ],
+  "aircraft": [
+   "fixed-wing aircraft",
+   "helicopter",
+   "rocket"
+  ],
+  "animal": [
+   "bear",
+   "bird",
+   "cat",
+   "cow",
+   "dog",
+   "elephant",
+   "fish",
+   "giraffe",
+   "horse",
+   "invertebrate",
+   "mammal",
+   "reptile",
+   "sheep",
+   "shellfish",
+   "zebra"
+  ],
+  "appliance": [
+   "microwave",
+   "oven",
+   "refrigerator",
+   "sink",
+   "toaster"
+  ],
+  "auto part": [
+   "seat belt",
+   "tire",
+   "vehicle registration plate",
+   "wheel"
+  ],
+  "baked goods": [
+   "bagel",
+   "bread",
+   "cookie",
+   "muffin",
+   "pastry",
+   "pretzel"
+  ],
+  "ball (object)": [
+   "cricket ball",
+   "football",
+   "rugby ball",
+   "tennis ball",
+   "volleyball (ball)"
+  ],
+  "bathroom accessory": [
+   "facial tissue holder",
+   "soap dispenser",
+   "toilet paper",
+   "towel"
+  ],
+  "bear": [
+   "brown bear",
+   "panda",
+   "polar bear",
+   "teddy bear"
+  ],
+  "bed": [
+   "infant bed",
+   "studio couch"
+  ],
+  "beetle": [
+   "ladybug"
+  ],
+  "bird": [
+   "blue jay",
+   "canary",
+   "chicken",
+   "duck",
+   "eagle",
+   "falcon",
+   "goose",
+   "magpie",
+   "ostrich",
+   "owl",
+   "parrot",
+   "penguin",
+   "raven",
+   "sparrow",
+   "swan",
+   "turkey",
+   "woodpecker"
+  ],
+  "boat": [
+   "barge",
+   "canoe",
+   "gondola"
+  ],
+  "building": [
+   "castle",
+   "convenience store",
+   "house",
+   "lighthouse",
+   "office building",
+   "skyscraper",
+   "tower",
+   "tree house"
+  ],
+  "car": [
+   "limousine",
+   "van"
+  ],
+  "carnivore": [
+   "bear",
+   "cat",
+   "cheetah",
+   "dog",
+   "fox",
+   "jaguar (animal)",
+   "leopard",
+   "lion",
+   "lynx",
+   "otter",
+   "raccoon",
+   "red panda",
+   "tiger"
+  ],
+  "clock": [
+   "alarm clock",
+   "digital clock",
+   "wall clock"
+  ],
+  "clothing": [
+   "brassiere",
+   "coat",
+   "dress",
+   "fashion accessory",
+   "footwear",
+   "hat",
+   "helmet",
+   "jacket",
+   "luggage and bags",
+   "scarf",
+   "shirt",
+   "shorts",
+   "skirt",
+   "sports uniform",
+   "suit",
+   "swim cap",
+   "swimwear",
+   "tiara",
+   "trousers"
+  ],
+  "container": [
+   "barrel",
+   "beaker",
+   "bottle",
+   "flowerpot",
+   "jug",
+   "picnic basket",
+   "tin can",
+   "waste container"
+  ],
+  "cosmetics": [
+   "face powder",
+   "hair spray",
+   "lipstick",
+   "perfume"
+  ],
+  "couch": [
+   "loveseat",
+   "sofa bed"
+  ],
+  "dairy product": [
+   "cheese",
+   "milk"
+  ],
+  "dessert": [
+   "cake",
+   "candy",
+   "cookie",
+   "ice cream",
+   "muffin"
+  ],
+  "drink": [
+   "beer",
+   "cocktail",
+   "coffee (drink)",
+   "juice",
+   "tea",
+   "wine"
+  ],
+  "electronic": [
+   "cell phone",
+   "keyboard",
+   "laptop",
+   "mouse",
+   "remote",
+   "tv"
+  ],
+  "fashion accessory": [
+   "belt",
+   "crown",
+   "earring",
+   "glasses",
+   "glove",
+   "goggles",
+   "handbag",
+   "hat",
+   "necklace",
+   "scarf",
+   "sock",
+   "sunglasses",
+   "tiara",
+   "tie",
+   "umbrella",
+   "watch"
+  ],
+  "fast food": [
+   "french fries",
+   "hot dog"
+  ],
+  "fish": [
+   "goldfish",
+   "rays and skates",
+   "seahorse",
+   "shark"
+  ],
+  "flower": [
+   "common sunflower",
+   "lavender (plant)",
+   "lily",
+   "rose"
+  ],
+  "food": [
+   "apple",
+   "baked goods",
+   "banana",
+   "broccoli",
+   "burrito",
+   "cake",
+   "carrot",
+   "cooking spray",
+   "dairy product",
+   "dessert",
+   "donut",
+   "egg",
+   "fast food",
+   "fruit",
+   "guacamole",
+   "honeycomb",
+   "hot dog",
+   "mushroom",
+   "orange",
+   "pancake",
+   "pasta",
+   "pizza",
+   "sandwich",
+   "seafood",
+   "snack",
+   "sushi",
+   "taco",
+   "vegetable",
+   "waffle"
+  ],
+  "footwear": [
+   "boot",
+   "high heels",
+   "roller skates",
+   "sandal"
+  ],
+  "fruit": [
+   "apple",
+   "banana",
+   "cantaloupe",
+   "common fig",
+   "grape",
+   "grapefruit",
+   "lemon (plant)",
+   "mango",
+   "orange (fruit)",
+   "peach",
+   "pear",
+   "pineapple",
+   "pomegranate",
+   "strawberry",
+   "tomato",
+   "watermelon"
+  ],
+  "furniture": [
+   "bathroom cabinet",
+   "bed",
+   "bench",
+   "bookcase",
+   "cabinetry",
+   "chair",
+   "chest of drawers",
+   "closet",
+   "couch",
+   "cupboard",
+   "desk",
+   "dining table",
+   "drawer",
+   "filing cabinet",
+   "nightstand",
+   "potted plant",
+   "shelf",
+   "stool",
+   "table",
+   "toilet",
+   "wall clock",
+   "wardrobe",
+   "wine rack"
+  ],
+  "glove": [
+   "baseball glove"
+  ],
+  "hat": [
+   "cowboy hat",
+   "fedora",
+   "sombrero",
+   "sun hat"
+  ],
+  "helmet": [
+   "bicycle helmet",
+   "football helmet"
+  ],
+  "home appliance": [
+   "blender",
+   "ceiling fan",
+   "coffeemaker",
+   "dishwasher",
+   "gas stove",
+   "hair dryer",
+   "hand dryer",
+   "heater",
+   "humidifier",
+   "kettle",
+   "mechanical fan",
+   "microwave oven",
+   "mixer",
+   "oven",
+   "refrigerator",
+   "sewing machine",
+   "toaster",
+   "washing machine",
+   "wood-burning stove"
+  ],
+  "indoor": [
+   "book",
+   "clock",
+   "hair drier",
+   "scissors",
+   "teddy bear",
+   "toothbrush",
+   "vase"
+  ],
+  "insect": [
+   "ant",
+   "bee",
+   "beetle",
+   "dragonfly",
+   "moths and butterflies"
+  ],
+  "invertebrate": [
+   "centipede",
+   "insect",
+   "marine invertebrates",
+   "oyster",
+   "scorpion",
+   "snail",
+   "spider",
+   "tick",
+   "worm"
+  ],
+  "kitchen": [
+   "bottle",
+   "bowl",
+   "cup",
+   "fork",
+   "knife",
+   "spoon",
+   "wine glass"
+  ],
+  "kitchen appliance": [
+   "blender",
+   "coffeemaker",
+   "dishwasher",
+   "food processor",
+   "microwave oven",
+   "mixer",
+   "oven",
+   "pressure cooker",
+   "refrigerator",
+   "slow cooker",
+   "waffle iron"
+  ],
+  "kitchen utensil": [
+   "bottle opener",
+   "can opener",
+   "chopsticks",
+   "cutting board",
+   "drinking straw",
+   "fork",
+   "knife",
+   "ladle",
+   "measuring cup",
+   "pizza cutter",
+   "spatula",
+   "spoon",
+   "whisk"
+  ],
+  "kitchenware": [
+   "frying pan",
+   "kitchen appliance",
+   "kitchen utensil",
+   "spice rack",
+   "tableware",
+   "wok"
+  ],
+  "land vehicle": [
+   "ambulance",
+   "bicycle",
+   "bus",
+   "car",
+   "cart",
+   "golf cart",
+   "motorcycle",
+   "segway",
+   "snowmobile",
+   "tank",
+   "taxi",
+   "train",
+   "truck",
+   "unicycle",
+   "wheelchair"
+  ],
+  "luggage and bags": [
+   "backpack",
+   "briefcase",
+   "handbag",
+   "suitcase"
+  ],
+  "mammal": [
+   "alpaca",
+   "antelope",
+   "armadillo",
+   "bat (animal)",
+   "bull",
+   "camel",
+   "carnivore",
+   "cattle",
+   "deer",
+   "elephant",
+   "giraffe",
+   "goat",
+   "hamster",
+   "hedgehog",
+   "hippopotamus",
+   "horse",
+   "kangaroo",
+   "koala",
+   "marine mammal",
+   "monkey",
+   "mouse",
+   "mule",
+   "pig",
+   "porcupine",
+   "rabbit",
+   "rhinoceros",
+   "sheep",
+   "skunk",
+   "squirrel",
+   "zebra"
+  ],
+  "marine invertebrates": [
+   "crab",
+   "isopod",
+   "jellyfish",
+   "lobster",
+   "shrimp",
+   "squid",
+   "starfish"
+  ],
+  "marine mammal": [
+   "dolphin",
+   "harbor seal",
+   "sea lion",
+   "whale"
+  ],
+  "medical equipment": [
+   "band-aid",
+   "stethoscope",
+   "stretcher",
+   "syringe"
+  ],
+  "moths and butterflies": [
+   "butterfly",
+   "caterpillar"
+  ],
+  "musical instrument": [
+   "accordion",
+   "banjo",
+   "cello",
+   "chime",
+   "drum",
+   "flute",
+   "french horn",
+   "guitar",
+   "harmonica",
+   "harp",
+   "harpsichord",
+   "maraca",
+   "musical keyboard",
+   "oboe",
+   "organ (musical instrument)",
+   "piano",
+   "saxophone",
+   "trombone",
+   "trumpet",
+   "violin"
+  ],
+  "office supplies": [
+   "adhesive tape",
+   "box",
+   "calculator",
+   "envelope",
+   "eraser",
+   "fax",
+   "paper cutter",
+   "pen",
+   "pencil case",
+   "pencil sharpener",
+   "plastic bag",
+   "poster",
+   "ring binder",
+   "scissors",
+   "stapler",
+   "toilet paper",
+   "whiteboard"
+  ],
+  "outdoor": [
+   "bench",
+   "fire hydrant",
+   "parking meter",
+   "stop sign",
+   "traffic light"
+  ],
+  "pastry": [
+   "croissant",
+   "doughnut",
+   "tart"
+  ],
+  "person": [
+   "boy",
+   "girl",
+   "man",
+   "woman"
+  ],
+  "personal care": [
+   "cream",
+   "crutch",
+   "diaper",
+   "glasses",
+   "goggles",
+   "sunglasses",
+   "toothbrush",
+   "wheelchair"
+  ],
+  "plant": [
+   "flower",
+   "houseplant",
+   "tree"
+  ],
+  "plumbing fixture": [
+   "bathtub",
+   "bidet",
+   "shower",
+   "sink",
+   "tap",
+   "toilet"
+  ],
+  "racket": [
+   "table tennis racket",
+   "tennis racket"
+  ],
+  "reptile": [
+   "crocodile",
+   "dinosaur",
+   "frog",
+   "lizard",
+   "snake",
+   "turtle"
+  ],
+  "sandwich": [
+   "hamburger",
+   "submarine sandwich"
+  ],
+  "sculpture": [
+   "bronze sculpture",
+   "bust",
+   "snowman"
+  ],
+  "seafood": [
+   "shellfish",
+   "squid"
+  ],
+  "shellfish": [
+   "crab",
+   "lobster",
+   "oyster",
+   "shrimp"
+  ],
+  "skirt": [
+   "miniskirt"
+  ],
+  "snack": [
+   "cookie",
+   "popcorn",
+   "pretzel"
+  ],
+  "sports": [
+   "baseball bat",
+   "baseball glove",
+   "frisbee",
+   "kite",
+   "skateboard",
+   "skis",
+   "snowboard",
+   "sports ball",
+   "surfboard",
+   "tennis racket"
+  ],
+  "sports equipment": [
+   "balance beam",
+   "ball (object)",
+   "baseball bat",
+   "baseball glove",
+   "bicycle",
+   "billiard table",
+   "bow and arrow",
+   "bowling equipment",
+   "dumbbell",
+   "flying disc",
+   "golf ball",
+   "helmet",
+   "hiking equipment",
+   "horizontal bar",
+   "indoor rower",
+   "paddle",
+   "parachute",
+   "personal flotation device",
+   "punching bag",
+   "racket",
+   "roller skates",
+   "scoreboard",
+   "skateboard",
+   "ski",
+   "snowboard",
+   "stationary bicycle",
+   "surfboard",
+   "training bench",
+   "treadmill"
+  ],
+  "squash (plant)": [
+   "pumpkin",
+   "zucchini"
+  ],
+  "table": [
+   "coffee table",
+   "kitchen & dining room table"
+  ],
+  "tableware": [
+   "bottle",
+   "bowl",
+   "cake stand",
+   "chopsticks",
+   "cocktail shaker",
+   "coffee cup",
+   "fork",
+   "jug",
+   "kitchen knife",
+   "mixing bowl",
+   "mug",
+   "pitcher (container)",
+   "plate",
+   "platter",
+   "salt and pepper shakers",
+   "saucer",
+   "serving tray",
+   "spoon",
+   "teapot",
+   "wine glass"
+  ],
+  "telephone": [
+   "corded phone",
+   "mobile phone"
+  ],
+  "tool": [
+   "axe",
+   "binoculars",
+   "camera",
+   "chainsaw",
+   "chisel",
+   "container",
+   "drill (tool)",
+   "flashlight",
+   "grinder",
+   "hammer",
+   "kitchen utensil",
+   "ladder",
+   "nail (construction)",
+   "ratchet (device)",
+   "ruler",
+   "scale",
+   "scissors",
+   "screwdriver",
+   "snowplow",
+   "toothbrush",
+   "torch",
+   "tripod",
+   "wrench"
+  ],
+  "toy": [
+   "balloon",
+   "dice",
+   "doll",
+   "flying disc",
+   "kite",
+   "teddy bear"
+  ],
+  "traffic sign": [
+   "stop sign"
+  ],
+  "tree": [
+   "christmas tree",
+   "maple",
+   "palm tree",
+   "willow"
+  ],
+  "trousers": [
+   "jeans"
+  ],
+  "turtle": [
+   "sea turtle",
+   "tortoise"
+  ],
+  "vegetable": [
+   "artichoke",
+   "bell pepper",
+   "broccoli",
+   "cabbage",
+   "carrot",
+   "cucumber",
+   "garden asparagus",
+   "potato",
+   "radish",
+   "salad",
+   "squash (plant)",
+   "tomato",
+   "winter melon"
+  ],
+  "vehicle": [
+   "aircraft",
+   "airplane",
+   "bicycle",
+   "boat",
+   "bus",
+   "car",
+   "land vehicle",
+   "motorcycle",
+   "train",
+   "truck",
+   "watercraft"
+  ],
+  "watercraft": [
+   "boat",
+   "jet ski",
+   "submarine"
+  ],
+  "weapon": [
+   "axe",
+   "bomb",
+   "bow and arrow",
+   "cannon",
+   "dagger",
+   "handgun",
+   "knife",
+   "missile",
+   "rifle",
+   "shotgun",
+   "sword",
+   "tank"
+  ]
+ }
+}
