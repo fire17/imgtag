@@ -243,38 +243,40 @@ artifact is absent; a missing track is reported by name, never a silent zero). A
 registered in `_TRACKS` and found by `load_heads`.
 
 - `PeopleHead.wants_images = True` — answers from pixels.
-- `score(embeddings, images, ids) -> list[list[dict]]`, **four RAW records per image**:
+- `PeopleHead.col_roles = ["n_persons","n_faces","n_persons_conf","n_faces_conf"]` — the
+  head is the single authority for its column schema; the engine reads it once and writes
+  `tracks/people.json`'s `col_roles`. `PeopleHead.spec` (property) carries the derive band
+  edges as data → folded into the header `spec_sha` (no shared-file write, rule-7 safe).
+- `score(embeddings, images, ids) -> list[list[dict]]`, per image:
+  - **ONE raw record** `{"category":"people", "cols":{n_persons, n_faces, n_persons_conf,
+    n_faces_conf}, "tier":"none"}` → the engine writes a **`people.f32 [N,4]`** dense
+    sidecar in `col_roles` order (b-daemon's single-column ask). Tier `none`: a count is
+    not a moderation flag, so it never enters the ADR-14 enforcement accounting. Emitted
+    for **every** image incl. empty/`unreadable`/`no_pixels` (T1), so confidence is present
+    for every image.
+  - **Zero-to-four `match` chips** `{"category":"one-person"|…, "p":conf, "tier":"match"}`,
+    one per SATISFIED category (multi-label — multi-person AND one-face can co-fire). These
+    populate the manifest **`content` bucket** (`{match:{one-person:N,…}}`, verified) and
+    the per-image flags the 14:16Z detail view ranks. Unsatisfied → no chip, no spurious
+    membership.
+- **The four USER categories DERIVE from the two count columns** at read via
+  `people.derive(n_persons, n_faces)` (T1): `one-person = n_persons==1`, `multi-person ≥2`,
+  `one-face = n_faces==1`, `multi-face ≥2`. A future "multi means ≥3" is a free re-read of
+  `people.f32`. **b-daemon / b-app: read `people.f32` cols 0/1 and call `derive()`** — the
+  chip columns (`one-person.f32` …) are a convenience for the content bucket, not the
+  source of truth; the counts are.
 
-  | category | `p` is | tier |
-  |---|---|---|
-  | `people.n_persons` | the person count | `none` |
-  | `people.n_faces` | the face count | `none` |
-  | `people.n_persons_conf` | confidence in that count | `none` |
-  | `people.n_faces_conf` | confidence in that count | `none` |
-
-  All tier `none`: a counting track never enters the ADR-14 alert/violation/review counts.
-  Each record also carries `n_persons/n_faces/*_conf` as fields and `model_id`,
-  `calibrated=False`, `enforcement_ready=False`; `content-free`/`unreadable`/`no_pixels`
-  add a marker without ever raising.
-- **The four USER categories are DERIVED AT READ** by `people.derive(n_persons, n_faces)`
-  (T1): `one-person = n_persons==1`, `multi-person ≥2`, `one-face = n_faces==1`,
-  `multi-face ≥2`. A future "multi means ≥3" is a free re-read. **b-daemon / b-app: read
-  the two count sidecars and call `derive()`** — do not expect `one-person.f32` columns;
-  storing them would be redundant (a per-category confidence cannot encode membership,
-  which is a pure function of the counts).
-- **Confidence for EVERY image (T1):** every record carries a `p`, including `content-free`
-  and `unreadable` records.
-
-**Two coordination asks (open):**
-1. **b-engine** — a non-counting **`match` tier** in `MODERATION_TIERS` + `empty_counts()`
-   would let this track (and any future content track) emit per-image *category chips* as
-   flags without crashing the fixed-tier manifest merge (indexer.py:731). Until then chips
-   are derived at read; nothing is blocked. **Minor:** the engine seeds an all-NaN bare
-   `people.f32` column per registered track name; this track's real columns are namespaced
-   `people.n_*`, so the bare column is vestigial (skip-seed or ignore-all-NaN on read).
-2. **b-daemon** — expose the four derived categories in search/tag vocabulary via
-   `people.derive()` over the two count sidecars; "sort gallery by n_persons" is a direct
-   column read.
+**Coordination:**
+1. **b-engine** — ✅ `match` content-tier landed (`CONTENT_TIERS`, `accumulate()`); ✅
+   multi-col `[N,C]` write path landed and verified for people. ⚠️ **OPEN BUG** reported:
+   `_apply_moderation` (indexer.py:275) does `roles.get(cat, ["p"])[0]`, which is
+   `None[0]` for any single-value track whose head has no `col_roles` (weapons/nudity/…),
+   because `detect.col_roles` stores `None` for them and `.get(cat, default)` skips the
+   default when the key exists-with-`None`. Fix: `(roles.get(cat) or ["p"])[0]`. Blocks the
+   full-multi-track moderation index; people verified in isolation until it lands.
+2. **b-daemon** — expose the four categories in search/tag vocab via `derive()` over
+   `people.f32`; "sort gallery by n_persons/n_faces" is a direct column read. Validation
+   `.npy` for `cocoval2017` offered.
 
 ---
 

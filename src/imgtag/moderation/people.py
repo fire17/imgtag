@@ -220,12 +220,11 @@ def derive(n_persons: int, n_faces: int) -> dict[str, bool]:
 class PeopleHead:
     """Dispatcher-facing head (imgtag.moderation.load_heads contract).
 
-    ``score(embeddings, images, ids) -> list[list[dict]]`` — one LIST per image holding
-    one record per derived category (``as_flag_list`` in the indexer explicitly supports
-    a multi-signal track). Every record carries the raw counts, so the sidecar writer and
-    the API read them without a second pass, and records whose category is false are
-    still emitted with ``tier: "none"`` — T1 says every track scores every image, so
-    nothing is silently absent.
+    ``score(embeddings, images, ids) -> list[list[dict]]`` — one LIST per image. First
+    element is always the RAW multi-column record (``category="people"``, a ``cols`` dict
+    in ``col_roles`` order → ``people.f32 [N,4]``, tier ``none``); then zero or more
+    ``match`` chips, one per satisfied derived category. Every image gets the raw record,
+    so T1's "every track scores every image" holds even for empty frames.
     """
 
     category = CATEGORY
@@ -286,29 +285,35 @@ class PeopleHead:
 
     def _records(self, n_persons: int, n_faces: int, cp: float, cf: float,
                  extra: dict | None = None) -> list[dict]:
-        """Four RAW sidecar columns per image — the DURABLE, re-derivable source of truth.
+        """Per image: ONE raw multi-column record + one ``match`` chip per satisfied category.
 
-        ``people.n_persons`` / ``people.n_faces`` (``p`` IS the raw count) and their two
-        confidence columns. All tier ``none``: a counting track is not a moderation flag,
-        so it must never enter the alert/violation/review accounting (ADR-14).
+        RAW (`category="people"`, tier ``none``): a dense ``cols`` dict in ``col_roles``
+        order → the engine writes ``people.f32 [N,4]`` (b-daemon's single-column ask). This
+        is the DURABLE, re-derivable source of truth; the four user categories are DERIVED
+        at read via ``derive(n_persons, n_faces)`` (TRACKS.md T1), so a future "multi means
+        >=3" is a free re-read. Tier ``none`` keeps a count out of the ADR-14 enforcement
+        accounting — a person count is not a policy breach.
 
-        The four USER categories (one/multi person/face) are NOT stored — they are DERIVED
-        AT READ from these columns by ``derive(n_persons, n_faces)`` (TRACKS.md T1). That
-        is why a future "multi means >=3" policy is a free re-read, not a re-score, and why
-        a derived-category *column* would be redundant: its confidence alone cannot encode
-        membership, which is a pure function of the two counts already stored here.
-
-        ponytail: per-image match-tier FLAGS (app chips) await a non-counting ``match`` tier
-        in the engine's MODERATION_TIERS — a one-line b-engine change (coordinated). Until
-        then the app derives chips from these columns; nothing here blocks on it.
+        CHIPS (tier ``match``, one per SATISFIED category — multi-label, both
+        multi-person AND one-face can fire): the per-image flags the 14:16Z detail view
+        ranks, and the numbers behind the ``content`` bucket rollup. Emitted only when true,
+        so an unsatisfied category leaves no spurious column; membership stays a pure
+        function of the stored counts.
         """
-        base = {"n_persons": int(n_persons), "n_persons_conf": round(float(cp), 4),
-                "n_faces": int(n_faces), "n_faces_conf": round(float(cf), 4),
-                "model_id": self.model_id, "calibrated": self.calibrated,
+        prov = {"model_id": self.model_id, "calibrated": self.calibrated,
                 "enforcement_ready": self.enforcement_ready, **(extra or {})}
-        raw = (("people.n_persons", float(n_persons)), ("people.n_faces", float(n_faces)),
-               ("people.n_persons_conf", float(cp)), ("people.n_faces_conf", float(cf)))
-        return [{"category": c, "p": round(v, 4), "tier": "none", **base} for c, v in raw]
+        out = [{"category": CATEGORY,
+                "cols": {"n_persons": float(n_persons), "n_faces": float(n_faces),
+                         "n_persons_conf": round(float(cp), 4),
+                         "n_faces_conf": round(float(cf), 4)},
+                "tier": "none",
+                "n_persons": int(n_persons), "n_faces": int(n_faces), **prov}]
+        on = derive(n_persons, n_faces)
+        conf = {"one-person": cp, "multi-person": cp, "one-face": cf, "multi-face": cf}
+        out += [{"category": c, "p": round(float(conf[c]), 4), "tier": "match",
+                 "n_persons": int(n_persons), "n_faces": int(n_faces), **prov}
+                for c in DERIVED if on[c]]
+        return out
 
     def score(self, embeddings, images=None, ids=None) -> list[list[dict]]:
         from PIL import Image

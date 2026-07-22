@@ -118,36 +118,43 @@ class _FakeSession:
         return [o[n] for n in out_names]
 
 
-def test_head_emits_four_raw_columns_every_image():
-    """T1: every track scores every image — RAW counts stored, categories derived at read.
+def test_head_emits_raw_multicol_record_every_image():
+    """T1: every image gets the RAW `people` multi-col record (col_roles order), tier none.
 
-    Exactly four columns (two counts + two confidences), all tier `none` so a counting
-    track never pollutes the ADR-14 moderation accounting. Nothing is ever silently absent.
+    An empty frame satisfies no category, so it emits exactly the one raw record — never
+    silently absent, never a spurious chip.
     """
     head = P.PeopleHead(_FakeSession(), cascade=None)
     out = head.score(np.zeros((1, 512), np.float32), images=[None],
                      ids=[{"path": "/does/not/exist.jpg"}])
     assert len(out) == 1
     recs = out[0]
-    assert [r["category"] for r in recs] == [
-        "people.n_persons", "people.n_faces", "people.n_persons_conf", "people.n_faces_conf"]
-    for r in recs:
-        assert r["tier"] == "none"       # never enters alert/violation/review
-        assert set(("n_persons", "n_persons_conf", "n_faces", "n_faces_conf")) <= r.keys()
-        assert r["enforcement_ready"] is False   # a counting track never authorizes action
-    raw = {r["category"]: r for r in recs}
-    assert raw["people.n_persons"]["p"] == float(raw["people.n_persons"]["n_persons"])
+    raw = recs[0]
+    assert raw["category"] == "people" and raw["tier"] == "none"
+    assert list(raw["cols"]) == P.PeopleHead.col_roles   # dict in the on-disk column order
+    assert raw["enforcement_ready"] is False             # counting track never authorizes
+    # a no-person frame emits ONLY the raw record (no satisfied chip)
+    assert [r for r in recs if r["tier"] == "match"] == []
     # the four user categories are a pure read-time function of the two count columns
-    d = P.derive(int(raw["people.n_persons"]["p"]), int(raw["people.n_faces"]["p"]))
+    d = P.derive(int(raw["cols"]["n_persons"]), int(raw["cols"]["n_faces"]))
     assert set(d) == set(P.DERIVED)
+
+
+def test_col_roles_matches_dispatcher_contract():
+    """The head is the single authority for its column schema (b-engine reads this attr)."""
+    assert P.PeopleHead.col_roles == ["n_persons", "n_faces", "n_persons_conf", "n_faces_conf"]
+    spec = P.PeopleHead(_FakeSession(), cascade=None).spec
+    assert set(spec["bands"]) == set(P.DERIVED) and spec["bands"]["multi-person"] == [2, None]
 
 
 def test_unreadable_file_never_raises_and_marks_the_record():
     head = P.PeopleHead(_FakeSession(), cascade=None)
     out = head.score(np.zeros((1, 512), np.float32), images=[None],
                      ids=[{"path": "/nope.jpg"}])[0]
-    assert all(r["tier"] == "none" for r in out)
+    assert out[0]["category"] == "people" and out[0]["tier"] == "none"
     assert out[0].get("unreadable") is True
+    assert out[0]["cols"]["n_persons"] == 0.0 and out[0]["cols"]["n_faces"] == 0.0
+    assert [r for r in out if r["tier"] == "match"] == []   # nothing satisfied
 
 
 def test_head_counts_faces_from_optics(tmp_path):
@@ -159,13 +166,11 @@ def test_head_counts_faces_from_optics(tmp_path):
     p = tmp_path / "x.png"
     Image.new("RGB", (64, 48), (120, 120, 120)).save(p)
     out = head.score(np.zeros((1, 512), np.float32), images=[None], ids=[{"path": str(p)}])[0]
-    assert out[0]["n_faces"] == 3
-    faces_col = next(r for r in out if r["category"] == "people.n_faces")
-    persons_col = next(r for r in out if r["category"] == "people.n_persons")
-    assert faces_col["p"] == 3.0                          # raw count is the sidecar value
-    assert persons_col["p"] >= 3.0                        # faces lower-bound persons
-    d = P.derive(int(persons_col["p"]), int(faces_col["p"]))
-    assert d["multi-face"] and d["multi-person"]
+    raw = out[0]
+    assert raw["cols"]["n_faces"] == 3.0                  # raw count is the sidecar value
+    assert raw["cols"]["n_persons"] >= 3.0                # faces lower-bound persons
+    chips = {r["category"] for r in out if r["tier"] == "match"}
+    assert "multi-face" in chips and "multi-person" in chips   # satisfied categories fire
 
 
 # ── cascade persistence roundtrip ─────────────────────────────────────────────
