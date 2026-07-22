@@ -137,3 +137,50 @@ Assignment is by EXCEEDANCE, not severity: a row goes to the tier it clears by t
 what keeps a bikini in `review` while an injured person reaches `alert` — and a
 `tau_review` above `tau` would otherwise make the review tier unreachable.
 Per-tier thresholds are read as `tau_<tier>` (with `tau` as violation's legacy name).
+
+### Calibration precedence — ONE loader, no split-brain (2026-07-22, conductor task)
+
+A track's effective thresholds/calibration are resolved in STRICT precedence, and every
+consumer (b-daemon reader, b-engine store-side derive/dataset_flags, any third) MUST use
+the SAME order or a track split-brains (the "weapons not indexed" bug: store read tau from
+the base spec and derived `none` for all rows, while the reader honored the fitted file):
+
+1. **Per-model fitted head** — `data/moderation/<category>-<model_id>.json` (then the base
+   `<category>-<base_model_id>.json`). Keys: `calibration, scorer, tau, tau_<tier>, platt`.
+   WINS when present.
+2. **Base spec** — the `categories.<category>` entry in `data/moderation.json`. Fallback.
+
+Rules the loader enforces (b-daemon's reader is authoritative; b-engine matches it):
+- `calibration: "fitted"` is honoured (may gate) ONLY when a fitted head supplies a `tau`
+  for every tier the spec declares. A spec-declared `proxy-fitted` / `fp-budget` / absent
+  calibration is DEMOTED to unfitted gating — corpus-relative thresholds, never the spec's
+  taus. (Rollback law: the drugs proxy fit flagged 218 benign at saturated p=0.99.)
+- A track that ships a HEAD with tier arbitration (drugs' tobacco routing, a two-margin
+  AND) must be consumed through `load_<track>_head(cfg).probs(emb) -> (p, tier)` — NEVER
+  re-banded from tau alone, which resurrects the head's fixed defects (vape→violation).
+- `spec_sha` is `store.spec_sha(spec)` = sha256(json.dumps(spec,sort_keys=True,
+  separators=(",",":")))[:16] — imported from `imgtag.core.store`, never reimplemented, so
+  all consumers hash identically. A model_sha/spec_sha mismatch triggers re-score (a stored
+  `p` cannot be re-derived after a Platt recalibration until raw margins land in the sidecar).
+
+### Score sidecars (ADR-15 / TRACKS.md T1) — reader contract
+
+`~/.imgtag/datasets/<slug>/tracks/<category>.f32` [rows, cols] + `<category>.json`
+`{category, rows, cols, col_roles, bytes, dtype, scorer, model_sha, spec_sha, updated}`.
+Written column-fsync THEN header-atomic-swap (shard discipline): a reader caps at the
+header's `rows`, never stats the `.f32`. Read via `store.read_track_meta`/`store.read_track`.
+Today `cols==1, col_roles==["p"]` (heads emit one calibrated p); the format reserves
+`cols`/`col_roles` so a head that later emits raw per-tier MARGINS widens its column with
+zero format change (then a Platt refit is also free, not just a tau change). The reader
+derives tiers from raw + the CURRENT spec (T1-pure) and refuses on model_sha/spec_sha
+mismatch; `store.dataset_flags` exposes derived tiers for a consumer that prefers not to
+re-derive, but the raw+spec derivation stays authoritative.
+
+### Per-image all-tracks — `GET /api/image/<dataset>/<image_id>/tracks`
+
+`{image_id, dataset, path, tracks: [{category, label, kind: moderation|content, p, tier
+(winning tier or "none"), calibration, spec_calibration, enforcement_ready, scored,
+label_value?}]}`. EVERY registered track present (incl. ~0). `scored: false` (p null) =
+scorer unavailable → render "score pending", never a fake 0. Ranked fired-first then by p;
+p comparable WITHIN kind, not across. HTTP-only for now; if a CLI `imgtag info --image
+<id> --tracks` is added it MUST return this exact object (B20 parity).
