@@ -71,6 +71,55 @@ def rec_at_fpr(s: np.ndarray, y: np.ndarray, f: float) -> float:
     return float((s[y] >= t).mean())
 
 
+# ── CONFIDENCE CORRECTNESS (user law 2026-07-22: measure calibration/separation, not just
+# rates). A recall-first review queue is only trustworthy if a HIGHER p really does mean
+# MORE likely a drug — separation — and if the number means what it says — calibration. ──
+def auroc(p: np.ndarray, y: np.ndarray) -> float:
+    """Threshold-free TP-vs-FP separation. 0.5 = chance, 1.0 = perfectly separated.
+
+    Rank statistic (Mann-Whitney), so it is stable under the tiny positive set where a
+    single threshold (AP) is noisy. THIS is the 'confidence correctness' headline.
+    """
+    y = np.asarray(y, bool)
+    pos, neg = p[y], p[~y]
+    if not len(pos) or not len(neg):
+        return float("nan")
+    order = np.argsort(np.concatenate([pos, neg]))
+    ranks = np.empty(len(order), float)
+    ranks[order] = np.arange(1, len(order) + 1)
+    r_pos = ranks[: len(pos)].sum()
+    return float((r_pos - len(pos) * (len(pos) + 1) / 2) / (len(pos) * len(neg)))
+
+
+def ece(p: np.ndarray, y: np.ndarray, bins: int = 10) -> float:
+    """Expected Calibration Error: |mean confidence − empirical rate| averaged over bins.
+
+    On the labelled slice only. With 17 positives this is noisy, so it is reported WITH its
+    support, never as a hero number — a direction to move, not a benchmark."""
+    p, y = np.asarray(p, float), np.asarray(y, bool)
+    edges = np.linspace(0, 1, bins + 1)
+    e, n = 0.0, len(p)
+    for i in range(bins):
+        m = (p >= edges[i]) & (p < edges[i + 1] if i < bins - 1 else p <= 1.0)
+        if m.any():
+            e += m.sum() / n * abs(p[m].mean() - y[m].mean())
+    return float(e)
+
+
+def brier(p: np.ndarray, y: np.ndarray) -> float:
+    return float(np.mean((np.asarray(p, float) - np.asarray(y, bool)) ** 2))
+
+
+def wilson(k: int, n: int, z: float = 1.96) -> tuple[float, float]:
+    """95% Wilson CI for a rate k/n — the honest interval on a fitted τ's FP rate."""
+    if n == 0:
+        return (0.0, 1.0)
+    ph, z2 = k / n, z * z
+    c = (ph + z2 / (2 * n)) / (1 + z2 / n)
+    half = z * ((ph * (1 - ph) / n + z2 / (4 * n * n)) ** 0.5) / (1 + z2 / n)
+    return (max(0.0, c - half), min(1.0, c + half))
+
+
 def ridge_platt(s, y, lam: float = 1e-3):
     """Platt scaling with an L2 penalty on the SLOPE.
 
@@ -242,6 +291,30 @@ def main() -> int:
     print("\nfit A=%.2f B=%.2f  tau=%.4f  tau_review=%.4f  (cap %.3f)" % (A, B, tau, tau_review, P_MAX))
     print("p histogram, negatives:", out["p_histogram_negatives"])
     print("p histogram, drug     :", out["p_histogram_drug"])
+
+    # ── CONFIDENCE CORRECTNESS (the user-law headline: does a higher p mean more drug?) ──
+    fp_k = int((p[neg] >= tau).sum())
+    out["confidence"] = {
+        "auroc_drug_vs_neg": round(auroc(p[m], y[m]), 4),           # threshold-free separation
+        "separation_margin": round(float(np.median(p[y]) - np.quantile(p[neg], 0.99)), 4),
+        "tp_median_p": round(float(np.median(p[y])), 4),
+        "fp_p99": round(float(np.quantile(p[neg], 0.99)), 4),
+        "ece_labelled": round(ece(p[m], y[m]), 4),
+        "brier_labelled": round(brier(p[m], y[m]), 4),
+        "tau_fp_rate": round(fp_k / max(1, int(neg.sum())), 5),
+        "tau_fp_wilson95": [round(w, 5) for w in wilson(fp_k, int(neg.sum()))],
+        "note": "AUROC is the headline (rank-stable on 17 positives); ECE/Brier are noisy "
+        "on this support and read as direction, not benchmark.",
+    }
+    # per-subcategory separation: which drug KINDS the detector actually confidently finds
+    grp = np.array(scorer.groups)[cp.argmax(1)]
+    out["confidence"]["per_subcategory_auroc"] = {
+        g: round(auroc(np.concatenate([p[y & (grp == g)], p[neg]]),
+                       np.concatenate([np.ones((y & (grp == g)).sum(), bool),
+                                       np.zeros(int(neg.sum()), bool)])), 3)
+        for g in sorted(set(grp[y])) if (y & (grp == g)).sum() >= 1
+    }
+    print("confidence:", json.dumps(out["confidence"]))
 
     # ── tiering with the shipped arbitration, so the numbers match the product ──
     viol = (p >= tau) & (s >= st + drugs.TIER_MARGIN)

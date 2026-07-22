@@ -6,6 +6,15 @@
 > Binding: VISION-ADDENDA 12:33Z (three tracks) + 12:50Z rulings / ADR-14 (two tiers),
 > ADR-3 (probability space, background-margin experiment), ADR-7 (no new deps).
 
+> **CHECKPOINT 2026-07-22 ~17:40Z** — WHERE I AM: refit v2 shipped (4 routed defects fixed;
+> committed 6a6a2e1/3ab7ce9; 18 tests green; live index reports 16 drug violations + 6
+> review). improve-track round 1 PREPARED during the b-bench quiet window (no compute):
+> confidence-correctness metrics written into eval (AUROC / ECE / Brier / Wilson-CI /
+> per-subcategory separation), candidate subcategory taxonomy drafted
+> (`data/drug-probe/taxonomy.json`, 7+staging subcats). WHAT'S NEXT (on ALL-CLEAR): A/B each
+> taxonomy candidate for TP-vs-FP separation, promote only prompts that lift AUROC without
+> lifting the FP band, refit, ledger entry, delete duplicate `drugprobe2`.
+
 ## 0. The one-paragraph answer
 
 Drugs is the hardest of the three tracks because **the labels do not exist** and the
