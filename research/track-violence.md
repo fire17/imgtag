@@ -311,11 +311,16 @@ earlier `--full-speed` attempt was rightly killed mid-run as an ADR-11 violation
 and the completion was redone in polite mode, job polled not `--wait`-blocked).
 
 **Cross-track collision, measured on the whole `vslices` (1856) via the live reader
-(`Searcher.track_scores`):** violence flags 17 images (alert 2 · violation 3 · review 12;
-`unfitted`, `enforcement_ready:false`), **and 0 of them overlap a `sports.match` flag** — the
-negatives-subtraction cleanly separates the two tracks on real contact-sport data. (Aside,
-reported to b-daemon + track-sports2: `sports.match` fired 0/1856 under the reader on this
-sports-heavy slice — a sports-side reader-vs-head gating gap, not a violence issue.)
+(`Searcher.track_scores`) — confirmed by b-daemon with BOTH tracks firing:** violence flags
+~14–17 images (`unfitted`, `enforcement_ready:false`; the 14 vs 17 delta is τ-precedence
+between b-daemon's current shared-loader run and an earlier read, both non-saturated),
+**`sports.match` fires 143, and the overlap is 0** (alert∩sports 0 · violation∩sports 0 ·
+review∩sports 0). The first pass showed collision 0 while `sports.match` was momentarily
+dead (0/1856, a stale sports reader) — b-daemon re-ran once sports fired live, and the 0
+HELD: a boxing image now correctly fires `sports/match` and does NOT fire violence (this
+track's contact-sport negatives suppress it), while the violence flags never touch sports.
+Clean orthogonal separation on the confusable slice, both tracks live — the self-contained
+negatives (option a) work, with no sports→violence coupling, exactly as TRACKS.md prefers.
 
 ## 8. Acceptance sketch (the brief's cases, with documented rulings)
 
