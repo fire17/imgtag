@@ -253,3 +253,15 @@ These will likely move ImgTag's metrics more than swapping models. Flagging them
 [OpenVINO MobileCLIP notebook](https://docs.openvino.ai/2024/notebooks/mobileclip-video-search-with-output.html) ·
 [EVA-CLIP arXiv:2303.15389](https://arxiv.org/abs/2303.15389) ·
 [apple/DFN2B-CLIP-ViT-B-16](https://huggingface.co/apple/DFN2B-CLIP-ViT-B-16)
+
+---
+
+## ⚠️ CORRECTION (2026-07-22, main session — live-verified, supersedes row 13)
+
+Row 13 (**Meta Perception Encoder / PE-Core**) wrongly lists 🔴 FAIR Noncommercial. Live check
+of github.com/facebookresearch/perception_models shows **two separate licenses**: LICENSE.PE =
+**Apache-2.0 for all PE checkpoints** (badge: "Model License: Apache 2.0"); the FAIR
+Noncommercial Research License applies to **PLM only** (the language model). HF model card
+facebook/PE-Core-S16-384 metadata also reads `apache-2.0`. → **PE-Core is commercial-safe**
+and PE-Core-S16-384 (20M vision, 72.7% IN1k) / PE-Core-T16-384 (10M) join the shippable top
+tier per the tagging lane's ranking. (Cross-lane conflict caught 10:07Z, resolved 10:09Z.)
