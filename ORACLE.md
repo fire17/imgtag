@@ -669,6 +669,14 @@ label, or to compare a dev-machine number against a target-profile (🐧) budget
   (~112MB) remains the strict-disk edge floor. fp16-weights arm dropped from perf matrix.
   Revisit trigger: ORT CPU EP gains fp16 MatMul kernels, or a B24-passing int8 vision
   tower appears.
+- 2026-07-22 14:18Z · **RESURRECTION FOOTGUN (operational law)**: a SendMessage to a
+  completed/apparently-dead teammate RESUMES it from its transcript. During the auth
+  outage the conductor spawned successors (safety2/violence2/sports3) for "dead" lanes —
+  then sibling lanes' contract messages resurrected the ORIGINALS (safety, violence,
+  sports2, nudity), producing three duplicated lanes racing the same files. Caught via ps
+  before any file collision; successors TaskStop'd, originals kept (richer context).
+  LAW: before spawning a successor for a dead lane, `ps aux | grep 'agent-id <name>'`
+  AND TaskStop the original name first; a "dead" lane is one message away from alive.
 
 ---
 
