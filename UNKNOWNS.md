@@ -30,10 +30,11 @@ Finding (measured locally, priorart §1.2): worst-case 12MP JPEG decode+resize =
 single-thread vs ~2–6ms model inference (immich's own table). Every incumbent treats decode
 as glue; that's why they index at 0.2–2 img/s while their models allow >170 img/s.
 Resolution: the architecture puts decode first-class: DCT-scaled `draft()` decode (measured
-1.75× win, larger on real photos) → decode-at-target-scale always; parallel decode worker
-pool feeding batched inference; EXIF-thumbnail fast path evaluated in bench; libvips as a
-bench alternative to Pillow. Indexing pipeline = (N decode workers) → (batch queue) →
-(ORT session, all cores) with backpressure.
+1.75× win on 12MP; corpus-scoped — see ORACLE playbook) → decode-at-target-scale always;
+parallel decode worker pool feeding batched inference; EXIF-thumbnail fast path evaluated
+in bench. Indexing pipeline = (N decode workers) → (bounded uint8 batch queue) → (ORT
+session, thread geometry per ORACLE ADR-11 resource policy — intra-op small by design;
+per-image parallelism beats intra-op on many-core, measured).
 
 **C4. Fast preprocessing that silently degrades quality is the classic trap in this field.**
 Finding: clip.cpp ships 31.4% ImageNet top-1 vs 66.6% reference for IDENTICAL weights —

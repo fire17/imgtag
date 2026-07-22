@@ -25,21 +25,39 @@ highest-bar protocol — verbatim vision, budgets as tests, honest verification,
   CPU; Ente migrated ggml→ORT), over torch (weight, cold start), over OpenVINO-as-primary
   (Intel-centric; keep as bench slot), over CoreML (violates CPU-only law; opt-in future).
   Revisit if: bench shows another EP ≥1.5× on target hardware.
-- **ADR-2 No vector database. Exact brute-force scan** over L2-normalized contiguous
-  mmap (f16 on disk, f32 accumulate). Measured 0.47ms @10k×512, 7.4ms @100k on this
-  machine; every ANN option costs 0.3–105s build to save ≤0.3ms. Revisit if: corpus
-  >~300k measured crossover → binary-quantized coarse pass + f32 rerank (design ready),
-  then usearch. NEVER pgvector/sqlite-vec for the hot path at this scale.
+- **ADR-2 No vector database. Exact brute-force scan over L2-normalized contiguous
+  mmap'd f32 shards. f16 is DROPPED entirely** (rev round 1 adjudication: numpy has no
+  f16 BLAS — f16 matmul measured 48× slower, f16→f32 convert 9.3ms@10k/97ms@100k; disk
+  saving is trivial at our scale, and mmap'd f32 pages are file-backed/evictable — kinder
+  to the 8GB box than any heap mirror). Measured f32 scan: 0.28ms @10k, 3.2ms @100k.
+  `bench search` asserts `dtype == float32` on the array actually handed to the matmul.
+  Revisit only >300k imgs (binary-quantized coarse pass + f32 rerank, then usearch).
+  NEVER pgvector/sqlite-vec for the hot path at this scale.
 - **ADR-3 Hybrid retrieval architecture.** Embedding index (free-text recall) + tag
   vocabulary (~4–8k tags from COCO/LVIS/OI names + curated) scored via the SAME text
-  encoder at index time (one matmul, marginal cost ~0) with per-tag calibrated thresholds
-  + query-time hypernym expansion (WordNet closure + supercategory tables, max-pooled).
+  encoder at index time (one matmul, marginal cost ~0) + query-time hypernym expansion.
   Over embedding-only (fails: multi-object recall, superordinate queries, no honest
-  no-match) and over heavy tagger models (RAM++ = 3GB/750M params, 24× PE-T FLOPs — dead
-  end). Tags are the FP gate and the explanation surface.
+  no-match) and over heavy tagger models (RAM++ dead end). Tags are the FP gate and the
+  explanation surface. **Hypernym data is a PRECOMPUTED static table** built offline from
+  LVIS synsets + OI 600-class tree + COCO supercats (all on disk) — no nltk/WordNet at
+  runtime (ADR-7 intact). **CALIBRATION CONTRACT (rev round 1, rev-arch C-7 — mandatory):**
+  (1) two-layer thresholds: model-layer per-tag Platt fit on COCO+LVIS (held-out CAL-SET)
+  → `p_tag`, shipped per model_sha; dataset-layer streaming stats (per-tag mean/std/p99
+  over THIS corpus, accumulated free during the index matmul, stored in manifest ~96KB)
+  → effective τ = max(τ_tag, mean+k·std). (2) **Fusion in probability space ONLY** —
+  never max-pool raw cosine against calibrated probabilities; free-text path calibrated
+  via per-query corpus z-score → global logistic; fuse p = max(p_tag, p_text), record
+  which path won (= the "why this matched" payload). (3) Near-tag rule: query inherits a
+  tag's calibration only if cos(q, tag) ≥ θ_syn (fit on COCO synonym pairs); compound
+  queries NEVER inherit a component tag's threshold — unit test with "my dog wearing a
+  santa hat". (4) Manifest records calib_sha + calib_model_sha; tag-path search REFUSES
+  loudly on mismatch (same mechanism as the model/manifest refusal). Re-calibration is
+  structurally impossible to forget, not a discipline.
 - **ADR-4 Pluggable model backends; Apache-2.0 default.** Bench roster (2026-07-22):
   PE-Core-S16-384 + T16-384 (Apache; export spike first), SigLIP2-base-224 (Apache,
-  official int8 ONNX — quality anchor), SigLIP-v1-base (Apache, small text tower),
+  official ONNX — quality anchor; its official int8 files must THEMSELVES pass the B24
+  fidelity gate vs their fp32 before being trusted — official ≠ audited, per the broken
+  Xenova int8 precedent), SigLIP-v1-base (Apache, small text tower),
   UForm (Apache, Matryoshka 64d dark horse), OpenCLIP ViT-B/32 (MIT control),
   MobileCLIP2-S0/S2 (apple-amlr — REFERENCE CEILING ONLY, opt-in plugin, never default,
   never in published artifacts), rclip (system-level head-to-head baseline).
@@ -63,11 +81,29 @@ highest-bar protocol — verbatim vision, budgets as tests, honest verification,
   after 300s → 60–70s cold search. We keep the text tower resident (few hundred MB max),
   LRU query cache, tag table precomputed. CLI talks to the daemon when present, else
   in-process (still ≤2s cold, B13).
-- **ADR-6 Storage = append-only shards + atomic manifest.** `~/.imgtag/datasets/<slug>/`:
-  `shard-XXXX.f16` (embeddings, mmap), `ids-XXXX.jsonl` (image id/path/dims), 
-  `manifest.json` (atomic tmp+rename; counts, model id+hash, shard list). Readers snapshot
-  the manifest; writers append + rename. Search-while-indexing and crash recovery fall out
-  free. Never mutate published shards; compaction writes new files then swaps manifest.
+- **ADR-6 Storage = append-only shards + atomic manifest + EXCLUSIVE WRITER + DURABLE
+  FLUSH** (rev round 1: the original "falls out free" claim was false — two writers or a
+  crash could silently permute row↔id mapping forever). `~/.imgtag/datasets/<slug>/`:
+  - Files: `shard-<jobid8>-<seq:04d>.f32` + `ids-<jobid8>-<seq>.jsonl` (generation-scoped
+    names — two writers can never land in one file) + `manifest.json`. Manifest per-shard
+    record: `{name, rows, emb_bytes, ids_bytes}` — **byte counts are the authority; readers
+    never stat() shard files** and cap reads at manifest counts. Line i of ids ↔ row i of
+    shard is a WRITTEN invariant; each ids line also carries `"row": <global_index>`.
+  - **Writer exclusion:** `.writer.lock`, `fcntl.flock(LOCK_EX|LOCK_NB)` held for the whole
+    job; failure = exit 3 with pid/job/since message. Kernel releases on any death — NO
+    pid-liveness heuristics. Lock contents (JSON) are advisory for the error message only.
+    Readers take no lock ever.
+  - **Flush protocol (order mandatory):** (1) buffered write() batch to shard — never
+    mmap-write; (2) fsync(shard); (3) write() ids lines; (4) fsync(ids); (5) write
+    manifest.tmp + fsync; (6) rename→manifest.json; (7) **fsync(dataset dirfd)** — the
+    step everyone omits.
+  - **Recovery (on every open-for-WRITE, never on read):** truncate any shard/ids file
+    longer than its manifest byte count (torn tail from crash); shorter than manifest =
+    FAIL LOUDLY + quarantine; assert emb_bytes % (D×4) == 0 and == rows; log every
+    truncation. Orphan shards not in manifest → moved to trash/ at job start, never read,
+    never deleted inline.
+  - Compaction writes new files then swaps manifest; unlinked shards go to trash/ with a
+    grace period (live readers may hold the old snapshot).
 - **ADR-7 Engine deps = onnxruntime + numpy + Pillow + certifi/httpx + micro-server.**
   NO torch/transformers at runtime (export tooling may use them offline). uv-managed venv.
 - **ADR-8 Idea reuse: concepts from AGPL tools, code only from MIT/Apache.** (UNKNOWNS I9.)
@@ -88,6 +124,19 @@ highest-bar protocol — verbatim vision, budgets as tests, honest verification,
   (e) quant decisions are PER-ARCH — NEON results never transfer to AVX2 (clip.cpp
   anomaly was x86; DeepSparse win was AVX512-VNNI; measure on target). Revisit if: the
   user later asks for Mac-local optimization (add profile, change no defaults).
+
+- **ADR-11 Resource policy — ONE place, both throughput and politeness measured from the
+  SAME run** (rev round 1, rev-arch C-4/C-5/C-6). POLITE (default): decode_workers =
+  clamp(ncpu−2, 2, 8) · ORT intra_op=2, inter_op=1 · total threads ≤ ncpu−1 asserted at
+  startup · os.nice(10) set IN EACH worker initializer (not only inherited). FULL
+  (`--full-speed`): workers=ncpu, no nice. B1 headline = POLITE run; FULL number always
+  labeled. Transport: decode workers ship **uint8 tensors** (normalization FUSED into the
+  ONNX graph — Ente trick); workers need Pillow only, no numpy. Non-JPEG decodes capped
+  by semaphore(4) (draft() is JPEG-only; PNG/HEIC full decodes are the biggest RAM term).
+  Pipeline geometry (central session vs per-worker sessions) is a bench-swept axis; the
+  policy's totals govern either. Memory arithmetic vs B8 is re-measured, never assumed
+  (spawn start-method means zero COW sharing — 16 workers ≈ 1.4GB of interpreters alone;
+  hence the clamp).
 
 ## 3. Dead ends (do not rediscover)
 
@@ -188,10 +237,13 @@ highest-bar protocol — verbatim vision, budgets as tests, honest verification,
 
 STOP and report (symptom + what you tried + which oracle entries you consulted) when:
 (a) a budget test fails twice for the same cause; (b) reality contradicts an ADR or a
-research number you were handed; (c) you are about to add a dependency outside ADR-7 or
-any GPL/AGPL/amlr-licensed code; (d) you are about to relax a budget, delete user data,
-or touch anything outside the ImgTag tree + ~/.imgtag; (e) an export/quantization fight
-exceeds its timebox; (f) you catch yourself guessing a number you could measure.
+research number you were handed; (c) you are about to add a RUNTIME dependency outside ADR-7 or
+any GPL/AGPL/amlr-licensed code (dev-deps for the bench harness — playwright, psutil-free
+sampling — are allowed and marked dev-only); (d) you are about to relax a budget, delete
+user data, or write outside the allowed surfaces: the ImgTag tree, ~/.imgtag,
+~/.claude/skills/imgtag* (the vision-mandated skill install), and the session scratchpad;
+(e) an export/quantization fight exceeds its timebox; (f) you catch yourself guessing a
+number you could measure.
 "I stopped because X" is a success report. Silent grinding is the only failure.
 
 ## 8. Field log (append-only: symptom → what worked)

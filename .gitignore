@@ -9,3 +9,4 @@ models/**/*.onnx
 models/**/*.bin
 models/**/tokenizer.json
 data/
+.scratch/
