@@ -354,3 +354,18 @@ def test_matched_terms_are_the_users_words_with_via_for_expansion(home):
     r = s.search("animal misc", "d1", k=3)  # "animal" is a hypernym: expands to cat/dog
     if r.get("terms"):
         assert "animal" in r["terms"]  # the user's word, never the internal tag name
+
+
+def test_generic_metadata_passthrough(home):
+    """Index-time metadata (account ids, dates, ...) rides through to every hit (12:33Z)."""
+    be = FakeBackend()
+    embs = np.stack([be._vec("cat")] * 3 + [be._vec("misc")] * 20)
+    recs = [{"image_id": f"{i:016x}", "path": f"/img/{i}.jpg", "dataset": "d1", "w": 4, "h": 4,
+             "account_id": "acct-7", "captured": "2026-07-01"} for i in range(23)]
+    with Writer("d1", be, home) as w:
+        w.append(embs, recs)
+    r = S.Searcher(home, backend=be).search("cat", "d1", k=3)
+    assert r["hits"]
+    for h in r["hits"]:
+        assert h["meta"] == {"account_id": "acct-7", "captured": "2026-07-01"}
+        assert h["w"] == 4 and h["h"] == 4  # known fields stay top-level, not in meta

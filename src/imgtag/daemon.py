@@ -24,6 +24,8 @@ Endpoints::
                                                  can exclude the one-time load
     GET  /api/datasets                           fleet view (B18f: exactly what is on disk)
     GET  /api/status                             footprint + fleet + job count (app health)
+    GET  /api/moderation?dataset=&limit=         nudity/weapons/drugs counts per dataset
+                                                 (+ flagged images when limit>0)
     GET  /api/images?dataset=&offset=&limit=     paged snapshot listing (gallery view)
     GET  /api/jobs                               job status files (progress.list_jobs)
     GET  /api/events                             SSE, <=1s freshness, from the job files
@@ -362,15 +364,46 @@ class Handler(BaseHTTPRequestHandler):
                            "evictions": d.evictions[-5:]})
             elif u.path == "/api/search":
                 query = (q.get("q") or [""])[0]
+                trk = (q.get("track") or [None])[0] or None
+                k = max(1, min(500, int((q.get("k") or [50])[0])))
+                if not query.strip() and trk:
+                    # "show me the flagged images": a track with no query is a browse of
+                    # that track, ranked by track probability instead of query relevance.
+                    ds = (q.get("dataset") or [None])[0]
+                    names = [ds] if ds else list_datasets(d.home)
+                    hits = [h for nm in names
+                            for h in d.searcher.moderation(nm, limit=k).get("flagged", [])
+                            if h["track"] == trk]
+                    hits.sort(key=lambda h: (-h["p"], h["image_id"]))
+                    self.json({"query": "", "track": trk, "tookMs": 0.0, "hits": hits[:k],
+                               "no_match": not hits, "calibration": "measured-default",
+                               "enforcement_ready": False,
+                               "coverage": {"indexed": sum(d.searcher.snapshot(n).count
+                                                           for n in names)},
+                               "datasets": names})
+                    return
                 if not query.strip():
-                    raise ValueError("q is required")
+                    raise ValueError("q is required (or pass track= to browse a track)")
                 self.json(d.searcher.search(
                     query,
                     dataset=(q.get("dataset") or [None])[0] or None,
-                    k=max(1, min(500, int((q.get("k") or [50])[0]))),
+                    k=k,
                     strict=(q.get("strict") or ["0"])[0] in ("1", "true", "yes"),
                     text=(q.get("text") or ["auto"])[0],
+                    track=trk,
                 ))
+            elif u.path == "/api/moderation":
+                ds = (q.get("dataset") or [None])[0]
+                limit = max(0, min(200, int((q.get("limit") or [0])[0])))
+                names = [ds] if ds else list_datasets(d.home)
+                per = [d.searcher.moderation(nm, limit) for nm in names]
+                totals: dict[str, int] = {}
+                for r in per:
+                    for tname, c in r["counts"].items():
+                        totals[tname] = totals.get(tname, 0) + c
+                self.json({"datasets": per, "totals": totals,
+                           "indexed": sum(r["indexed"] for r in per),
+                           "calibration": "measured-default", "enforcement_ready": False})
             elif u.path == "/api/status":
                 self.json(d.status())
             elif u.path == "/api/images":

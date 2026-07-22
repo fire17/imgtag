@@ -1,0 +1,61 @@
+{
+ "version": 1,
+ "note": "Moderation tracks (VISION-ADDENDA 2026-07-22 ~12:33Z). Each track is a set of PROMPTS scored directly by the text tower, NOT tag-table lookups: the object vocabulary has no nudity concept at all (measured: 'nudity'/'nude'/'naked' are absent from the 2177-tag table; only clothing items are present, and a swimsuit is not nudity). Prompts are provisional and UNFITTED — b-bench's CAL-SET fit decides per-track tau before any of this may enforce anything.",
+ "enforcement_ready": false,
+ "tracks": {
+  "nudity": {
+   "label": "nudity / sexual content",
+   "prompts": [
+    "a nude person",
+    "a naked person",
+    "nudity",
+    "explicit sexual content",
+    "a topless person",
+    "a person in lingerie",
+    "a shirtless person",
+    "a person in underwear"
+   ],
+   "negatives": [
+    "a person wearing clothes",
+    "a portrait of a person",
+    "a person at the beach in a swimsuit"
+   ]
+  },
+  "weapons": {
+   "label": "weapons",
+   "prompts": [
+    "a gun",
+    "a handgun being held",
+    "a rifle",
+    "a firearm",
+    "a knife held as a weapon",
+    "a sword",
+    "ammunition and bullets",
+    "a person pointing a gun"
+   ],
+   "negatives": [
+    "a kitchen knife cutting vegetables",
+    "a toy gun",
+    "a person holding a phone"
+   ]
+  },
+  "drugs": {
+   "label": "drugs / drug paraphernalia",
+   "prompts": [
+    "illegal drugs",
+    "a syringe and needle for drug use",
+    "marijuana",
+    "a bong or smoking pipe",
+    "cocaine powder and lines",
+    "pills spilled out",
+    "a person smoking a cigarette",
+    "drug paraphernalia"
+   ],
+   "negatives": [
+    "a pharmacy shelf",
+    "a person drinking coffee",
+    "medical equipment in a hospital"
+   ]
+  }
+ }
+}

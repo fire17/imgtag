@@ -346,3 +346,29 @@ def test_app_assets_resolve_at_root_and_under_app(live):
     for path in ("/", "/app/app.js", "/app.js", "/app.css"):
         st, body = D.request("GET", path, home=live)
         assert st == 200 and body, path
+
+
+def test_moderation_endpoint_and_track_filter(live):
+    """Moderation tracks (VISION-ADDENDA 12:33Z): per-dataset counts, opt-in only, and
+    never advertised as enforcement-ready while the tracks are unfitted."""
+    st, r = get(live, "/api/moderation?dataset=d1")
+    assert st == 200 and r["enforcement_ready"] is False
+    assert r["calibration"] == "measured-default"
+    d = r["datasets"][0]
+    assert set(d["counts"]) == {"nudity", "weapons", "drugs"} and d["indexed"] == 30
+    assert all(isinstance(v, int) for v in d["counts"].values())
+    assert r["totals"] == d["counts"]
+
+    st, r = get(live, "/api/search?q=cat&dataset=d1&track=weapons&k=5")
+    assert st == 200  # filter applies; a fake backend flags nothing, so an honest empty set
+    st, r = get(live, "/api/search?q=cat&dataset=d1&track=nope")
+    assert st == 400 and r["exit_code"] == 1 and "unknown moderation track" in r["error"]
+
+
+def test_plain_search_never_triggers_moderation(live):
+    """Moderation costs a text-tower batch — a normal query must not pay it (ADR-5)."""
+    s = D.Handler.daemon.searcher
+    s._tracks.clear()
+    st, r = get(live, "/api/search?q=cat&dataset=d1&k=3")
+    assert st == 200 and not s._tracks  # nothing computed, nothing cached
+    assert all("flags" not in h for h in r["hits"])
