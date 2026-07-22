@@ -127,11 +127,13 @@ def load_moderation_hook(spec=None, profile: dict | None = None, log=lambda m: N
         return None
     log(f"moderation heads loaded: {', '.join(sorted(heads))}")
 
+    warned: set[str] = set()   # deprecation notices fire ONCE per job, not per batch
+
     def detect(embs, recs, images=None):
         per: list[list[dict]] = [[] for _ in recs]
         for name, head in heads.items():
             try:
-                out = _call_head(head, embs, images, recs) or []
+                out = _call_head(head, embs, images, recs, name, warned, log) or []
             except Exception as e:
                 log(f"moderation head {name!r} raised {type(e).__name__}: {e} — skipped for this batch")
                 continue
@@ -147,20 +149,23 @@ def load_moderation_hook(spec=None, profile: dict | None = None, log=lambda m: N
     return detect
 
 
-def _call_head(head, embs, images, recs):
-    """Call a track head through whichever shape it actually implements.
+def _call_head(head, embs, images, recs, name="head", warned=None, log=lambda m: None):
+    """Call a track head through the ONE documented seam, with one tolerated legacy path.
 
-    The documented seam is `score(embeddings, images, ids) -> [{category,p,tier}]`. The
-    nudity track ships `score_images(list[PIL.Image]) -> [{category,p,flagged}]` plus a
-    tensor-only `score(batch)`; the PIL path is UNAMBIGUOUS so it is supported here. A
-    bare `score(batch)` is NOT guessed at — feeding it embeddings would silently produce
-    numbers that mean nothing, which is worse than the loud skip the caller gets.
+    Seam (ruling 2026-07-22): `score(embeddings, images, ids) -> [{category, p, tier}]`.
+    TOLERATED UNTIL THE TRACK CONFORMS: `score_images(list[PIL.Image])`, which is
+    unambiguous. A bare `score(batch)` is NOT guessed at — feeding an image model's
+    tensor input with embeddings would silently produce numbers that mean nothing.
     """
     try:
-        return head.score(embs, images, recs)          # the finalized seam
+        return head.score(embs, images, recs)          # the documented seam
     except TypeError:
         if not hasattr(head, "score_images"):
             raise
+    if warned is not None and f"seam:{name}" not in warned:
+        warned.add(f"seam:{name}")
+        log(f"DEPRECATED: moderation head {name!r} has no score(embeddings, images, ids) — "
+            f"using its legacy score_images(); the track should migrate to the documented seam")
     if images is None:                                  # legacy PIL-only head
         raise RuntimeError("head needs pixels but this batch has none (geometry=worker)")
     from PIL import Image as _Image
@@ -168,7 +173,7 @@ def _call_head(head, embs, images, recs):
     return head.score_images([_Image.fromarray(im) for im in images])
 
 
-def _apply_moderation(hook, embs, recs, images, counts: dict, log) -> int:
+def _apply_moderation(hook, embs, recs, images, counts: dict, log, warned=None) -> int:
     """Attach ADR-14 flags to recs and accumulate per-TIER, per-category counts.
 
     Returns 1 if the detector failed for this batch (counted, never fatal).
@@ -184,7 +189,13 @@ def _apply_moderation(hook, embs, recs, images, counts: dict, log) -> int:
         for f in flags or []:
             # ADR-14: tier is the carrier. Legacy `flagged: True` maps to violation so an
             # older detector still counts for something instead of vanishing silently.
-            tier = f.get("tier") or ("violation" if f.get("flagged") else "none")
+            tier = f.get("tier")
+            if tier is None:  # legacy {flagged: bool} — counted, but say so once per job
+                tier = "violation" if f.get("flagged") else "none"
+                if warned is not None and "tier" not in warned:
+                    warned.add("tier")
+                    log(f"DEPRECATED: moderation flag for {f.get('category')!r} has no ADR-14 "
+                        f"`tier` — mapping flagged->violation; the track should emit tier")
             if tier == "none":
                 continue
             keep.append({"category": f["category"], "p": round(float(f.get("p", 1.0)), 4), "tier": tier})
@@ -387,6 +398,7 @@ def index(
     job_meta = dict(meta or {})
     per_image_meta = load_meta_csv(meta_csv, root if root.is_dir() else root.parent) if meta_csv else {}
     mod_counts: dict[str, dict] = {}
+    mod_warned: set[str] = set()
     mod_errors = 0
     prof = dict(profile or load_profile(home))
     hook = load_moderation_hook(moderation, prof, log) if moderation else None
@@ -488,7 +500,7 @@ def index(
                     embs = be.embed_images(images)
                     t_infer += time.perf_counter() - t
                 if hook is not None:
-                    mod_errors += _apply_moderation(hook, embs, pend_recs, images, mod_counts, log)
+                    mod_errors += _apply_moderation(hook, embs, pend_recs, images, mod_counts, log, mod_warned)
                 w.append(embs, pend_recs.copy())
                 for s in pend_slots:
                     free_q.put(s)

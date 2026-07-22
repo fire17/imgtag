@@ -412,7 +412,13 @@ def _search_via_daemon(args, t0: float):
         _err(f"error: {(body or {}).get('message', body)}")
         return code
     body["clientMs"] = round((time.perf_counter() - t0) * 1000, 2)
-    body.setdefault("served_by", "daemon")
+    # `served_by` names the TRANSPORT (which process answered) — that is what the ADR-13
+    # client contract is about. The daemon's own label for its tower state ("warm-tower",
+    # "cold-load") is preserved beside it instead of overwriting the transport answer.
+    detail = body.get("served_by")
+    body["served_by"] = "daemon"
+    if detail and detail != "daemon":
+        body["served_detail"] = detail
     _out(args, body, "\n".join(f"{h['score']:.4f}  {h['dataset']:12s} {h['image_id']}  {h['path']}"
                                for h in body.get("hits", [])) or "no match")
     return 0
@@ -442,7 +448,10 @@ def cmd_search(args) -> int:
 
     obj = Searcher().search(args.query, dataset=args.dataset, k=args.k)
     obj["clientMs"] = round((time.perf_counter() - t0) * 1000, 2)
-    obj.setdefault("served_by", "in-process")
+    detail = obj.get("served_by")
+    obj["served_by"] = "in-process"
+    if detail and detail != "in-process":
+        obj["served_detail"] = detail
     _out(args, obj, "\n".join(f"{h['score']:.4f}  {h['dataset']:12s} {h['image_id']}  {h['path']}"
                               for h in obj.get("hits", [])) or "no match")
     return 0

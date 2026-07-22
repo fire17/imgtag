@@ -133,6 +133,39 @@ def test_no_hook_means_no_moderation_block(tmp_path, imgs):
     assert "moderation" not in store.read_manifest("ds", home)
 
 
+class _LegacyHead:
+    """A head from before the seam ruling: tensor-only score(), flagged instead of tier."""
+
+    def score(self, batch):
+        raise TypeError("score() takes 2 positional arguments but 4 were given")
+
+    def score_images(self, images):
+        return [[{"category": "weapons", "p": 0.8, "flagged": True}] for _ in images]
+
+
+@needs_model
+def test_legacy_head_is_tolerated_and_deprecation_fires_once(tmp_path, imgs, monkeypatch):
+    """Ruling: keep score_images and flagged->violation as TOLERATED adapters, each with
+    a deprecation line — said once per job, not once per batch (a log that repeats per
+    batch is a log nobody reads)."""
+    import sys
+    import types
+
+    fake = types.ModuleType("imgtag.moderation")
+    fake.load_heads = lambda profile: {"weapons": _LegacyHead()}
+    monkeypatch.setitem(sys.modules, "imgtag.moderation", fake)
+
+    lines = []
+    s = index(imgs, "ds", profile=PROFILE, home=tmp_path / "home", workers=2,
+              moderation=True, log=lines.append)
+
+    assert s["moderation"]["violation"]["weapons"] == 4      # legacy path still counts
+    seam = [ln for ln in lines if "DEPRECATED" in ln and "score_images" in ln]
+    tier = [ln for ln in lines if "DEPRECATED" in ln and "tier" in ln]
+    assert len(seam) == 1, f"seam deprecation should fire once per job, got {len(seam)}"
+    assert len(tier) == 1, f"tier deprecation should fire once per job, got {len(tier)}"
+
+
 def test_summary_uses_the_users_phrasing():
     assert moderation_summary({"violation": {"drugs": 3, "weapons": 1, "nudity": 0}}) == \
         "Found 0 images with nudity, 1 images with weapons, 3 images with drugs"
