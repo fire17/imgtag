@@ -36,3 +36,7 @@ make another track to identify people lying down (even if part of their body is 
 ## 2026-07-22 ~13:23Z — sports content track (verbatim)
 
 make another dedicated track to identify all sports related images
+
+## 2026-07-22 ~13:26Z — track confidence + scaling invariant (verbatim)
+
+very important - make sure this is true and to also right it in the project's dir somewhere where it matters - for each track so for or any that we add in the future i want a confidence score for each track for every image - ideally each track is specialized and possibly autoresearch auto improved onto itself but we must makes sure that even if we have 100 tracks, the times for indexing and inferencing should remain relatively the same so this system can continue to scale
