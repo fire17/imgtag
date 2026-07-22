@@ -970,12 +970,20 @@ async function viewSearch(q, dataset) {
       + 'thirds of the time, until the calibration fit lands.'));
   }
   const allTier = res.terms ? res.hits.filter((h) => h.terms && h.terms.m >= h.terms.n).length : 0;
+  // free-text is recall-first + uncalibrated: it can return weak matches (even for gibberish)
+  // rather than a false empty, so the ranking is flagged uncalibrated — the scores are real
+  // distances, the CONFIDENCE is not yet calibrated. Never let a weak result read as authoritative.
+  const uncal = res.calibration && res.calibration !== 'fitted';
   $('#resSum').textContent = res.hits.length
     ? [
       `${n0(res.hits.length)} ${res.hits.length === 1 ? 'hit' : 'hits'}`,
       res.terms ? `${n0(allTier)} match all ${res.terms.n} terms` : null,
+      uncal ? 'uncalibrated ranking' : null,
       res.tookMs != null ? `${res.tookMs.toFixed(1)} ms server` : null,
     ].filter(Boolean).join(' · ')
+    : '';
+  $('#resSum').title = uncal
+    ? 'Confidence thresholds are not fitted yet: results are ranked by raw similarity and may include weak matches — the order is honest, the certainty is not.'
     : '';
 
   if (!res.hits.length) {
