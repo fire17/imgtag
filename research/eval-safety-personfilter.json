@@ -1,0 +1,57 @@
+{
+ "model": "pecore-s16-384-fp32",
+ "person_tau": 0.004,
+ "person_present_total": 234,
+ "n": 795,
+ "by_subcategory": {
+  "alert_tp": {
+   "n": 57,
+   "person_present": 23,
+   "rate": 0.404
+  },
+  "person_down": {
+   "n": 118,
+   "person_present": 28,
+   "rate": 0.237
+  },
+  "sunbathing": {
+   "n": 8,
+   "person_present": 5,
+   "rate": 0.625
+  },
+  "injury_context": {
+   "n": 72,
+   "person_present": 15,
+   "rate": 0.208
+  },
+  "danger_context": {
+   "n": 25,
+   "person_present": 7,
+   "rate": 0.28
+  },
+  "destruction": {
+   "n": 515,
+   "person_present": 156,
+   "rate": 0.303
+  }
+ },
+ "separation_before": {
+  "n_alert": 57,
+  "n_benign": 126,
+  "AP": 0.4544,
+  "CI95": [
+   0.3486,
+   0.5904
+  ]
+ },
+ "separation_after": {
+  "n_alert": 23,
+  "n_benign": 33,
+  "AP": 0.5468,
+  "CI95": [
+   0.3763,
+   0.7593
+  ]
+ },
+ "verdict": "WITHHOLD alert (still)"
+}

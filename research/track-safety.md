@@ -282,8 +282,10 @@ Unsplash probe is a review-queue threshold, not a page-a-human threshold.
 | `safetyprobe` corpus + `labels.json` (item 3) | ✅ built (797 imgs, 6 subcats) + INDEXED (795/797, ALL-CLEAR) |
 | separation per subcategory (item 4) | ✅ MEASURED — alert_tp vs benign-lying AP **0.454** CI95 [0.349, 0.590] |
 | fitted τ_alert + τ_review + CI (item 4) | ✅ measured → **not fittable**: precision-first τ_danger can't reach prec 0.80 at any recall; τ_review recall on the probe is 0.12 (label-polluted, see §5b) |
-| spec → `data/moderation.json` (item 2) | ⛔ **WITHHELD (measured verdict)** — separation CI lower bound 0.349 < 0.5, AND the probe labels are not clean TPs (4/4 diagnostic views mislabeled) |
-| ledger entry (item 5) | ✅ round-2 appended (before/after measured; verdict WITHHOLD) |
+| spec → `data/moderation.json` (item 2) | ✅ **REVIEW tier SHIPPED** (person-down, COCO-measured, `track_spec(ship_alert=False)`); ⛔ **ALERT still withheld** — person-filtered separation CI lower 0.376 < 0.5 (round 3) |
+| person-presence pre-filter (round 3) | ✅ built + measured — confirms pollution (lying subcats 24–40% person-present), lifts alert AP 0.454→0.547 but not past the gate |
+| beach-scene-leakage refit (round 3) | ✅ measured → **REJECTED**: "a person standing on the beach" negative HURTS COCO AP 0.534→0.470 (competes with real beach-sunbathers) |
+| ledger entry (item 5) | ✅ rounds 2 + 3 appended (before/after measured; verdicts honest) |
 
 **The round's result, honestly:** the ALL-CLEAR measurement did its job — it produced a
 WITHHOLD verdict backed by data, and revealed the true blocker is **labels, not the
@@ -325,3 +327,17 @@ safety` only when a clean TP set shows separation. Withhold stands.
 > upright person). Blocker is LABELS not threshold; unblock = person-presence pre-filter
 > or hand-verified deployment images. COCO baseline (§3) stands; spec stays out of
 > moderation.json. Ledger round-2 recorded.
+>
+> 2026-07-22 · track-safety · ROUND 3 (team-lead rulings): (1) SHIPPED the REVIEW tier to
+> moderation.json — `track_spec(ship_alert=False)` emits review-only (person-down, COCO-
+> measured, occlusion-robust); the `alert` block is ABSENT not zeroed, re-armed by
+> `ship_alert=True` when a clean TP set clears the gate. (2) Built the person-presence
+> pre-filter (`scripts/filter_safetyprobe_persons.py`: YuNet faces ∪ a COCO-fitted person-
+> presence margin, since track-people's fitted cascade is absent for this backend). It
+> MECHANICALLY confirmed the pollution — only 24–40% of the lying-labelled images contain a
+> person — and lifted alert separation AP 0.454→**0.547**, but CI95 [0.376, 0.759] still has
+> a lower bound < 0.5 (smaller filtered n widens it; the residual noise is wrong-POSE, which
+> person-gating cannot fix). **ALERT STAYS WITHHELD.** (3) Beach-negative refit MEASURED and
+> REJECTED — "a person standing on the beach" HURTS COCO AP 0.534→0.470 (it competes with
+> real beach-sunbathers, who are true positives). Net: review live, alert withheld with a
+> now-quantified path (pose-gate or hand-verified TPs). Ledger round-3 recorded.

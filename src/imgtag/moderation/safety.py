@@ -522,43 +522,58 @@ def load_safety_head(profile=None, backend=None, root=None, config: dict | None 
         return None
 
 
-def track_spec() -> dict:
+def track_spec(ship_alert: bool = False) -> dict:
     """The `safety` entry of src/imgtag/data/moderation.json (v2 schema, conductor-owned
     file, this key owned by track-safety).
 
     `negatives` are subtracted; `policy_neighbours` MUST NOT be — a sunbather and a
     collapsed person are the same pose, so subtracting the benign bank removes the
     positives (the drugs track measured the identical collapse, AP 0.58 -> 0.04).
+
+    THE ALERT TIER IS WITHHELD (`ship_alert=False`, the default and current state). Ruling
+    2026-07-22 (team-lead): ship the REVIEW tier now — person-down is COCO-measured and
+    occlusion-robust (§3), and review is a human queue where recall-first is correct — but
+    keep `alert` OUT until a clean TP set shows separation (the safetyprobe round measured
+    alert_tp-vs-benign-lying AP 0.454, CI95 [0.349, 0.590]; lower bound < 0.5 = not shippable,
+    and 4/4 diagnostic views were mislabelled — the labels, not the threshold, are the
+    blocker; research/track-safety.md §5b). The `alert` block is ABSENT, not zeroed, so the
+    reader derives tiers `[review]` only. Flip `ship_alert=True` once a person-presence-
+    filtered pull clears the 0.5 gate — the ALERT_PHRASES / platt_danger / tau_danger are
+    ready and validated by test_safety.py; only the go decision is withheld.
     """
     pol = policy({})                   # module defaults, not whatever is on disk now
-    return {
+    spec = {
         "label": "safety / person lying down",
-        # b-daemon's reader assigns by EXCEEDANCE over tier prompt-sets (not the code
-        # head's two-margin AND). So `alert` = person-down-AND-danger COMBINED phrases (the
-        # highest ADR-14 tier, 13:20Z directive); `review` = benign person-down. Written to
-        # CONTRAST, not nest: an injured-lying image exceeds `alert`, a sleeper exceeds
-        # `review`, boots-on-ice exceeds neither.
-        "alert": list(ALERT_PHRASES),
+        # `review` = person-down (benign or not). b-daemon's reader assigns by EXCEEDANCE
+        # over tier prompt-sets; with only `review` present it derives the tier `[review]`.
         "review": list(LYING),
         # negatives are subtracted as background. GROUND_LEVEL_FP kills b-daemon's measured
-        # boots/puddle alert FPs; animal + standing/seated come from BACKGROUND.
+        # boots/puddle FPs; animal + standing/seated come from BACKGROUND.
         "negatives": list(BACKGROUND) + list(DANGER_BACKGROUND) + list(GROUND_LEVEL_FP),
         "policy_neighbours": list(BENIGN_CONTEXT),
         "templates": list(TEMPLATES),
         "scorer": "margin",
         # NOTE: no `violation` key — this track's tiers are alert|review|none only.
         "platt": [LYING_PLATT_A, LYING_PLATT_B],
-        "platt_danger": [DANGER_PLATT_A, DANGER_PLATT_B],
         "tau": pol["tau"],
-        "tau_danger": pol["tau_danger"],
-        # THE un-ruled knob: does danger with NO person visible flag? (AMBIGUITIES #2)
-        "danger_alone_tier": pol["danger_alone_tier"],
         # proxy-fitted, NOT fitted: no labelled safety corpus exists (COCO has n=1
         # person-down-in-danger). The reader must corpus-relative-threshold this, not
         # trust tau — enforcement_ready stays false until a real fit on real positives.
         "calibration": "proxy-fitted",
         "enforcement_ready": False,
-        "spec_sha": spec_sha(),
-        "fit": FIT,
         "policy_questions": len(AMBIGUITIES),
+        "fit": FIT,
     }
+    if ship_alert:
+        # b-daemon's reader: `alert` = person-down-AND-danger COMBINED phrases (highest
+        # ADR-14 tier, 13:20Z), written to CONTRAST `review`, not nest. Withheld by default.
+        spec["alert"] = list(ALERT_PHRASES)
+        spec["platt_danger"] = [DANGER_PLATT_A, DANGER_PLATT_B]
+        spec["tau_danger"] = pol["tau_danger"]
+        spec["danger_alone_tier"] = pol["danger_alone_tier"]
+    else:
+        spec["alert_withheld"] = ("alert_tp vs benign-lying AP 0.454 CI95 [0.349,0.590] "
+                                  "< 0.5 ship gate; labels not clean TPs (§5b). review "
+                                  "tier ships; alert re-armed via track_spec(ship_alert=True).")
+    spec["spec_sha"] = spec_sha()
+    return spec

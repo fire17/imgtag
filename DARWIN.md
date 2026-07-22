@@ -23,3 +23,14 @@
 | D-nudity-review-distill | Distilled review-tier head for lingerie / underwear / bare-chest-male | the shared pecore embedding CANNOT separate these review subcats from the FP band (R@5% ≤ 0.13, measured on nudityprobe — swimwear DOES, R@5%=0.57; research/track-nudity.md §11). Fix path (TRACKS T2 earn-it): distil a small embedding head from a permissive teacher — NudeNet v3 `*_COVERED` classes (Apache, already in nudity_subcat.py) are the ready teacher — then it rides the embedding at ~0 cost like weapons/drugs. Violation-tier recall stays operator-`nsfwprobe`-gated (EVAL DATA LAW). | quality/track |
 
 > 2026-07-22: seeded by conductor pre-loop.
+
+- **D12 — improve-track brief v2 A/B (outer loop, ARMED 2026-07-22).** Ledger holds 5
+  round-entries under brief_version 1 (weapons/nudity/drugs strict wins from zero; safety's
+  honest withhold). Trigger (3+ entries) met. In the darwin loop: mutate the inner brief
+  (gate strictness · autoresearch depth · diagnostic-view budget · subcategory-first vs
+  metric-first ordering), run v2 on the next comparable rounds (drugs labels-round, safety
+  round-3), fitness = delta-per-round vs the v1 baseline the ledger already records.
+  Candidate v2 seeds from today: (a) bake READER-PARITY into the brief's verify step (the
+  sports lesson — a round is not done until the serving path agrees); (b) require a
+  person/object pre-filter step for pose/context tracks (the safety kitten lesson);
+  (c) A/B-gate all prompt promotions (the drugs pattern — rejections are half the value).

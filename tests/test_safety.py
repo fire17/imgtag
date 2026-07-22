@@ -183,24 +183,30 @@ def test_config_policy_is_typo_proof():
 
 
 # ── moderation.json contract: the spec the reader consumes ──────────────────────────────
-def test_track_spec_is_reader_shaped():
+def test_track_spec_review_only_by_default_alert_rearmable():
+    """DEFAULT is review-only — the alert tier is WITHHELD (measured verdict, §5b), the
+    block ABSENT not zeroed. ship_alert=True re-arms it, ready + validated."""
     spec = S.track_spec()
-    # b-daemon's reader: tiers are prompt-set keys; alert must be present and contrastive
-    assert spec["alert"] and spec["review"] and spec["negatives"]
+    assert spec["review"] and spec["negatives"]
     assert "violation" not in spec                     # this track has no violation tier
+    assert "alert" not in spec                         # WITHHELD by default
+    assert "alert_withheld" in spec                    # and says so, with the reason
     assert spec["enforcement_ready"] is False
     assert spec["calibration"] == "proxy-fitted"       # not "fitted" — no labelled corpus
-    # alert prompts are COMBINED person-down+danger (so exceedance ~ the code AND)
-    for p in spec["alert"]:
+    # re-armed: alert prompts are COMBINED person-down+danger (exceedance ~ the code AND)
+    armed = S.track_spec(ship_alert=True)
+    assert armed["alert"] and "tau_danger" in armed and "platt_danger" in armed
+    for p in armed["alert"]:
         assert any(w in p for w in ("lying", "collapsed", "fallen", "unconscious", "down"))
 
 
-def test_moderation_json_carries_safety_and_is_valid():
+def test_moderation_json_carries_review_only_safety():
     path = Path(S.__file__).resolve().parent.parent / "data" / "moderation.json"
     data = json.loads(path.read_bytes())
-    assert "safety" in data["categories"]
+    assert "safety" in data["categories"]              # review tier shipped (ruling 1)
     e = data["categories"]["safety"]
-    assert set(e) >= {"label", "alert", "review", "negatives", "calibration",
+    assert set(e) >= {"label", "review", "negatives", "calibration",
                       "enforcement_ready", "spec_sha"}
+    assert "alert" not in e                             # alert withheld until clean TPs
     assert e["enforcement_ready"] is False
     assert e["spec_sha"] == S.spec_sha()               # spec on disk matches the module
