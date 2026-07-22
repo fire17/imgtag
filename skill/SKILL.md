@@ -40,9 +40,11 @@ Returns immediately (≤500ms) with a job id; embedding continues in the backgro
  "status":"running","queued":10432,"tookMs":214}
 ```
 
-Flags: `--dataset <slug>` (required) · `--full-speed` (drop the polite nice/worker caps; default
-is polite so co-tenants are not starved) · `--wait` (block until done — for scripts only, never
-when an agent is reporting progress).
+Flags: `--dataset <slug>` (defaults to the folder name; also accepted positionally) ·
+`--full-speed` (drop the polite nice/worker caps; default is polite so co-tenants are not
+starved) · `--wait` (run in the foreground and return the finished job summary — fine for a
+one-shot script, but for anything long, prefer the default async form + `info --job` so the
+user sees live progress).
 
 ### 2. `info` — datasets, jobs, live progress
 
@@ -114,9 +116,13 @@ imgtag search "vehicle" --dataset my-photos -k 50 --json
 ### Auxiliary
 
 ```bash
-imgtag doctor --json     # machine profile + autotuned threads/batch/precision (first run)
+imgtag doctor --json     # machine profile + autotuned threads/batch (first run)
 imgtag status --json     # daemon pid/version/uptime/loaded models/RSS
 ```
+
+Vision precision is **fp32** in v1: int8 vision failed the parity budget (B24) and is refused
+with a named error, not silently downgraded. Don't pass `--precision int8` — it exits 7 by
+design.
 
 ## Exit codes
 
