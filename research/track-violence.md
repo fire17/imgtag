@@ -33,9 +33,11 @@ still-image violence/gore model with published metrics worth a second forward pa
 that is **never subtracted, only arbitrated** (→ `review`), and a subtracted `BACKGROUND`
 bank whose headline members are **contact sports** (boxing / martial arts / wrestling /
 rugby), lifted verbatim from `sports.py` so the two tracks share a concept space. Measured
-on 5,000 COCO images and 3,058 Unsplash confusables: **contact sports flag 0.00% alert /
-0.38% violation, boxing-and-martial-arts specifically flag 0% violation** (§3) — the
-classic false-positive class does not fire — while the detector ranks COCO's own most
+on 5,000 COCO images and 3,058 Unsplash confusables, **under the path that ships (b-daemon's
+reader, §3.0): contact sports flag 0.00% alert / 0.38% violation, boxing-and-martial-arts
+specifically flag 0% violation** (§3) — the classic false-positive class does not fire,
+because THIS track subtracts the contact-sport prompts in its own `negatives` bank (§7
+corrects the weaker sports-composition claim) — while the detector ranks COCO's own most
 violent caption ("a man badly beating laying unconscious", margin 0.114) as the single
 highest of 5,000 images (§3b). τ is a false-positive budget, not a recall fit — no
 labelled positives exist here — so **`calibrated: false`, `enforcement_ready: false`**,
@@ -82,7 +84,48 @@ a false positive (COCO and the confusable slices contain no depicted violence by
 construction — the swimwear-style caveat does not apply, these are sports/costume/medical
 photos).
 
-**Tier rates at the shipped τ** (alert τ=0.055 severe-margin · violation τ=0.071 · review τ=0.044):
+### 3.0 Two scorers, and which one SHIPS (coordinated with b-daemon)
+
+This track has two scoring surfaces, and it matters which produces the live tiers:
+
+- **The shipped path is b-daemon's reader** (`search.py::track_scores`, the tier-derivation
+  layer). It reads the `violence` prompt banks from `moderation.json` and scores the index's
+  embeddings with a **generic z-score + exceedance** rule: per tier `t`, margin
+  `m_t = max(t-prompts) − max(negatives)`, z-scored against the corpus, and each image is
+  assigned to the tier it exceeds MOST above a `mean+3σ` floor. It honours a track's own τ
+  **only** when `calibration == "fitted"` — this track is deliberately `fp-budget` (not
+  fitted; no labelled positives may be fetched), so the reader treats it as UNFITTED and its
+  own strict floor governs. **These are the numbers a deployed site sees.**
+- **The seam is `violence.py::ViolenceHead`** (the `load_heads` contract), which adds the
+  fitted-spread PLATT map, the explicit τ (§5) and the CONTEXT-bank arbitration (§4). It is
+  the raw-score writer / offline-analysis instrument, and its numbers are the FITTED-τ
+  reference. It is NOT the daemon's tier authority.
+
+**Both scorers agree on every qualitative invariant that matters** — boxing/martial-arts do
+not over-fire, peaceful protest is silent, team sport flags 0% violation, gore can reach
+alert, and halloween SFX lands at review not alert. The reader is simply sparser (it fires
+only the >3σ tail). Both tables are given below, each labelled with its scorer.
+
+**A. SHIPPED — b-daemon's reader (z-score + exceedance, unfitted):**
+
+| slice | n | alert % | violation % | review % |
+|---|---|---|---|---|
+| **COCO val2017** | 5000 | **0.04** | **0.02** | **0.22** |
+| **contact-sport** | 262 | **0.00** | **0.38** | 0.38 |
+| team-sport | 214 | 0.00 | **0.00** | 0.47 |
+| protest | 110 | 0.00 | **0.00** | **0.00** |
+| red-liquid | 1024 | 0.00 | 0.00 | 0.49 |
+| medical | 247 | 0.00 | 0.41 | 0.41 |
+| military | 392 | 0.00 | 0.26 | 0.51 |
+| costume-horror | 292 | 0.34 | 0.34 | 1.71 |
+
+Per keyword under the reader: **boxing viol 2.6% (1/38), boxer 0%, martial-arts 0%,
+halloween alert 0.9%/viol 0%/review 3.4%, protest 0%** — the headline holds under the path
+that ships. (Verified two ways: `Searcher.track_scores("cocoval2017")` live, and the same
+Z_A/Z_B/K_STD/exceedance math replayed on the cached slice embeddings.)
+
+**B. SEAM reference — `ViolenceHead` fitted τ + arbitration** (alert τ=0.055 severe-margin ·
+violation τ=0.071 · review τ=0.044); the wider recall net the fitted operating point buys:
 
 | slice | n | mean margin | max margin | alert % | violation % | review % |
 |---|---|---|---|---|---|---|
@@ -116,10 +159,11 @@ per keyword (Unsplash slices, same head):
 | basketball | 98 | −0.0141 | 0.0490 | 0.0 | 0.0 | 6.1 |
 
 **Boxing and martial arts flag 0% violation** (the single boxing "violation" is one
-outlier of 38, characterised in §3c). Review is the wide recall-first net — a boxing match
-with punching poses reasonably reaches a human queue, and the composition ruling (§7)
-exculpates it. **This is the falsification, on our own corpus, of "a violence detector will
-just call boxing a fight"** — because boxing lives in the subtracted BACKGROUND bank.
+outlier of 38, characterised in §3c). **This is the falsification, on our own corpus, of "a
+violence detector will just call boxing a fight" — and it is delivered by THIS track's own
+`negatives` bank subtracting the contact-sport prompts, NOT by the sports track's label**
+(see §7 for that correction). Review is the wide recall-first net — a boxing match with
+punching poses reasonably reaches a human queue.
 
 ### 3b. The closest thing to a true positive we may measure (COCO caption probe)
 
@@ -248,19 +292,27 @@ Blood / wreckage cues may appear in both specs; each category scores **independe
 its own dense sidecar (ADR-15), and tier counts are reported **per category**, so no image is
 double-counted in one moderation total.
 
-**With track-sports (the contact-sport composition).** The BACKGROUND bank lifts sports.py's
-martial-arts and team-sport prompts **verbatim** so the two tracks share a concept space.
-Documented ruling, measured on both sides: **a boxing match → `sports: match(martial arts)`
-AND `violence: review` (never `violation`)** — the sports track supplies the exculpatory
-content label; the violence track's own review band means "a human should glance", not "this
-is an assault". If sports.py retunes those prompts, this bank must follow (a standing
-sync note sent to that lane).
+**With track-sports (the contact-sport composition — corrected after track-sports2's
+measurement).** The BACKGROUND bank lifts sports.py's martial-arts and team-sport prompts
+**verbatim** so the two tracks share a concept space, and sports.py has FROZEN those exact
+strings (commit 45c10f6) with a sync-on-retune ping to this lane. **The mechanism that
+delivers boxing → 0% violation is THIS track's subtraction of those prompts from its own
+margin — measured, first-party, solid (§3a).** The *composition* "sports:match exculpates
+the bout" is a WEAKER, secondary signal and must not be over-stated: track-sports2 measures
+its own match recall on contact sports at **only ~0.10–0.15** (boxing 0.102, martial-arts
+0.146 on the `unsplashb` slice, at τ_match 0.1809), inside its documented "activity-only,
+under-measured" blind spot — its prompts are equipment/scene-biased and weak-keyword boxing
+photos are mostly gym/portrait, not ring shots. So **sports:match is NOT a reliable
+"this is a bout, not an assault" guarantee today.** The honest statement: the negatives-bank
+subtraction is the working mechanism; the cross-track composition is a promising but
+unproven bonus, pending sports' targeted prompt round (which needs the `vslices` dataset
+this lane indexed for it).
 
 ## 8. Acceptance sketch (the brief's cases, with documented rulings)
 
 | input | expected | measured / ruling |
 |---|---|---|
-| boxing match | none-or-review | **review** (boxing 21% review, 0% violation, 0% alert; §3a). Documented ruling: review + `sports:match` exculpates |
+| boxing match | none-or-review | **review** (boxing 0% violation, 0% alert; reader review 2.6%, seam review 21%; §3a). Delivered by this track's negatives subtraction — `sports:match` is a WEAK secondary signal (~0.10–0.15 recall, §7), not the mechanism |
 | depicted fight / assault | violation | fires `violation` (bloodless) — `test_alert_needs_the_severe_bank`; COCO's "badly beating unconscious" ranks #1 (§3b) |
 | bloody injury / gore | violation or alert | `alert` when the SEVERE bank leads and beats CONTEXT (§4); else `violation` |
 | halloween zombie / SFX makeup | documented | **review** — the CONTEXT arbiter demotes it from alert (Joker/skull makeup measured at review, §3c; alert 3→0, §4) |
@@ -269,7 +321,8 @@ sync note sent to that lane).
 ## 9. Verification status (honest)
 
 - ✅ False-positive behaviour on 5,000 COCO + 3,058 Unsplash confusables — measured, first-party, reproducible (`scripts/eval_violence.py`, `research/eval-violence.json`).
-- ✅ **Contact-sport required negative** — measured: 0% alert, 0.38% violation on 262 imgs; boxing/martial-arts 0% violation (§3a).
+- ✅ **Contact-sport required negative** — measured under BOTH scorers (shipped reader + seam): 0% alert, 0.38% violation on 262 imgs; boxing/martial-arts 0% violation (§3a). Mechanism = this track's own negatives subtraction, not sports composition (§7).
+- ✅ **Shipped-path consistency** — b-daemon's live `Searcher.track_scores` reader agrees with the seam on every qualitative invariant (boxing silent, protest silent, gore→alert, halloween→review); the reader is sparser (fires the >3σ tail). Verified two ways (§3.0).
 - ✅ Score distribution does **not** saturate — measured: 0.10% of COCO above p=0.9 (§5).
 - ✅ CONTEXT arbiter earns its keep — measured ablation (§4).
 - ✅ 15 tests green (`tests/test_violence.py`), incl. the alert-boundary, the arbitration-demotes-never-drops invariant, the config-driven-policy law, and the moderation.json non-drift check.
