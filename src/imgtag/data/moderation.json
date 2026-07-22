@@ -166,5 +166,6 @@
    "policy_questions": 10
   }
  },
- "note_drugs": "drugs: `policy_neighbours` are scored for EXPLANATION ONLY and must never be subtracted \u2014 measured, subtracting them collapses AP 0.58 to 0.04 (a clinical syringe is visually identical to a drug syringe). See research/track-drugs.md."
+ "note_drugs": "drugs: `policy_neighbours` are scored for EXPLANATION ONLY and must never be subtracted \u2014 measured, subtracting them collapses AP 0.58 to 0.04 (a clinical syringe is visually identical to a drug syringe). See research/track-drugs.md.",
+ "note_tiers": "Tier vocabulary is DATA: a category's prompt-set keys are its tiers, ordered alert > violation > review (moderation) and `match` (content, never counted as moderation). Adding a track = adding a spec entry; the reader needs no change. Owning lanes add their own categories."
 }

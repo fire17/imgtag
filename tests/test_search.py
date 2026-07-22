@@ -425,13 +425,16 @@ def test_tier_is_decided_by_which_prompt_set_the_image_resembles_more(home, monk
     t = s.track_scores("d1")
     ids = [r["image_id"] for r in s.snapshot("d1").ids]
     cat_row, dog_row = 0, 1
-    assert t["categories"]["x"]["is_violation"][cat_row] and not t["categories"]["x"]["is_review"][cat_row]
-    assert t["categories"]["x"]["is_review"][dog_row] and not t["categories"]["x"]["is_violation"][dog_row]
+    c = t["categories"]["x"]
+    assert c["is"]["violation"][cat_row] and not c["is"]["review"][cat_row]
+    assert c["is"]["review"][dog_row] and not c["is"]["violation"][dog_row]
+    assert c["tiers"] == ["violation", "review"] and c["moderation"] is True
     assert t["counts"]["x"] == {"violation": 1, "review": 1}
     assert ids  # provenance intact
 
     flags = s.flags_for(t, dog_row)
-    assert flags == [{"category": "x", "p": flags[0]["p"], "tier": "review"}]
+    assert flags == [{"category": "x", "p": flags[0]["p"], "tier": "review",
+                      "kind": "moderation"}]
     assert 0.0 < flags[0]["p"] <= 1.0
 
 
@@ -462,20 +465,32 @@ def test_stored_index_time_flags_pass_through_under_their_own_name(home):
 
 
 def test_duplicate_index_rows_collapse_but_stay_counted(home):
-    """One content-addressed id = one image (IA.md). Duplicate rows collapse, extra paths
-    fold into `paths`, and the count is REPORTED so the indexer bug stays visible."""
+    """LEGACY-INDEX GUARD. b-engine now refuses a duplicate id at write time (the root
+    fix), so this is the read-side half of a layered defence: indexes written before that
+    guard — the 420-rows-for-44-ids corruption b-app found — must still read correctly.
+    One content-addressed id = one image (IA.md); extra paths fold in; the count is
+    REPORTED so an indexer regression can never hide behind a tidy payload."""
     be = FakeBackend()
-    recs = [{"image_id": "a" * 16, "path": f"/img/copy{i}.jpg", "dataset": "d1", "w": 1, "h": 1}
-            for i in range(7)] + [
-           {"image_id": "b" * 16, "path": "/img/other.jpg", "dataset": "d1", "w": 1, "h": 1}]
-    with Writer("d1", be, home) as w:
-        w.append(np.stack([be._vec("cat")] * 8), recs)
-    r = S.Searcher(home, backend=be).search("cat", "d1", k=10)
-    ids = [h["image_id"] for h in r["hits"]]
-    assert len(ids) == len(set(ids)) == 2, ids
-    assert r["collapsed_duplicates"] == 6
-    dup = next(h for h in r["hits"] if h["image_id"] == "a" * 16)
-    assert len(dup["paths"]) == 7 and dup["path"] in dup["paths"]
+    from imgtag.core.store import Writer as _W
+
+    with _W("d1", be, home) as w:  # the writer guard is real, and is asserted here
+        w.append(np.stack([be._vec("cat")]),
+                 [{"image_id": "a" * 16, "path": "/img/copy0.jpg", "dataset": "d1", "w": 1, "h": 1}])
+        with pytest.raises(ValueError, match="duplicate image_id"):
+            w.append(np.stack([be._vec("cat")]),
+                     [{"image_id": "a" * 16, "path": "/img/copy1.jpg", "dataset": "d1",
+                       "w": 1, "h": 1}])
+
+    hits = [{"image_id": "a" * 16, "path": f"/img/copy{i}.jpg", "dataset": "d1", "p": 0.9 - i / 100}
+            for i in range(7)]
+    hits += [{"image_id": "b" * 16, "path": "/img/other.jpg", "dataset": "d1", "p": 0.5}]
+    out, collapsed = S.dedupe(hits)
+    assert [h["image_id"] for h in out] == ["a" * 16, "b" * 16]
+    assert collapsed == 6
+    assert len(out[0]["paths"]) == 7 and out[0]["path"] in out[0]["paths"]
+    # a duplicate id in ANOTHER dataset is a different row: B18(d) forbids merging them
+    cross = S.dedupe(hits[:1] + [{**hits[0], "dataset": "d2"}])
+    assert len(cross[0]) == 2 and cross[1] == 0
 
 
 def test_every_hit_carries_exists(home):
@@ -505,7 +520,7 @@ def test_proxy_fitted_spec_is_demoted_to_unfitted(home, monkeypatch):
     assert c["spec_calibration"] == "proxy-fitted"  # what the spec claimed, preserved
     assert c["enforcement_ready"] is False
     # p must not saturate: a fitted logistic on a margin pinned everything at 0.99
-    assert float(c["violation_p"].max()) < 0.999
+    assert float(c["p"]["violation"].max()) < 0.999
     assert s.track_state("d1", "x")["calibration"] == "unfitted"  # same value everywhere
 
 
@@ -526,3 +541,33 @@ def test_stored_moderation_counts_index_time_flags(home):
     assert m["counts"] == {"weapons": {"violation": 2, "review": 1}}
     assert m["enforcement_ready"] == {"weapons": False}
     assert m["flagged"][0]["tier"] == "violation" and m["flagged"][0]["image_id"]
+
+
+def test_alert_tier_outranks_violation_and_match_is_never_moderation(home, monkeypatch):
+    """Tier vocabulary is data-driven: a track ships by adding a spec entry.
+    `alert` is the most severe moderation tier; `match` is CONTENT and never counted
+    as moderation (ORACLE tier-vocab amendments 2026-07-22)."""
+    spec = {"version": 2, "categories": {
+        "safety": {"label": "safety", "alert": ["car"], "review": ["dog"], "negatives": ["sky"]},
+        "sports": {"label": "sports", "match": ["cat"], "negatives": ["sky"]}}}
+    monkeypatch.setattr(S, "tracks", lambda: spec)
+    be = build(home, "d1", ["car", "dog", "cat"] + ["tree"] * 17)
+    s = searcher(home, be)
+    t = s.track_scores("d1")
+    assert t["categories"]["safety"]["tiers"] == ["alert", "review"]
+    assert t["categories"]["safety"]["moderation"] is True
+    assert t["categories"]["sports"]["moderation"] is False  # content track
+
+    m = s.moderation("d1", limit=5)
+    assert "safety" in m["counts"] and "sports" not in m["counts"]      # never mixed
+    assert m["content_counts"] == {"sports": {"match": 1}}
+    assert m["counts"]["safety"] == {"alert": 1, "review": 1}
+    assert m["flagged"][0]["tier"] == "alert"  # most severe first, above violation
+
+    flags = s.flags_for(t, 0)  # the "car" row -> safety/alert
+    assert flags[0]["tier"] == "alert" and flags[0]["kind"] == "moderation"
+    sports_flags = s.flags_for(t, 2)
+    assert sports_flags[0] == {"category": "sports", "p": sports_flags[0]["p"],
+                               "tier": "match", "kind": "content"}
+    assert S.tier_rank("alert") < S.tier_rank("violation") < S.tier_rank("review")
+    assert S.tier_rank("unknown-future-tier") == len(S.TIER_ORDER)  # never dropped

@@ -115,3 +115,25 @@ statues and other non-person figures. A row takes the tier whose prompt set it s
 HIGHER on — "violation first" was MEASURED to mislabel every review class, because the
 review set is by construction the look-alike. `enforcement_ready` is reported PER CATEGORY
 and stays false until per-tier tau is fitted on labelled ground truth.
+
+### Tier vocabulary — DATA, not code (2026-07-22 amendments)
+
+A track's prompt-set keys ARE its tiers. Adding a track = adding a `categories` entry in
+`src/imgtag/data/moderation.json`; the reader needs no change. Severity order:
+
+| tier | meaning | counted in `/api/moderation` |
+|---|---|---|
+| `alert` | highest severity — someone may be hurt (person down + danger context) | yes, sorts FIRST |
+| `violation` | policy breach (human nudity/explicit, real weapons, illegal drugs) | yes |
+| `review` | look-alike a human should judge (swimwear, toy weapon, tobacco/vape) | yes |
+| `match` | CONTENT label for classification tracks (e.g. sports) | **never** — reported under `content_counts` |
+
+An unknown tier sorts last but is never dropped. A category whose tiers are all content
+tiers is not moderation at all: it is excluded from `counts`/`totals` and surfaces under
+`content_counts`, and via `/api/search?track=<category>` as a content filter.
+
+Assignment is by EXCEEDANCE, not severity: a row goes to the tier it clears by the most
+(margin space when the spec is `calibration: "fitted"`, resemblance otherwise). That is
+what keeps a bikini in `review` while an injured person reaches `alert` — and a
+`tau_review` above `tau` would otherwise make the review tier unreachable.
+Per-tier thresholds are read as `tau_<tier>` (with `tau` as violation's legacy name).

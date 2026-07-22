@@ -65,6 +65,19 @@ K_STD = 3.0  # dataset-layer effective tau = max(tau_tag, mean + K_STD*std)
 # co-occurs 0 times at 3.0, 1 at 2.5, 16 at 2.0. A gate floor would make ALL unreachable and
 # the whole spectrum collapse to ANY. Applies ONLY to unfitted tags; a CAL-SET-fitted tau
 # replaces it. Uncalibrated tags still may never gate or veto (ADR-3 tiers).
+# Tier vocabulary (ORACLE tier-vocab amendments 2026-07-22). A track spec's prompt-set keys
+# ARE its tiers, so a new track ships as DATA — no code change here. Order is severity,
+# most severe first: `alert` (someone may be hurt) outranks `violation` outranks `review`.
+# `match` is a CONTENT label for classification tracks (e.g. sports) — it is never counted
+# as moderation and never mixed into a safety total.
+TIER_ORDER = ("alert", "violation", "review", "match")
+CONTENT_TIERS = frozenset({"match"})
+MOD_TIERS = tuple(t for t in TIER_ORDER if t not in CONTENT_TIERS)
+# keys in a category spec that are configuration, never prompt sets
+SPEC_KEYS = frozenset({"label", "negatives", "policy_neighbours", "templates", "scorer",
+                       "platt", "calibration", "enforcement_ready", "spec_sha", "fit",
+                       "policy_questions", "note"})
+
 SPECTRUM_K = 2.0
 # An image-relative presence test (term inside the image's own top-R tags) was built and
 # A/B-MEASURED against COCO ground truth on cocoval2017, 10 tag pairs x top-20: identical
@@ -97,6 +110,11 @@ def dedupe(hits: list[dict]) -> tuple[list[dict], int]:
         if h["path"] not in paths:
             paths.append(h["path"])
     return out, len(hits) - len(out)
+
+
+def tier_rank(tier: str) -> int:
+    """Severity rank; unknown tiers sort last but are never dropped (forward-compatible)."""
+    return TIER_ORDER.index(tier) if tier in TIER_ORDER else len(TIER_ORDER)
 
 
 def _order(h: dict) -> tuple:
@@ -314,17 +332,24 @@ class Searcher:
 
     # -- moderation ------------------------------------------------
     def track_scores(self, dataset: str) -> dict:
-        """Per-image scores for every moderation category, in BOTH ADR-14 tiers.
+        """Per-image scores for every track, over whatever TIERS its spec declares.
 
-        Two spec shapes are honoured, per category:
+        Tiers are data-driven (``TIER_ORDER``): a category's prompt-set keys ARE its tiers,
+        so a new track ships by adding a spec entry — no code change. Severity ordering is
+        ``alert > violation > review`` for moderation; ``match`` is a CONTENT label and is
+        never counted as moderation at all.
 
-        * **fitted** (``scorer: "margin"`` + ``tau``/``tau_review``, e.g. the drugs track):
-          feature = max(positive concepts) - max(background concepts), thresholded at the
-          FITTED taus in margin space. ``policy_neighbours`` are scored for EXPLANATION
-          ONLY and never subtracted — measured by that lane, subtracting them collapses AP
-          0.58 to 0.04, because a clinical syringe is visually identical to a drug syringe.
-        * **unfitted**: the same margin feature, z-scored against THIS corpus, tiered by
-          which prompt set the image resembles more (ADR-14).
+        Two spec shapes, per category:
+
+        * **fitted** (``calibration: "fitted"``, ``scorer: "margin"``, per-tier ``tau``):
+          feature = max(tier concepts) - max(background), gated at the FITTED taus in margin
+          space, assigned to the tier whose threshold it exceeds MOST. ``policy_neighbours``
+          are scored for EXPLANATION ONLY and never subtracted — measured by that lane,
+          subtracting them collapses AP 0.58 to 0.04 (a clinical syringe is visually
+          identical to a drug one).
+        * **anything else** (incl. ``proxy-fitted``): the same feature z-scored against THIS
+          corpus, assigned to the tier the image RESEMBLES most. Resemblance, not severity,
+          is what keeps a bikini in `review` while an injured person reaches `alert`.
         """
         snap = self.snapshot(dataset)
         stamp = self._manifest_stamp(dataset)
@@ -340,73 +365,68 @@ class Searcher:
         za, zb = table.z_logistic if table else (Z_A, Z_B)
         zfloor = float(_sigmoid(za * K_STD + zb))
         groups, cols = self._track_concepts(snap.manifest, spec)
-        cos = np.asarray(snap.emb @ cols.T, np.float32).reshape(len(snap.ids), cols.shape[0])
+        n = len(snap.ids)
+        cos = np.asarray(snap.emb @ cols.T, np.float32).reshape(n, cols.shape[0])
 
         def best(sl):  # max similarity over a concept group (empty group -> -inf)
-            return cos[:, sl].max(1) if sl.stop > sl.start else np.full(len(snap.ids), -1e9, np.float32)
+            return cos[:, sl].max(1) if sl.stop > sl.start else np.full(n, -1e9, np.float32)
 
         cats, counts = {}, {}
         for name, g in groups.items():
             cfg = spec[name]
-            # A PROXY fit does not gate. Ruling 2026-07-22 after b-app's audit: the drugs
-            # track's proxy-fitted logistic put 218 violations on this corpus (vs nudity 5,
-            # weapons 10) with the first 21 eyeballed all benign at a SATURATED p=0.99 — a
-            # fit that is worse than no fit gets rolled back, per staleness-worse-than-
-            # absence. Only `calibration: "fitted"` may use its own taus; a proxy spec keeps
-            # its declared scorer but falls back to the dataset layer and says "unfitted".
+            tiers = [t for t in TIER_ORDER if t in g and g[t].stop > g[t].start]
+            if not tiers:
+                continue
+            # A PROXY fit does not gate (ruling after b-app's audit: the drugs proxy
+            # logistic produced 218 benign violations at a saturated p=0.99 — a fit worse
+            # than no fit is rolled back). Only `calibration: "fitted"` may use its taus.
             trusted = cfg.get("calibration") == "fitted"
-            fitted = trusted and cfg.get("scorer") == "margin" and cfg.get("tau") is not None
-            if fitted:
-                # margin ONLY where the spec was fitted for it: its negative set is a
-                # background for a max-margin, not a mean to subtract. Applying margin to a
-                # spec written the other way MEASURABLY broke nudity — "a clothed person"
-                # dominates the background of any photo containing a person, so a genuine
-                # topless image scored no flag at all.
-                bg = best(g["negatives"])
-                mv, mr = best(g["violation"]) - bg, best(g["review"]) - bg
-                tv = float(cfg["tau"])
-                tr_ = float(cfg.get("tau_review", tv))
-                over_v, over_r = mv - tv, mr - tr_
-                # tier by which threshold is exceeded MORE. `tau_review` above `tau` would
-                # otherwise make the review tier unreachable (everything clearing the higher
-                # review bar has already cleared the lower violation bar) — measured on the
-                # drugs spec, where a vape landed in `violation` against ADR-14.
-                is_v = (over_v >= 0) & (over_v >= over_r)
-                is_r = (over_r >= 0) & ~is_v
-                pv, pr = self._margin_p(mv, cfg), self._margin_p(mr, cfg)
-            elif cfg.get("scorer") == "margin":  # declared margin, untrusted thresholds:
-                # keep the feature, drop the fitted taus, z-score against THIS corpus
-                bg = best(g["negatives"])
-                mv, mr = best(g["violation"]) - bg, best(g["review"]) - bg
-                pv = _sigmoid(za * ((mv - mv.mean()) / max(float(mv.std()), 1e-6)) + zb)
-                pr = _sigmoid(za * ((mr - mr.mean()) / max(float(mr.std()), 1e-6)) + zb)
-                fires = np.maximum(pv, pr) >= zfloor
-                is_v = fires & (pv > pr)
-                is_r = fires & ~is_v
-            else:  # unfitted spec: mean-of-prompts minus half the mean of the negatives,
-                # z-scored against THIS corpus (the shape those prompt sets were written for)
-                neg = cos[:, g["negatives"]].mean(1) if g["negatives"].stop > g["negatives"].start else 0.0
-                mv = (cos[:, g["violation"]].mean(1) if g["violation"].stop > g["violation"].start
-                      else np.zeros(len(snap.ids), np.float32)) - 0.5 * neg
-                mr = (cos[:, g["review"]].mean(1) if g["review"].stop > g["review"].start
-                      else np.zeros(len(snap.ids), np.float32)) - 0.5 * neg
-                pv = _sigmoid(za * ((mv - mv.mean()) / max(float(mv.std()), 1e-6)) + zb)
-                pr = _sigmoid(za * ((mr - mr.mean()) / max(float(mr.std()), 1e-6)) + zb)
-                fires = np.maximum(pv, pr) >= zfloor
-                is_v = fires & (pv > pr)
-                is_r = fires & ~is_v
-            cats[name] = {"violation_p": pv, "review_p": pr, "is_violation": is_v,
-                          "is_review": is_r,
-                          # a proxy fit is reported as UNFITTED, with its claim preserved
-                          "calibration": cfg.get("calibration", "unfitted") if trusted else "unfitted",
-                          "spec_calibration": cfg.get("calibration", "unfitted"),
-                          "enforcement_ready": bool(cfg.get("enforcement_ready", False)),
-                          # explanation-only signal, never subtracted, never a gate
-                          "neighbour": best(g["policy_neighbours"]) if g["policy_neighbours"].stop
-                          > g["policy_neighbours"].start else None}
-            counts[name] = {"violation": int(is_v.sum()), "review": int(is_r.sum())}
-        out = {"categories": cats, "counts": counts, "floor": zfloor, "n": len(snap.ids),
-               "labels": {n: spec[n].get("label", n) for n in spec}}
+            margin = cfg.get("scorer") == "margin"
+
+            def tau_of(t, _cfg=cfg):
+                return _cfg.get(f"tau_{t}", _cfg.get("tau") if t == "violation" else None)
+
+            # FITTED means: trusted calibration + margin scorer + a tau for every tier.
+            fitted = trusted and margin and all(tau_of(t) is not None for t in tiers)
+            bg = best(g["negatives"]) if margin else None
+            feat, prob, thr = {}, {}, {}
+            for t in tiers:
+                if margin:
+                    # the negative set is a BACKGROUND for a max-margin, not a mean to
+                    # subtract; applying this form to a spec written the other way measurably
+                    # broke nudity ("a clothed person" dominates any photo with a person).
+                    m = best(g[t]) - bg
+                else:
+                    neg = (cos[:, g["negatives"]].mean(1)
+                           if g["negatives"].stop > g["negatives"].start else 0.0)
+                    m = cos[:, g[t]].mean(1) - 0.5 * neg
+                feat[t] = m
+                if fitted:  # gate in margin space, report the fitted probability
+                    thr[t], prob[t] = float(tau_of(t)), self._margin_p(m, cfg)
+                else:  # dataset layer: this feature's own distribution over THIS corpus
+                    thr[t] = zfloor
+                    prob[t] = _sigmoid(za * ((m - m.mean()) / max(float(m.std()), 1e-6)) + zb)
+            # Assign each row to the tier it exceeds MOST — in margin space when fitted,
+            # by resemblance otherwise. Resemblance (not severity) is what keeps a bikini in
+            # `review`; a tau_review ABOVE tau would otherwise make review unreachable.
+            over = np.stack([(feat[t] if fitted else prob[t]) - thr[t] for t in tiers])
+            fires = (over >= 0).any(0)
+            pick = over.argmax(0)
+            cats[name] = {
+                "tiers": tiers,
+                "p": {t: prob[t] for t in tiers},
+                "is": {t: fires & (pick == i) for i, t in enumerate(tiers)},
+                # a category whose tiers are all CONTENT labels is not moderation at all
+                "moderation": not set(tiers) <= CONTENT_TIERS,
+                "calibration": cfg.get("calibration", "unfitted") if trusted else "unfitted",
+                "spec_calibration": cfg.get("calibration", "unfitted"),
+                "enforcement_ready": bool(cfg.get("enforcement_ready", False)) and trusted,
+                "neighbour": best(g["policy_neighbours"]) if g["policy_neighbours"].stop
+                > g["policy_neighbours"].start else None,
+            }
+            counts[name] = {t: int(cats[name]["is"][t].sum()) for t in tiers}
+        out = {"categories": cats, "counts": counts, "floor": zfloor, "n": n,
+               "labels": {k: spec[k].get("label", k) for k in cats}}
         self._tracks[dataset] = (stamp, out)
         return out
 
@@ -431,7 +451,7 @@ class Searcher:
         key = (manifest["model_sha"], tracks().get("version"), tuple(sorted(spec)))
         if self._track_vecs.get("key") == key:
             return self._track_vecs["groups"], self._track_vecs["cols"]
-        roles = ("violation", "review", "negatives", "policy_neighbours")
+        roles = TIER_ORDER + ("negatives", "policy_neighbours")
         texts, groups, n = [], {}, 0
         for name, cfg in spec.items():
             tpl = cfg.get("templates") or ["{}"]
@@ -456,15 +476,15 @@ class Searcher:
         return groups, cols
 
     def flags_for(self, tr: dict, i: int) -> list[dict]:
-        """ADR-14 per-image payload: [{category, p, tier}] for whatever actually fired."""
+        """Per-image payload: [{category, p, tier}] for whatever fired, most severe first."""
         out = []
         for name, c in (tr.get("categories") or {}).items():
-            if c["is_violation"][i]:
-                out.append({"category": name, "p": round(float(c["violation_p"][i]), 4),
-                            "tier": "violation"})
-            elif c["is_review"][i]:
-                out.append({"category": name, "p": round(float(c["review_p"][i]), 4),
-                            "tier": "review"})
+            for t in c["tiers"]:
+                if c["is"][t][i]:
+                    out.append({"category": name, "p": round(float(c["p"][t][i]), 4),
+                                "tier": t, "kind": "moderation" if c["moderation"] else "content"})
+                    break
+        out.sort(key=lambda f: tier_rank(f["tier"]))
         return out
 
     def track_state(self, dataset: str, category: str) -> dict:
@@ -511,8 +531,13 @@ class Searcher:
         """Per-dataset summary: "N violations, M for review" per category (ADR-14)."""
         snap = self.snapshot(dataset)
         t = self.track_scores(dataset)
+        cats = t.get("categories") or {}
+        mod = {k: v for k, v in (t.get("counts") or {}).items() if cats[k]["moderation"]}
+        content = {k: v for k, v in (t.get("counts") or {}).items() if not cats[k]["moderation"]}
         out = {
-            "dataset": dataset, "indexed": t["n"], "counts": t.get("counts", {}),
+            "dataset": dataset, "indexed": t["n"],
+            # moderation counts NEVER include a content track's `match` tier
+            "counts": mod, "content_counts": content,
             "labels": t.get("labels", {}), "threshold": t.get("floor"),
             "source": "current-scan",  # live: today's detectors over today's embeddings
             # per-category, and false until per-TIER tau is fitted (ADR-14 item 3)
@@ -523,8 +548,8 @@ class Searcher:
         if limit and t.get("categories"):
             flagged = []
             for name, c in t["categories"].items():
-                for tier, p, mask in (("violation", c["violation_p"], c["is_violation"]),
-                                      ("review", c["review_p"], c["is_review"])):
+                for tier in c["tiers"]:
+                    p, mask = c["p"][tier], c["is"][tier]
                     idx = np.argsort(-np.where(mask, p, -1.0))[:limit]
                     for i in idx:
                         if not mask[i]:
@@ -535,7 +560,7 @@ class Searcher:
                                         "image_id": r["image_id"], "path": r["path"],
                                         "dataset": r.get("dataset") or dataset,
                                         "dataset_slug": r.get("dataset") or dataset})
-            flagged.sort(key=lambda f: (f["category"], f["tier"] != "violation", -f["p"], f["image_id"]))
+            flagged.sort(key=lambda f: (tier_rank(f["tier"]), f["category"], -f["p"], f["image_id"]))
             out["flagged"] = flagged
         return out
 
@@ -787,8 +812,11 @@ class Searcher:
             if c is None:
                 raise ValueError(
                     f"unknown moderation category {track!r}; known: {sorted(tr.get('categories') or {})}")
-            keep = c["is_violation"] | c["is_review"] if tier is None else (
-                c["is_violation"] if tier == "violation" else c["is_review"])
+            if tier is not None and tier not in c["is"]:
+                raise ValueError(
+                    f"category {track!r} has no tier {tier!r}; declared: {', '.join(c['tiers'])}")
+            keep = (c["is"][tier] if tier is not None
+                    else np.logical_or.reduce([c["is"][t] for t in c["tiers"]]))
             p = np.where(keep, p, 0.0).astype(np.float32)
         # ALL-SOME-ANY ordering (VISION-ADDENDA): tag-count is the PRIMARY key, probability
         # the tiebreak. p is in [0,1), so `matched + p` orders both in one pass.
