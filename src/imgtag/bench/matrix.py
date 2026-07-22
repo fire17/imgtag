@@ -189,14 +189,42 @@ def summarize(rec: dict) -> dict:
     sp = stream_perf(rec, prec) or stream_perf(rec, "fp32")
     bp = best_perf(rec, prec)
     art = rec["artifacts"]
+    # B9 shipping config (team-lead): fp32 vision + int8 text (text int8 passes fidelity
+    # on every family, 0.98–0.99) + binary tokenizer (~11MB) + tag table (T×dim×4).
     vis = art.get(f"vision_{prec}_mb") or art.get("vision_fp32_mb") or 0
-    txt = min([v for k, v in art.items() if k.startswith("text_")] or [0])
+    txt = art.get("text_int8_mb") or art.get("text_fp32_mb") or 0
+    tags_mb = round(2177 * rec["dim"] * 4 / 1e6, 1)
+    tokenizer_mb = 11.0
     q = rec["quality"].get(prec) or rec["quality"].get("fp32") or {}
     per_worker = sp["peak_rss_mb"] if sp else None
     proj = per_worker * TARGET_WORKERS if per_worker else None
+    # How many POLITE workers the B8 ceiling can actually afford, and what that buys.
+    affordable = int(B8_INDEX_MB // per_worker) if per_worker else 0
+    workers = min(TARGET_WORKERS, affordable)
+    proj_throughput = round(sp["img_s"] * workers, 1) if sp and workers else None
+
+    # B24 semantics (team-lead ruling): the gate tests a QUANTIZED artifact vs the same
+    # model's fp32 reference. A ships-fp32 row IS the reference → passes trivially.
+    fint8 = rec.get("fidelity", {}).get("int8")
+    int8_tier = QT.b24_tier(fint8) if fint8 else None
+    if prec == "fp32":
+        b24_label = "✅ (ref)" + ("" if fint8 else "")
+    else:
+        b24_label = {"default": "✅ default", "optin": "◐ opt-in",
+                     "banned": "❌ banned"}.get(int8_tier, "—")
+    # int8 quality delta vs fp32 (tier-2 decides), when both quality rows exist.
+    qi, qf = rec["quality"].get("int8"), rec["quality"].get("fp32")
+    int8_delta = None
+    if qi and qf and qi.get("b17_retrieval") and qf.get("b17_retrieval"):
+        int8_delta = {
+            "d_r10": round(qi["b17_retrieval"]["R@10"] - qf["b17_retrieval"]["R@10"], 1),
+            "d_p_at_k": round(qi["b6_category_precision"]["mean"]
+                              - qf["b6_category_precision"]["mean"], 3),
+        }
     return {
         "candidate": rec["candidate"], "license": rec["license"],
         "shippable_precision": prec,
+        "b24_label": b24_label, "int8_tier": int8_tier, "int8_delta": int8_delta,
         "b24": rec.get("fidelity", {}).get("int8", {}).get("pass"),
         "img_s_stream": sp["img_s"] if sp else None,
         "ms_img_stream": sp["ms_per_img"] if sp else None,
@@ -204,9 +232,13 @@ def summarize(rec: dict) -> dict:
         "img_s_best": bp["img_s"] if bp else None,
         "per_worker_rss_mb": per_worker,
         "projected_index_rss_mb": proj,
+        "workers_affordable_under_b8": affordable,
+        "projected_polite_img_s": proj_throughput,
         "b8_eligible": (proj is not None and proj <= B8_INDEX_MB),
-        "artifact_total_mb": round(vis + txt, 1),
-        "b9_ok": round(vis + txt, 1) <= B9_TOTAL_MB,
+        "artifact_total_mb": round(vis + txt + tags_mb + tokenizer_mb, 1),
+        "artifact_breakdown": {"vision_fp32": vis, "text_int8": txt,
+                               "tag_table": tags_mb, "tokenizer": tokenizer_mb},
+        "b9_ok": round(vis + txt + tags_mb + tokenizer_mb, 1) <= B9_TOTAL_MB,
         "b6_mean": q.get("b6_category_precision", {}).get("mean"),
         "b6_min": q.get("b6_category_precision", {}).get("min"),
         "b5_p100": q.get("b5_hypernym", {}).get("mean_p_at_100"),
@@ -243,27 +275,44 @@ def markdown(header: dict, summaries: list[dict], control_r10: float | None) -> 
              "rows are honest, not quiet-machine, numbers).\n")
 
     L.append("\n## Ranked table\n")
-    L.append("| # | candidate | ships | B24 | img/s (stream) | ms/img | per-worker RSS | "
-             "proj. index RSS (x2) | B8 | artifacts | B9 | B6 p@k | B5 p@100 | "
-             "B5 min-child | B17 R@10 | B7 leak |")
-    L.append("|---|---|---|---|---:|---:|---:|---:|---|---:|---|---:|---:|---:|---:|---:|")
+    L.append("| # | candidate | ships | B24 | img/s 1-proc | ms/img | per-worker RSS | "
+             "workers ≤B8 | proj. POLITE img/s | proj. index RSS | B8 | artifacts | B9 | "
+             "B6 p@k | B5 p@100 | B5 min-child | B17 R@10 | B7 leak |")
+    L.append("|---|---|---|---|---:|---:|---:|---:|---:|---:|---|---:|---|---:|---:|---:|"
+             "---:|---:|")
     for i, s in enumerate(summaries, 1):
-        b24 = "—" if s["b24"] is None else ("✅" if s["b24"] else "❌ FAIL")
         L.append(
-            f"| {i} | `{s['candidate']}` | {s['shippable_precision']} | {b24} | "
+            f"| {i} | `{s['candidate']}` | {s['shippable_precision']} | {s['b24_label']} | "
             f"{f(s['img_s_stream'], '.1f')}{'*' if s['advisory'] else ''} | "
             f"{f(s['ms_img_stream'], '.1f')} | {f(s['per_worker_rss_mb'], '.0f')}MB | "
+            f"{s['workers_affordable_under_b8']} | "
+            f"{f(s['projected_polite_img_s'], '.0f')} | "
             f"{f(s['projected_index_rss_mb'], '.0f')}MB | "
             f"{'✅' if s['b8_eligible'] else '🔴 INELIGIBLE-DEFAULT'} | "
             f"{f(s['artifact_total_mb'], '.0f')}MB | {'✅' if s['b9_ok'] else '❌'} | "
             f"{f(s['b6_mean'])} | {f(s['b5_p100'])} | {f(s['b5_min_child'])} | "
             f"{f(s['b17_r10'], '.1f')} | {f(s['b7_leak'])} |")
     L.append("\n`*` = ADVISORY (machine under swarm load during the timed run).")
-    L.append("`ships` = the precision that may be the DEFAULT: int8 only where it passes "
-             "B24, else fp32 (ADR-4: a failing precision never ships as default).")
-    L.append("`proj. index RSS` = per-worker peak RSS x 2 POLITE workers (ADR-11 clamp on "
-             "a 4-core 8GB box) — a **projection**, not a measured process-tree number "
-             "(that is B8's own bench, phase 2).")
+    L.append("`ships` = default precision. v1 = **fp32 vision** everywhere (no int8 vision "
+             "artifact clears B24's DEFAULT nn@200≥0.90 bar). B24 col: `✅ (ref)` = a "
+             "fp32 row IS its own reference; int8 arms classified `✅ default` / `◐ opt-in` "
+             "(nn 0.60–0.90, printed deltas) / `❌ banned` (below tier-1 cos 0.95 & "
+             "nn 0.60). int8 opt-in deltas vs fp32:")
+    for s in summaries:
+        if s.get("int8_tier"):
+            d = s.get("int8_delta")
+            dd = (f"ΔR@10 {d['d_r10']:+.1f}, Δp@k {d['d_p_at_k']:+.3f}"
+                  if d else "quality delta not measured")
+            L.append(f"  - `{s['candidate']}` int8 = **{s['int8_tier']}** ({dd})")
+    L.append("`artifacts` = B9 shipping sum: fp32 vision + int8 text + tag table (T×dim×4) "
+             "+ ~11MB binary tokenizer.")
+    L.append("`workers ≤B8` = how many streaming workers of this size fit under B8's 1.0GB "
+             "indexing ceiling; `proj. POLITE img/s` = single-process img/s x "
+             f"min({TARGET_WORKERS}, that) — {TARGET_WORKERS} being ADR-11's POLITE clamp "
+             "`clamp(ncpu−2,2,8)` on a 4-core target. Both are **projections** from a "
+             "single-process bench, not a measured process tree (that is B8/B1's own "
+             "bench, phase 2), and they assume the near-linear process scaling the "
+             "runtime lane measured — which is itself an ARM proxy result.")
     if control_r10 is not None:
         L.append(f"\n**B17 control** (`openclip-vitb32`, openai weights, same corpus/run): "
                  f"R@10 = {control_r10:.1f}. Gate: default must reach "

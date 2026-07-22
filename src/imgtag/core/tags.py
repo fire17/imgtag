@@ -142,7 +142,7 @@ def fit_platt(scores: np.ndarray, labels: np.ndarray, iters: int = 100) -> list:
 
     A, B = 0.0, float(np.log((n_neg + 1) / (n_pos + 1)))
     for _ in range(iters):
-        f = A * s + B
+        f = np.clip(A * s + B, -30, 30)      # clip: exp(±30) is already 0/1 to 1e-13
         p = 1.0 / (1.0 + np.exp(f))          # p = sigmoid(-f)
         d = p - t
         w = np.maximum(p * (1 - p), 1e-12)
@@ -159,7 +159,8 @@ def fit_platt(scores: np.ndarray, labels: np.ndarray, iters: int = 100) -> list:
 def platt_apply(scores: np.ndarray, ab) -> np.ndarray | None:
     if not ab:
         return None
-    return 1.0 / (1.0 + np.exp(ab[0] * np.asarray(scores, np.float64) + ab[1]))
+    f = np.clip(ab[0] * np.asarray(scores, np.float64) + ab[1], -30, 30)
+    return 1.0 / (1.0 + np.exp(f))
 
 
 def max_f1_tau(p: np.ndarray, y: np.ndarray) -> tuple:

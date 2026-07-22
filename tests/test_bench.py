@@ -184,3 +184,23 @@ def test_save_refuses_a_table_without_embeddings(tmp_path):
 def test_calset_status_is_honest_when_absent():
     s = G.calset_status()
     assert s["ready"] is (s["n_images"] >= 500)
+
+
+# ── B24 two-tier gate (team-lead ruling) ──────────────────────────────────────
+def test_b24_tier_classification():
+    assert QT.b24_tier({"mean_cos": 0.99, "nn_agree": 0.92}) == "default"
+    assert QT.b24_tier({"mean_cos": 0.99, "nn_agree": 0.80}) == "optin"
+    assert QT.b24_tier({"mean_cos": 0.94, "nn_agree": 0.95}) == "banned"  # tier-1 cos floor
+    assert QT.b24_tier({"mean_cos": 0.99, "nn_agree": 0.55}) == "banned"  # tier-1 nn floor
+
+
+def test_platt_no_longer_overflows_on_separable_data():
+    import warnings
+    rng = np.random.default_rng(11)
+    s = np.r_[rng.normal(0.5, 0.01, 100), rng.normal(0.0, 0.01, 900)]
+    y = np.r_[np.ones(100), np.zeros(900)]
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")  # any RuntimeWarning becomes a failure
+        ab = G.fit_platt(s, y)
+        p = G.platt_apply(s, ab)
+    assert p[:100].mean() > 0.9 and p[100:].mean() < 0.1

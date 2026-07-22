@@ -59,8 +59,20 @@ def quantize_weight_only(src: str, dst: str, force: bool = False) -> dict:
             "mb": round(os.path.getsize(dst) / 1e6, 1)}
 
 
-# ── B24 gate ──────────────────────────────────────────────────────────────────
-GATE = {"mean_cos": 0.995, "min_cos": 0.97, "nn_agree": 0.90}
+# ── B24 gate (two-tier ruling, team-lead 2026-07-22; pool n FIXED at 200) ─────
+# tier-1 HARD FLOOR: cos ≥0.95 AND nn@200 ≥0.60 → fail = BANNED (incl. opt-in).
+# DEFAULT-grade additionally needs nn@200 ≥0.90. tier-2 (|Δp@k|, ΔR@10, Δhypernym)
+# lives in the quality columns, decided there. Legacy strict floor kept for reference.
+TIER1 = {"mean_cos": 0.95, "nn_agree": 0.60}
+DEFAULT_NN = 0.90
+GATE = {"mean_cos": 0.995, "min_cos": 0.97, "nn_agree": 0.90}  # legacy strict
+
+
+def b24_tier(f: dict) -> str:
+    """Classify an int8 artifact: 'default' | 'optin' | 'banned' by the two-tier ruling."""
+    if f["mean_cos"] < TIER1["mean_cos"] or f["nn_agree"] < TIER1["nn_agree"]:
+        return "banned"
+    return "default" if f["nn_agree"] >= DEFAULT_NN else "optin"
 
 
 def fidelity(ref: np.ndarray, cand: np.ndarray) -> dict:
