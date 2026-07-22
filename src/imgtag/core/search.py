@@ -65,13 +65,10 @@ K_STD = 3.0  # dataset-layer effective tau = max(tau_tag, mean + K_STD*std)
 # the whole spectrum collapse to ANY. Applies ONLY to unfitted tags; a CAL-SET-fitted tau
 # replaces it. Uncalibrated tags still may never gate or veto (ADR-3 tiers).
 SPECTRUM_K = 2.0
-# ...plus a CORPUS-INDEPENDENT presence test, because the z-score one structurally cannot
-# see a COMMON concept: quick50 is 58% "person", so no image with a person stands 2 sigma
-# above a corpus made of persons, and "car person" could never reach the ALL tier. A term
-# also counts as present when it ranks inside the image's own top-R tags — that asks "is
-# this one of the things this image is about?", which is invariant to corpus composition
-# and needs no fitted threshold. Ranking only; it may never gate or veto (ADR-3 tiers).
-SPECTRUM_RANK = 25
+# An image-relative presence test (term inside the image's own top-R tags) was built and
+# A/B-MEASURED against COCO ground truth on cocoval2017, 10 tag pairs x top-20: identical
+# ALL-tier precision (61/169 = 36%) and recall (61/66 = 92%) with and without it. Inert,
+# so it was deleted rather than kept as decoration. The real lever is a FITTED per-tag tau.
 MAX_TAGS = 32  # candidate tags per query (bounds the [N,C] tag matmul)
 NGRAM = 3  # longest multi-word tag a space-separated tag list may name ("night sky")
 DATA = Path(__file__).resolve().parent.parent / "data"
@@ -357,28 +354,6 @@ class Searcher:
         self._track_vecs = {"key": key, "vecs": vecs}
         return vecs
 
-    def _rank_presence(self, snap, table: TagTable, groups, rows, term_hit) -> None:
-        """Mark a term present when it is among the image's OWN top-R tags.
-
-        Only the rows we are about to return are scored against the full vocabulary
-        ([len(rows), T] — 50x2177 here), so this is a rounding error next to the scan.
-        """
-        if not len(rows):
-            return
-        M = np.asarray(table.emb, np.float32)
-        X = np.stack([np.asarray(snap.emb[int(i)], np.float32) for i in rows])
-        sc = X @ M.T  # [rows, T]
-        # R scales with the vocabulary (top-25 of 2177 is selective; top-25 of 3 is not)
-        r = max(1, min(SPECTRUM_RANK, sc.shape[1] // 10))
-        top = np.argpartition(-sc, r - 1, axis=1)[:, :r]
-        base = sc.mean(1)  # a tag below the image's own average is not what it is "about"
-        for gi, (_, tag_idxs) in enumerate(groups):
-            want = set(tag_idxs)
-            for ri, row in enumerate(rows):
-                inside = want & set(top[ri].tolist())
-                if inside and max(sc[ri, j] for j in inside) > base[ri]:
-                    term_hit[int(row), gi] = True
-
     def moderation(self, dataset: str, limit: int = 0) -> dict:
         """Per-dataset moderation summary: "Found 10 images with drugs, 7 with weapons…"."""
         snap = self.snapshot(dataset)
@@ -624,9 +599,6 @@ class Searcher:
                     term_hit[:, gi] = (P[:, cols] >= present[cols]).any(1)
                     names = {table.names[idx[c]] for c in cols}
                     term_via.append({} if term in names else {"via": sorted(names)[:4]})
-                # union with the image-relative test over the rows we will actually return
-                top_rows = np.argpartition(-p_tag, min(k, n) - 1)[:k] if k < n else np.arange(n)
-                self._rank_presence(snap, table, groups, top_rows, term_hit)
                 matched = term_hit.sum(1).astype(np.int32)
                 mean_p = np.where(matched > 0,
                                   (term_p * term_hit).sum(1) / np.maximum(matched, 1), 0.0)

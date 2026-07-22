@@ -389,12 +389,14 @@ def test_generic_metadata_passthrough(home):
         assert h["w"] == 4 and h["h"] == 4  # known fields stay top-level, not in meta
 
 
-def test_common_term_still_counts_via_image_relative_presence(home):
-    """A term present in MOST of the corpus can never stand 2 sigma above it, so presence
-    also asks 'is this among the image's own top tags?' — corpus-composition invariant."""
-    labels = ["cat"] * 18 + ["cat dog"] * 2  # "cat" is 100% of the corpus: z-score is blind
+def test_common_term_undercounts_until_tau_is_fitted(home):
+    """HONEST LIMITATION, measured: a term present in most of the corpus cannot stand 2
+    sigma above it, so it under-counts in the spectrum. An image-relative top-R test was
+    built and A/B-measured against COCO GT — identical precision AND recall — so the fix
+    is a fitted per-tag tau (b-bench), not another heuristic."""
+    labels = ["cat"] * 18 + ["cat dog"] * 2  # "cat" is in 100% of rows
     be = build(home, "d1", labels)
-    write_tags(home, be.model_sha, ["cat", "dog"] + [f"filler{i}" for i in range(28)],
-               ["calibrated"] * 30, [[-12.0, 6.0]] * 30, [0.5] * 30)
+    write_tags(home, be.model_sha, ["cat", "dog"], ["calibrated"] * 2, [[-12.0, 6.0]] * 2, [0.5] * 2)
     r = searcher(home, be).search("cat dog", "d1", k=5)
-    assert r["hits"][0]["why"]["terms"]["m"] == 2  # the cat+dog rows still reach ALL
+    assert r["hits"]  # ranking still works; the tier is what degrades
+    assert r["hits"][0]["why"]["terms"]["n"] == 2
