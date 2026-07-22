@@ -53,6 +53,7 @@ python. (Playbook entry in ORACLE.md.)
 
 **I1. "Semantic flexibility" needs three graded ground truths, not one.**
 COCO supercats (vehicle=8 children) test the headline case; LVIS synsets + WordNet closure
+(computed OFFLINE into the static hierarchy JSON — nltk is never a runtime dep, ADR-3/ADR-7)
 test arbitrary-depth hypernyms on the same images; Open Images' independent 600-class tree
 cross-checks that recall isn't a taxonomy artifact. All three are downloaded and verified.
 Bench scores all three; report per-child recall breakdown (does "vehicle" find trucks as
@@ -71,8 +72,8 @@ queries lazy-load it. Cold start ≤2s is a budget (B13), politeness a new budge
 
 **I4. Search-while-indexing must be structurally lock-free.**
 Resolution (design, to be soak-verified): append-only embedding shards (mmap, contiguous
-f32/f16, L2-normalized at write) + atomic manifest rename per flush (~every N images or
-T seconds). Readers open the latest manifest snapshot; writers never mutate published
+**f32** — f16 dropped, ADR-2 — L2-normalized at write) + atomic manifest rename per flush
+(timed flusher thread: N=500 rows or T=1.5s, ADR-6). Readers open the latest manifest snapshot; writers never mutate published
 bytes. Coverage % comes free (manifest count vs job total). Bench `concurrent` proves
 zero blocking + ≤2s visibility (B11).
 
@@ -84,9 +85,16 @@ system-level baseline; B1 target raised to ≥60 img/s CPU-only (stretch: beat r
 number on pure CPU); edge floor ⌂ raised ≥10 img/s projected. Locked only after the bench.
 
 **I6. Edge/old-computer claims cannot be live-verified on this M3 Max.**
-Resolution: honesty protocol — ⌂ budgets reported as "projected via 4-thread throttled run
-(documented proxy), NOT yet live-verified on real old hardware". No claimed edge numbers
-without a real machine. (Fable credo #2.)
+Resolution **superseded 2026-07-22 by the BUDGETS ⌂/🐧 protocol**: the 4-thread throttle models
+*core count only* and holds bandwidth, ISA, storage and cache at 2024-flagship level (it
+plausibly overestimates a real 2015 4-core by 4–8×, in the flattering direction), so it is
+recorded as `⌂-ub` = **upper bound of the edge estimate, not a prediction**, never as a
+"projection". A second row `⌂-real: NOT MEASURED` names the target (any 4-core x86 without
+AVX-512) and stays blank until someone runs `docker run --cpus=4 --memory=8g` on any x86 box —
+minutes and cents, not hardware. **No ⌂ number appears in any README, landing page, or public
+claim until ⌂-real is populated.** Meanwhile the honest edge *expectation* comes from real x86
+anchors (photofield-ai 20 img/s on a 2014 6-core ⇒ ~13 on 4 cores, × a measured int8 factor),
+not from the throttle. (Fable credo #2.)
 
 **I7. First-run model download is a product surface.** ~100–400MB from HF; must resume,
 sha256-verify, cache under `~/.imgtag/models/`, fail with a clear offline error. The index
@@ -97,7 +105,11 @@ manifest records model id+hash — searching with a mismatched model is refused 
 — justified (B5-reuse; MLAS beats alternatives; writing inference = wasted innovation
 token). Everything else stays thin: numpy, Pillow, certifi/httpx, stdlib http server or
 starlette-class micro. NO torch, NO transformers at runtime (export-time only), NO vector
-DB, NO docker requirement. Target install ≤150MB wheel-tree excluding models.
+DB, NO docker requirement. Target install ≤150MB wheel-tree excluding models — **now enforced
+as B23**, which also pins the portability floor (manylinux glibc ≥2.17, Python ≥3.10, no root,
+no privileged port; AVX2 absent ⇒ compatible ORT build or a clear refusal, never SIGILL) and
+the two adopted small deps: `xxhash` (runtime, image ids) and `pillow-heif` (optional
+`imgtag[heic]` extra).
 
 **I9. AGPL contamination hygiene.** immich/Ente/photonix are AGPL; Lap is GPL. We adopt
 *ideas* (attributed), never code, from those; code reuse only from MIT/Apache sources
@@ -119,7 +131,12 @@ DB, NO docker requirement. Target install ≤150MB wheel-tree excluding models.
   content was cross-verified against disk and other lanes before adoption. Field-logged.
 - **10k-scale honesty**: at 10k images almost everything is fast; the differentiators that
   survive scale scrutiny are decode throughput, cold start, and quality/FP calibration.
-  The bench also runs a 100k synthetic-scale scan test so claims degrade gracefully.
+  The bench also runs a 100k synthetic-scale scan test so claims degrade gracefully — with a
+  real threshold now (scan p95 ≤15ms at 100k, B3; measured 7.4ms), because a stated intention
+  with no number is the softest thing in the project.
+- **Multi-user shared box** (the primary target): `~/.imgtag` is 0700/0600, the daemon binds a
+  per-user UNIX socket (ADR-13), and B22 asserts both — a world-readable index of someone's
+  private photo library is a literal reading of "no data leaks".
 
 ## 4. FEATURE IDEAS (opt-in, ranked by value-for-effort)
 

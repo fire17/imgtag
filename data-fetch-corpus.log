@@ -1,0 +1,28 @@
+[2026-07-22T13:52:29] CORPUS-B start: N=50 out=/Users/magic/Creations/ImgTag/data/unsplash-b par=12
+[2026-07-22T13:52:41] CORPUS-B done: 50/50 images,  87M
+[2026-07-22T13:52:51] CORPUS-B start: N=10000 out=/Users/magic/Creations/ImgTag/data/unsplash-b par=12
+[2026-07-22T13:52:51] CORPUS-B start: N=10000 out=/Users/magic/Creations/ImgTag/data/unsplash-b par=12
+[2026-07-22T13:57:59] CAL-SET start: 2000 urls (N=20) out=/Users/magic/Creations/ImgTag/data/coco-train2k
+[2026-07-22T13:58:14] CAL-SET done: 20/2000 images,  14M
+[2026-07-22T13:58:31] CAL-SET start: 2000 urls (N=0) out=/Users/magic/Creations/ImgTag/data/coco-train2k
+[2026-07-22T13:58:31] CAL-SET start: 2000 urls (N=0) out=/Users/magic/Creations/ImgTag/data/coco-train2k
+[2026-07-22T13:58:31] CORPUS-B12 start: want=5 cand=6 out=data/.fullres-probe
+candidates: 6
+CORPUS-B12 verified+kept: 5/5
+[2026-07-22T14:00:46] CORPUS-B12 done: 5 images,  17M
+curl: (52) Empty reply from server
+curl: (6) Could not resolve host: images.cocodataset.org
+curl: (56) Recv failure: Connection reset by peer
+curl: (56) Recv failure: Connection reset by peer
+curl: (56) Recv failure: Connection reset by peer
+curl: (56) Recv failure: Connection reset by peer
+curl: (56) Recv failure: Connection reset by peer
+curl: (56) Recv failure: Connection reset by peer
+curl: (56) Recv failure: Connection reset by peer
+curl: (56) Recv failure: Connection reset by peer
+curl: (56) Recv failure: Connection reset by peer
+curl: (56) Recv failure: Connection reset by peer
+[2026-07-22T14:01:57] CORPUS-B12 start: want=300 cand=360 out=/Users/magic/Creations/ImgTag/data/unsplash-fullres
+[2026-07-22T14:01:57] CORPUS-B12 start: want=300 cand=360 out=/Users/magic/Creations/ImgTag/data/unsplash-fullres
+candidates: 360
+candidates: 360

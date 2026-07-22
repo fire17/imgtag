@@ -524,3 +524,502 @@ not cross-door API.
   only the lifecycle mechanics are missing, not the decision.
 - **C3's "decode is the engine" thesis** — the strongest claim in the corpus and it survives
   every angle I attacked it from; the risk is entirely in the unspecified plumbing beneath it.
+
+---
+---
+
+# § AMENDMENT — round 2, under ADR-10 (shared Linux x86, 8GB, no GPU, co-tenants sacred)
+
+> Trigger: brief amendment 2026-07-22 ~10:45Z. Grounded against `VISION-ADDENDA.md` (user
+> verbatim: *"a 8gb ram (not powerful) linux server (that also has other things running and we
+> cant slow down the server while we are doing both processing and infrence work)"*) and
+> ORACLE ADR-10(a–e) as they exist on disk.
+> New budget: **B8-linux ≤1.0 GB indexing peak / ≤1.5 GB total under load.**
+> Everything below is derived arithmetic or documented platform behavior, labeled as such.
+> **None of it is measured on the target** — there is no x86 Linux box in this session, and
+> ADR-10a already concedes "zero x86 validation exists". Treat every number here as a
+> *prediction to be falsified by `imgtag doctor` on the real server*, which is exactly the
+> honesty protocol the project claims (I6/⌂).
+
+**The headline reversal:** the round-1 constraint was *speed*; the ADR-10 constraint is
+*residency*. Three round-1 conclusions change sign under it, and the single largest memory
+term in the whole system turns out to be one nobody has named: **attention buffer size scales
+with token-count², so input resolution — not parameter count — dominates B8-linux.**
+
+---
+
+## CRITICAL (round 2)
+
+### C-8 · `fork` after the ORT session is created: deadlock, plus COW decay that silently doubles RSS
+**Where:** C3 / ORACLE risk row "process-pool decode workers (not threads)". No start method,
+and no *ordering*, is specified anywhere.
+
+Round 1 measured `mp.get_start_method()` → `spawn` **on macOS**. On Linux the default is
+**`fork`** (CPython ≤3.13). That single platform difference invalidates the round-1 memory
+model in both directions and introduces a correctness bug that does not exist on the Mac:
+
+**Failure scenario A (deadlock — correctness).** State: parent creates the ORT
+`InferenceSession`, which spins up its intra-op thread pool. Action: parent then forks decode
+workers. Wrong outcome: `fork()` copies only the calling thread; the child inherits the
+address space with ORT's (and glibc malloc's) mutexes frozen in whatever state the *other*
+threads left them — possibly locked by a thread that does not exist in the child. The child
+deadlocks on its first allocation or first ORT touch. This is intermittent, load-dependent,
+and will present as "indexing randomly hangs on the server but never on the Mac" — the worst
+possible debugging shape. CPython 3.12+ emits `DeprecationWarning: This process is
+multi-threaded, use of fork() may lead to deadlocks in the child`; **that warning is the
+design telling you it is wrong.**
+
+**Failure scenario B (COW decay — memory).** State: parent has loaded model weights, the ORT
+arena, and (per round-1 C-1) an f32 index mirror; then forks 2–4 workers. Action: the workers
+run for minutes. Wrong outcome: fork's copy-on-write sharing decays continuously because
+CPython's refcounts live *inside* object headers — merely traversing a shared list unshares
+its pages. Over a long run each worker's private RSS drifts upward toward a fraction of the
+parent's heap. On a 64 GB Mac nobody notices; against **≤1.0 GB** it is the difference between
+green and OOM, and it is invisible at t=0 (the bench's short runs will pass; the user's 10k
+job at minute 30 will not — this is precisely B12's soak class, but B12 monitors the parent).
+
+**Failure scenario C (silent behavior change on upgrade).** CPython **3.14 changes the default
+start method on Linux to `forkserver`**. State: the profile and all budgets were locked under
+`fork`. Action: the deploy box upgrades Python. Wrong outcome: worker startup cost, per-worker
+RSS, and the inheritance semantics all change under the project's feet, with no code change
+and no signal. A design that relies on a platform default it never names has an undeclared
+dependency on the interpreter's minor version.
+
+**Fix (specify all four; ordering is normative).**
+1. **Pin the start method explicitly, never inherit the default:**
+   `ctx = multiprocessing.get_context("forkserver")` and use `ctx` for every Process/Queue.
+   `forkserver` gives fork's cheap startup without inheriting the parent's threads, is stable
+   across 3.10→3.14, and is identical in behavior on Linux and macOS. Do not use bare `fork`
+   (scenarios A/B) and do not use `spawn` on Linux (pays a full re-import per worker for no
+   benefit over forkserver).
+2. **Preload the worker's imports into the forkserver:**
+   `ctx.set_forkserver_preload(["PIL.Image"])` — and, per round-1 C-4 fix #1, workers must
+   **not** import numpy at all (uint8 out via `img.tobytes()`; normalization fused into the
+   ONNX graph). This keeps per-worker RSS to interpreter+Pillow and makes it *stable* rather
+   than decaying.
+3. **Hard ordering rule, stated as an invariant:** *the worker pool is created BEFORE the ORT
+   session exists in that process.* Add a runtime assert — the pool constructor records
+   `ort_session is None` and raises `RuntimeError("worker pool must be started before the ORT
+   session (C-8)")` otherwise. This is the kind of rule that survives only if it is executable.
+4. Add to `bench soak`: **per-worker RSS sampled over the full run**, asserting drift ≤5%
+   per worker (not just parent — see round-1 I-1). Scenario B is otherwise undetectable.
+
+---
+
+### C-9 · The memory ceiling is set by **tokens² × batch**, not by parameter count — 384-res @ batch 32 cannot fit B8-linux
+**Where:** ADR-4 (bench roster ranks by params/quality; **PE-Core-S16-384 and T16-384 are the
+lead candidates and are 384-resolution**), ADR-10c ("small-model bias … PE-Core-S16/T16,
+SigLIP-v1, UForm gain rank vs SigLIP2's fat text tower"), B8-linux ≤1.0 GB, C3 ("batch queue").
+
+ADR-10c reasons about model size the way the field does — parameters and text-tower weight.
+That is the wrong variable for a memory ceiling. The transformer's peak *activation* memory is
+dominated by the attention score matrix, which is **quadratic in token count**:
+
+| model geometry | tokens (patch 16, +CLS) | attn scores / image (tokens²×heads×4B, 6 heads) | MLP intermediate / image (tokens×4·dim×4B, dim 384) |
+|---|---|---|---|
+| **@384** (PE-Core-S16-**384**) | 24×24+1 = **577** | **7.99 MB** | 3.54 MB |
+| **@224** (SigLIP2-base-224 geometry) | 14×14+1 = **197** | **0.93 MB** | 1.21 MB |
+| ratio | 2.93× | **8.58×** | 2.93× |
+
+Now the two configurations, on a 4-core / 8 GB shared box (derived; ORT's arena is
+allocator-dependent, so these are the *floor* of what the arena must hold, not a promise):
+
+| term | **NAIVE** (384-res, batch 32, workers=ncpu=4, f16 shards) | **SAFE** (224-res, batch 8, workers=2, f32 shards) |
+|---|---|---|
+| parent: interp + numpy + Pillow + ORT lib | 100 MB | 100 MB |
+| weights (image fp32 88 + text fp32 67) / (int8 ~22 + ~67) | 155 MB | 90 MB |
+| **ORT arena** (attn ≥2 live buffers + MLP, ×batch) | **≈ 500–900 MB** | **≈ 60–120 MB** |
+| decode workers (forkserver, Pillow-only) | 4 × 27 = 108 MB | 2 × 27 = 55 MB |
+| non-JPEG full-decode worst case (uncapped / capped at 2) | 144 MB | 72 MB |
+| shm ring (4×batch slots × 442 KB) | 57 MB | 14 MB |
+| f32 index mirror @10k (round-1 C-1) / f32 mmap, file-backed | 20 MB anon | 20 MB **evictable** |
+| **indexing peak** | **≈ 1.08–1.48 GB → B8-linux RED** | **≈ 410–470 MB → green, ~2× headroom** |
+
+**Failure scenario.** State: the bench runs on the M3 Max (64 GB), where batch 32 @384 is the
+throughput winner and B8's old 1.5 GB cap is met. Action: that recipe is written into the
+manifest as the chosen recipe (C2's provenance rule) and deployed to the 8 GB server. Wrong
+outcome: indexing peaks near or above 1.4 GB on a box that must also host co-tenants; the
+kernel reclaims aggressively or the OOM killer fires (and per C-12 it does not fire at us).
+The project's own tuning process selects the configuration that violates its own primary
+constraint, because throughput is measured and residency is not.
+
+**Fix.**
+1. **Make resolution a first-class axis of ADR-4's selection, ranked by `tokens² × batch`.**
+   Under ADR-10, a 224-model is worth ~8.6× its 384 sibling in arena terms — that is a larger
+   effect than every other memory lever combined, and it is currently invisible in the roster.
+   Concretely: **PE-Core-S16-384's 384 resolution is a liability on the primary target**;
+   if PE-Core has a 224 variant it must be benched, and if not, SigLIP2-base-224 /
+   SigLIP-v1-base / UForm rise on memory grounds independent of their quality scores.
+   ADR-10c's "small-model bias" must be restated as **"small-*token* bias"**.
+2. **Batch is budget-derived, not throughput-derived.** Specify:
+   `batch = max(1, floor(arena_budget / (tokens² × heads × 4B × 2.5)))`, evaluated at startup
+   from the machine profile, then clamped by the doctor's measured optimum. Cap batch ≤8 on
+   the linux profile until measurement says otherwise.
+3. **`bench resources` must report peak RSS per (model × batch × resolution)** as a matrix,
+   and `bench all` must fail if the *chosen* recipe's measured peak exceeds B8-linux — not
+   merely if some run somewhere did. Provenance must record which budget profile it was
+   validated against (`dev-m3` vs `linux-8g`); an M3-validated recipe is **not** deployable.
+4. Restate B8 as two profiles in BUDGETS.md rather than one tightened number, so an M3 run
+   cannot ever be read as validating the server: `B8-dev` (≤1.5 GB) and **`B8-linux` (≤1.0 GB
+   indexing / ≤1.5 GB total under load)**, with the linux row marked *projected until run on
+   target* per the ⌂ honesty protocol.
+
+---
+
+### C-10 · f16-on-disk is now actively harmful — it converts evictable page cache into unevictable anonymous memory (partial reversal of round-1 C-1's fix)
+**Where:** ADR-6 (`shard-XXXX.f16`), round-1 C-1's prescribed f32 mirror.
+
+Round 1 established that f16 shards force an f32 copy (⊕ measured: f16 dot is 48× slower;
+f16→f32+dot at 100k = 96.9 ms) and prescribed a resident, incrementally-extended f32 mirror.
+**On an 8 GB shared box that fix is the wrong shape**, and I am flagging my own round-1
+recommendation:
+
+**Failure scenario.** State: 100k-image dataset; daemon holds a 205 MB f32 mirror as an
+**anonymous** allocation. Action: the co-tenant's workload spikes and the kernel needs memory.
+Wrong outcome: anonymous pages cannot be dropped — they can only be swapped (and a "not
+powerful" shared server may have little or no swap). So the kernel reclaims *the co-tenant's*
+page cache instead, or invokes the OOM killer. We have converted a cost the kernel could have
+absorbed silently into a cost the co-tenant pays. That is a direct violation of the verbatim
+constraint "we cant slow down the server".
+
+**Fix — store shards as f32 on disk and mmap them directly; delete the mirror.**
+- Disk cost is trivially affordable: 10k×512×4 = **20.5 MB**, 100k = **205 MB**. B8's
+  ≤500 MB disk line at 10k is untouched.
+- `np.dot` runs BLAS directly on the mmap'd f32 array (⊕ round-1 measurement: **0.277 ms**
+  @10k, **3.17 ms** @100k) — zero conversion, zero mirror, zero warm-up.
+- Those pages are **file-backed and clean** → under pressure the kernel drops them for free
+  and re-faults from page cache on the next query. The system degrades *gracefully* instead of
+  OOMing, which is precisely the co-tenant contract.
+- `madvise(MADV_RANDOM)` on the mapping to suppress readahead; after each flush, the writer
+  issues `posix_fadvise(POSIX_FADV_DONTNEED)` on the bytes it just fsynced so the write path
+  does not squat cache it will never re-read.
+- Keep f16 as an **opt-in `--compact`** for genuinely disk-bound installs, documented with its
+  9.3 ms/97 ms conversion tax. It is a disk optimization, and it must stop being described as
+  a memory or speed one.
+- Round-1 C-1's incremental-extension rule still applies verbatim **if** `--compact` is used.
+  Under the new default it is simply unnecessary — the better fix is to not need it.
+
+---
+
+### C-11 · `imgtag doctor` (ADR-10d) can silently invalidate the calibrated no-match on every machine it tunes
+**Where:** ADR-10d ("fp32 vs int8, thread count, batch size … stores the recipe in the machine
+profile"), ADR-10e ("quant decisions are PER-ARCH"), against I7 (model_sha refusal), B16
+(parity), and round-1 C-7 (calibration).
+
+This is the round-2 finding I rate highest, because it is a *new* mechanism that breaks the
+project's proudest differentiator, and it fires automatically, on first run, on every install.
+
+**Failure scenario.** State: release ships PE-Core with per-tag thresholds calibrated on
+COCO/LVIS against the **fp32** artifact; the manifest and the refusal logic key on
+`model_sha`. Action: `imgtag doctor` runs on the server, measures int8-dynamic as faster on
+that ISA (exactly what ADR-10e says will happen and vary per-arch), and writes `quant: int8`
+into the machine profile. Wrong outcome: the model_sha is **unchanged** — it is the same model,
+a different artifact — so I7's loud refusal never fires, B16's parity gate is not consulted at
+runtime, and the engine now scores images with a quantized encoder whose cosine distribution
+is shifted relative to the one every τ_tag was fitted on. The honest-no-match threshold is
+silently miscalibrated on every machine the tuner touched, in a machine-dependent direction,
+and the failure is *invisible* because both the tag path and the embedding path still return
+plausible-looking results. B7 (≤2% FP) is green in the lab and unknown in the field.
+
+**Fix.**
+1. **Introduce `recipe_sha` and make it the calibration key everywhere `model_sha` is used
+   today.** `recipe_sha = sha256(model_sha ‖ quant ‖ preprocessing_recipe ‖ prompt_ensemble_sha
+   ‖ ort_version_major)`. The manifest records it; the tag table records it; the calibration
+   file records it; **the daemon refuses to serve tag-path search on mismatch, with I7's exact
+   loudness.** An index built under recipe A must refuse queries under recipe B — quantization
+   is a semantic change, not a deployment detail.
+2. **Doctor may only select recipes that have shipped calibration + parity artifacts.**
+   At release time, generate and ship calibration for *every* quant variant the tuner is
+   allowed to pick (fp32 / int8-dynamic / int8-static — 3 small JSON files keyed by
+   recipe_sha). Doctor's candidate set is defined as *"recipes with a calibration artifact"*;
+   anything else is benchable but not selectable. If a variant has no artifact, doctor may
+   report it as faster and must not choose it — printing "int8-static was 1.4× faster but has
+   no calibration artifact; not selected".
+3. **Doctor must run `bench parity` (B16) on its winner before committing the profile**, on
+   the shipped synthetic corpus (M-8): mean cosine ≥0.99 vs the fp32 reference. A recipe that
+   wins on speed and fails parity is discarded on the spot, on that machine. This makes B16 a
+   *runtime* gate on the deploy box, not just a CI gate on the dev box — which is the only
+   place it can catch a per-arch quantization anomaly (ADR-10e's whole point).
+4. **Changing the profile invalidates existing indexes built under the old recipe.** Specify
+   the behavior explicitly rather than leaving it to discovery: doctor detects existing
+   datasets whose manifest `recipe_sha` differs, and either (a) refuses to change the recipe
+   while indexes exist unless `--reindex` is passed, or (b) marks those datasets
+   `stale: true` and search refuses loudly with a re-index instruction. Silent cross-recipe
+   search is the same class of footgun I7 already forbids for models.
+
+---
+
+### C-12 · `nice` + `ionice` + `workers ≤ cores/2` do **not** protect co-tenants on a modern Linux server — six mechanisms, four of which are inert as specified
+**Where:** ADR-10b, B15. This is the direct answer to the amendment's question — the honest
+verdict is that the specified mechanics protect against the *least* likely harm and leave the
+*most* likely ones wide open.
+
+| # | Harm channel | What ADR-10b/B15 specifies | Why it is insufficient — concrete |
+|---|---|---|---|
+| 1 | CPU contention **within** our cgroup | `nice ≥10` | Works. This is the one that works. |
+| 2 | CPU contention **across** cgroups | `nice ≥10` | **Inert.** Under systemd/cgroup-v2 the co-tenant is in a different slice; CFS arbitrates *between* slices by `cpu.weight`, and nice only orders tasks *within* a leaf cgroup. Niced to 19 in `user.slice`, we still take our slice's full weighted share from `system.slice`. |
+| 3 | Disk I/O contention | `ionice` | **Usually inert.** `ionice` classes are honored by **BFQ/CFQ only**. Modern distros default NVMe/SSD to `none` or `mq-deadline`, where ionice is a no-op. Check `/sys/block/<dev>/queue/scheduler` before believing it. |
+| 4 | **Page-cache eviction** — the biggest real harm | *nothing* | Indexing 10k photos streams **~30 GB** of file bytes through the page cache on an 8 GB box. That evicts the co-tenant's hot working set (their DB pages, their mmap'd files). Their p99 latency degrades for the entire run and recovers slowly afterward. No nice value, no ionice class, and no worker count affects this at all. |
+| 5 | **Memory pressure / OOM** | *nothing* | With no cgroup memory limit, an imgtag spike triggers the **global** OOM killer, which selects by `oom_score` ≈ largest RSS — on a shared box that is very likely **the co-tenant's database, not us**. Our memory bug kills their service. This is the single worst outcome in the entire design and nothing currently prevents it. |
+| 6 | Thread oversubscription | `workers ≤ cores/2` | Insufficient — see I-9 (BLAS/OMP each spawn `ncpu` threads *per process*) and I-10 (`os.cpu_count()` reports **host** cores inside a container). "cores/2 workers" can still mean 3×ncpu runnable threads. |
+
+**Failure scenario (channel 4+5 together, the realistic one).** State: 8 GB server running a
+co-tenant Postgres with a 2 GB hot set; admin starts `imgtag index ~/photos` (10k images) with
+the specified politeness. Action: 30 GB of image reads stream through page cache; imgtag's own
+RSS climbs to ~1 GB. Wrong outcome: Postgres's cached pages are evicted, its query latency
+rises 10–50×, and if imgtag then spikes, the OOM killer picks Postgres as the largest RSS
+process. The politeness budget was green throughout — `nice` was 10, `ionice` was set,
+workers were `cores/2`. **B15 as written can pass while the exact harm the user forbade is
+occurring.**
+
+**Fix — five mechanisms, all cheap, in priority order.**
+1. **`posix_fadvise(POSIX_FADV_DONTNEED)` on every image file after reading it** (and
+   `POSIX_FADV_SEQUENTIAL` before). This is the highest-value line of code in the entire
+   politeness story: it stops us from evicting the co-tenant's cache with bytes we will read
+   exactly once. Same for shard writes after fsync (see C-10). Two `os.posix_fadvise` calls.
+2. **`oom_score_adj = +500`** for the indexer process group, written at startup
+   (`/proc/self/oom_score_adj`). If the box does go OOM, the kernel kills **us**, not the
+   co-tenant. One line; converts the worst-case outcome from "we killed their database" to
+   "our job died and says so". Pair it with a resumable job (the append-only design already
+   gives this for free, once C-3's recovery exists).
+3. **Self-imposed memory ceiling with a watchdog**, since we cannot assume cgroup access:
+   a thread samples tree RSS (round-1 I-1's method) every 2 s; at >0.8× `B8-linux` it reduces
+   batch then workers (and logs it); at 1.0× it stops the job with a clear error. **Do not use
+   `RLIMIT_AS`** — it counts virtual address space and will kill us for merely mmap'ing shards.
+4. **Cgroup v2 as the documented real answer** (the amendment asked; this is the answer):
+   nice/ionice are best-effort *hints*; only cgroups are enforcement. `imgtag doctor` should
+   detect cgroup v2 (`/sys/fs/cgroup/cgroup.controllers`) and **emit a ready-to-paste systemd
+   drop-in**, applying it only behind an explicit flag:
+   ```ini
+   # /etc/systemd/system/imgtag.service.d/limits.conf   (imgtag doctor --print-limits)
+   [Service]
+   CPUWeight=20         # vs default 100 — real cross-slice protection (channel 2)
+   MemoryHigh=1G        # throttle+reclaim before OOM  (channel 5)
+   MemoryMax=1.5G       # hard ceiling
+   IOWeight=20          # real I/O protection where ionice is inert (channel 3)
+   Nice=10
+   ```
+   Also honor them if already present: read `memory.max` / `cpu.max` from our own cgroup and
+   derive the machine profile from those, never from the host's totals (see I-10).
+5. **Keep nice + ionice** — they are free and they do help in the single-cgroup case — but
+   **B15's assertion must change**. Asserting "nice ≥10 and ≥1 core free" tests our
+   *intentions*. Specify the test to measure the *outcome*: `bench politeness` runs a
+   **co-workload probe** — a small fixed latency-sensitive benchmark process (e.g. a loop doing
+   4 KB random reads + a fixed matmul, reporting p99) — first alone, then during a full-rate
+   index. **B15 passes iff the probe's p99 degrades ≤25% and its page-cache hit rate degrades
+   ≤10%.** ADR-10b already gestures at "a co-workload probe test"; this makes it the
+   *definition* of the budget rather than an addendum to it, and it is the only formulation
+   that can catch channels 3, 4, and 6.
+
+---
+
+## IMPORTANT (round 2)
+
+### I-9 · BLAS/OpenMP thread explosion — `cores/2 workers` can mean 3×ncpu runnable threads
+NumPy on Linux links OpenBLAS, which defaults its thread pool to the **core count, per
+process**. State: 4-core server, 2 decode workers, each importing numpy, plus the parent.
+Action: any numpy op in a worker. Wrong outcome: up to 3 × 4 = 12 BLAS threads plus ORT's pool
+plus decode work, all contending — B15's co-workload probe tanks and B1 *also* drops (context
+switching). Additionally, `OPENBLAS_NUM_THREADS` is read **at import time**, so setting it
+after `import numpy` does nothing — a classic silent no-op.
+**Fix:** set `OMP_NUM_THREADS=1`, `OPENBLAS_NUM_THREADS=1`, `MKL_NUM_THREADS=1`,
+`NUMEXPR_NUM_THREADS=1` in `os.environ` **before the first numpy import**, in both the CLI
+entrypoint and the forkserver preload. Per round-1 C-4/C-8, workers should not import numpy at
+all — this is the belt to that fix's braces. The parent's scan parallelism is then controlled
+explicitly by one knob in the machine profile, not by three libraries guessing. Add a startup
+assertion via `threadpoolctl` (dev-only) or by reading `/proc/self/status:Threads` in
+`bench politeness` and asserting it is ≤ the profile's declared total.
+
+### I-10 · `os.cpu_count()` lies inside containers — the profile must come from cgroup quota
+State: imgtag runs in a Docker/k8s container with `cpu.max = 200000 100000` (2 cores) on a
+64-core host. Action: any of `os.cpu_count()`, ORT's default `intra_op_num_threads`, or
+OpenBLAS's default pool sizing. Wrong outcome: **64** threads scheduled onto 2 cores of quota
+→ the container is throttled every period, latency becomes sawtooth, and the co-tenants on
+that host see the worst behavior of all (a throttled, thrashing neighbor). ADR-10b's
+"workers ≤ cores/2" computes 32 workers on a 2-core quota.
+**Fix:** one helper, used everywhere, never `os.cpu_count()` directly:
+```
+effective_cores() = min(
+   len(os.sched_getaffinity(0)),                       # cpuset/taskset
+   cgroup_v2_quota(),   # /sys/fs/cgroup/cpu.max -> quota/period, or inf
+   cgroup_v1_quota(),   # cfs_quota_us/cfs_period_us
+)
+```
+The machine profile stores `effective_cores` and total RAM from `memory.max` (falling back to
+`MemTotal`), and every downstream default — workers, intra_op, batch — derives from those.
+`imgtag status` prints them so a wrong value is visible in one command.
+
+### I-11 · Politeness must be **asymmetric** and applied **before** the ORT session, or it kills search latency
+Two ordering/scoping bugs in one: (a) B15 says "indexer OS priority", but C3 puts indexing and
+(per I-12) serving in one process — a single `os.nice(10)` therefore deprioritizes **searches
+too**, so under co-tenant load B3's p95 ≤120 ms and the new B3-concurrent both blow, and the
+"instantly search while indexing" claim dies on the primary target. (b) On Linux, nice is
+per-task and new threads inherit the creator's value **at creation time** — so `os.nice(10)`
+called *after* `InferenceSession(...)` leaves ORT's whole intra-op pool at nice 0, silently
+un-policing the largest CPU consumer in the system.
+**Fix:** specify the priority map and enforce it with per-thread `setpriority(PRIO_PROCESS,
+tid, n)` (Linux tids from `threading.get_native_id()`):
+
+| task | nice | rationale |
+|---|---|---|
+| daemon query/serve thread + text-tower session | **0** | B3/B3-concurrent are user-facing |
+| flusher / dispatcher | +5 | durable-progress work, latency-tolerant |
+| image-tower ORT pool | +10 | the bulk consumer |
+| decode worker processes | +12 | plus `ionice -c3` where the scheduler honors it |
+
+And the invariant: **`os.nice()` / `setpriority` is applied before any thread pool is created**
+— same ordering family as C-8's rule, and worth one shared "process policy applied at startup,
+before sessions and pools" module that both b-engine and b-daemon call.
+
+### I-12 · Indexer and daemon as separate processes duplicate the model weights — +90–155 MB on the tightest target (new seam)
+Nothing states whether `imgtag index` runs the engine in its own process or submits to the
+daemon. b-engine and b-daemon are separate builders; the natural independent choice is "each
+owns its own engine". State: daemon resident with both towers (~90–155 MB of weights) while
+`imgtag index` runs its own engine with its own copy. Wrong outcome: weights are resident
+twice, plus two ORT arenas, on the box with a **1.5 GB total-under-load** ceiling — 10–15% of
+the entire budget burned on a duplicate that also *doubles* the co-tenant impact of C-12's
+channels 4 and 5.
+**Fix:** **the indexer is a mode of the daemon, not a peer process.** `imgtag index` submits a
+job over the unix socket (round-1 I-5 contract) and streams progress back; the daemon owns the
+single ORT session pair, the single writer lock (round-1 C-2), and the flusher. The in-process
+path survives only as the no-daemon fallback for one-shot CLI use, and it must **refuse to run
+if the daemon holds the dataset write lock** (which C-2's `flock` gives for free). This also
+resolves round-1 I-3 cleanly: with one process owning both towers, giving the text tower its
+own small session and its own nice-0 thread is a local change, not a cross-process protocol.
+
+### I-13 · ADR-2's "revisit if >~300k" crossover is a 64 GB-Mac number applied to an 8 GB shared box
+ADR-2 states a single global trigger for abandoning exact scan. Under ADR-10 the binding
+constraint is not scan *time* (⊕ 3.17 ms @100k — still excellent) but scan *residency*: a
+100k f32 index is 205 MB of page cache that must coexist with co-tenants on 8 GB, and per C-12
+channel 4 anything we keep resident is something they lose.
+**Fix:** make the trigger **profile-dependent and memory-based, not count-based**:
+`switch to binary/scalar-quantized coarse pass + f32 rerank of top-1000 when
+index_bytes > 0.25 × B8_total_budget`. On `linux-8g` that fires at ~375 MB f32 ≈ **180k
+images** (or ~90k if you want the index at ≤10% of budget — pick one and state it); on
+`dev-m3` it stays at ADR-2's ~300k. Binary quantization cuts resident bytes **32×** (512 bits
+= 64 B/vector → 100k = 6.4 MB) with f32 rerank restoring precision; ADR-2 already names this
+as the designed escape, so only the trigger needs fixing. Update ADR-2's revisit line rather
+than leaving a number that is right for the machine we are not deploying to.
+
+### I-14 · Doctor's 30 s budget across a quant×threads×batch grid selects the winner by noise
+ADR-10d: "~30s micro-bench (fp32 vs int8, thread count, batch size)". A full grid is
+3 quant × 4 thread-counts × 3 batches = **36 configs → 0.83 s each**. ORT session creation
+alone is ~100–500 ms per config (a new session is required per quant *and* per thread count),
+leaving ~100–300 ms of actual measurement — a handful of images, dominated by first-call
+allocation and MLAS warm-up.
+**Failure scenario.** Action: run doctor twice on the same idle machine. Wrong outcome: two
+different winners. Two identical servers get different profiles; published numbers become
+irreproducible — on the project whose thesis is *"the field has no honest numbers"*.
+**Fix:**
+- **Coarse-to-fine, not a grid.** Stage 1: fix `batch=8, threads=effective_cores/2`, sweep
+  quant (3 sessions). Stage 2: winning quant, sweep threads `{1, 2, cores/2}` (3 sessions).
+  Stage 3: winning pair, sweep batch `{1, 4, 8}` (3 sessions). **9 sessions, not 36.**
+- **Per config: ≥0.5 s discarded warm-up + ≥1.5 s timed steady state**, ≥5 repeats. ~25–30 s
+  total — the ADR's budget is achievable, but only for 9 configs, not 36.
+- **Report confidence and break ties by memory.** If the top-2 are within 5% (overlapping CIs),
+  choose the lower-memory config and record `tie_broken_by: memory`. On an 8 GB shared box that
+  tie-break is the correct default, and it must be explicit rather than incidental.
+- Store the winner's **predicted img/s** in the profile; the engine compares actual vs
+  predicted on every real run and flags >2× deviation (this is what makes I-15/I-16
+  detectable at zero cost).
+- Provide `--thorough` (~5 min, full grid) for when the admin can afford it, and print the
+  tune's duration + confidence so a rushed profile is visibly a rushed profile.
+
+### I-15 · A profile keyed to the machine goes stale invisibly on VM migration, resize, or quota change
+State: profile written on a host with AVX-512/VNNI, where int8-static won decisively
+(the DeepSparse regime). Action: the VM is live-migrated to an AVX2-only host, or resized
+2→8 vCPU, or its container quota is halved. Wrong outcome: the frozen recipe now runs a
+VNNI-tuned int8 path on AVX2 (ADR-10e's exact warning — "quant decisions are PER-ARCH"), or
+schedules `cores/2 = 4` workers against a 2-core quota → sustained throttling and co-tenant
+harm, which is the forbidden outcome, arrived at through a *stale file*.
+**Fix:** profile key = `sha256` of `{cpu_model, cpu_flags ∩ {avx2, avx512f, avx512_vnni, f16c,
+fma}, effective_cores (I-10), mem_total_effective, ort_version, imgtag_version,
+model_sha, recipe_sha}`. On every start, recompute the key in ~1 ms and compare. Mismatch →
+**do not use the profile**: fall back to conservative safe defaults (int8-off, threads=2,
+batch=4, workers=2), warn once, and suggest `imgtag doctor`. Add `--auto-retune` (default off
+on shared servers — retuning unattended is itself a politeness event). `imgtag status` prints
+the profile's key, its age, and whether it currently matches.
+
+### I-16 · Tuning *while the co-tenant is busy* bakes a permanently pessimal profile
+State: admin installs at 09:00; the co-tenant's nightly batch is saturating all 4 cores.
+Action: doctor's micro-bench measures threads=1 and batch=1 as "best" (extra parallelism only
+adds contention under load) and freezes that. Wrong outcome: at 03:00, when the box is idle,
+imgtag runs single-threaded at a fraction of achievable throughput — **forever**, with no
+symptom, because the profile is presumed authoritative. The inverse is equally bad: tuning on
+an idle box yields a profile that is impolite the moment the co-tenant wakes.
+**Fix:**
+- Doctor samples system idle (`/proc/stat` deltas + `/proc/loadavg`) **before and during** the
+  tune and records `tuned_under_load: {idle_pct_min, loadavg}` in the profile.
+- If mean idle < 70%, doctor **refuses by default** with a clear message ("system is 55% busy;
+  a profile tuned now will be pessimal when it is idle — re-run when quiet, or pass
+  `--tune-anyway` to accept a profile marked low-confidence").
+- Profiles carry `confidence: high|low`; low-confidence profiles are re-validated
+  automatically the first time the engine observes both (a) system idle >70% and (b) measured
+  throughput deviating >2× from the profile's stored prediction (I-14).
+- The deeper fix is that **one static profile cannot serve a shared box**: pair it with C-12's
+  adaptive worker count (sample idle every 5 s; shrink toward 1 worker when idle <25%, grow
+  back with hysteresis and a ≥30 s dwell). The profile then sets the *ceiling*, and runtime
+  adaptation sets the *actual* — which is the only structure that honors "we cant slow down
+  the server" across a full day/night cycle.
+
+---
+
+## MINOR (round 2)
+
+- **M-6 · Profile location and precedence on a multi-user server.** `~/.imgtag/` is per-user:
+  the admin runs `imgtag doctor` as themselves, the service runs as `imgtag`, and the tune is
+  invisible to the thing it was for. **Fix:** precedence `$IMGTAG_PROFILE > ./.imgtag/profile.json
+  > ~/.imgtag/profile.json > /etc/imgtag/profile.json`; `imgtag doctor --system` writes the
+  `/etc` one; `imgtag status` prints the active path. Same treatment for the model cache
+  (`~/.imgtag/models/` duplicated per user = 2–3× the disk on the tightest box) → allow
+  `IMGTAG_MODELS_DIR` / `/var/lib/imgtag/models`.
+- **M-7 · Doctor must itself obey the politeness policy.** A 30 s max-threads micro-bench on a
+  shared production box is exactly the harm we promised to avoid, executed at install time.
+  **Fix:** doctor runs under POLITE by default; sweeping aggressive configs requires
+  `--full-speed`; it prints a one-line consent notice ("will use ~N cores for ~30 s") and
+  honors `--yes` for automation.
+- **M-8 · The tune corpus must be fixed and shipped, not "whatever images are around."**
+  Otherwise profiles are incomparable across machines (defeating "generic and ready") and the
+  first run is contaminated by cold page cache. **Fix:** generate a deterministic synthetic set
+  (fixed seed; a spread of 0.5/2/12 MP JPEGs + one PNG) into a temp dir, read it once to warm,
+  then time. Ship the generator, not the images.
+- **M-9 · Every emitted number must carry its profile.** ADR-10a says M3 numbers are PROXY;
+  make the bench *enforce* it — every result row, JSON field, and showcase table carries
+  `profile: dev-m3-proxy | linux-8g-measured`, and the publish path refuses to render a proxy
+  number without the label. Round-1's honesty rules are only as strong as the field that
+  carries them.
+- **M-10 · `--full-speed` needs a co-tenant guard.** On the primary target, `--full-speed` is
+  the one flag that can violate the founding constraint. **Fix:** when the machine profile is
+  `linux-shared`, `--full-speed` prints what it will do and requires confirmation (or
+  `--yes`), and is refused entirely if a cgroup memory/cpu limit is detected that it would
+  exceed.
+
+---
+
+## What survives round 2 unrefuted
+
+- **ADR-10's diagnosis itself** — the four consequences (a) x86/AVX2 baseline, (b)
+  politeness-first, (c) structural memory ceiling, (e) per-arch quant are all correctly
+  reasoned; my attacks land on the *mechanisms*, not the direction. (d) autotune is the right
+  instinct (it is the only honest answer to "we have never run on the target") and needs the
+  guardrails in C-11/I-14/I-15/I-16 to be trustworthy rather than merely present.
+- **The append-only + atomic-rename storage shape** survives the memory constraint intact —
+  and gets *better* under C-10's f32 mmap, since file-backed pages are exactly what a
+  memory-pressured shared box wants.
+- **Exact brute-force scan** survives at the target scale (⊕ 3.17 ms @100k); only the
+  *crossover trigger* was mis-specified (I-13).
+- **"Decode is the engine"** survives again and is reinforced: on a 4-core server the decode:
+  inference ratio widens, so the pipeline design matters *more* than on the 16-core Mac, not
+  less.
+
+## Round-2 seams (would produce incompatible halves)
+
+1. **Process topology** (I-12) — is the indexer a daemon mode or its own process? b-engine and
+   b-daemon will answer differently and the weights get duplicated on the tightest target.
+2. **Process policy module** (C-8 ordering + I-9 env + I-10 effective_cores + I-11 nice map) —
+   four separate ordering-sensitive rules that must run in one place, before any pool or
+   session exists. Ship it as `imgtag/_policy.py:apply_process_policy()` called first thing by
+   every entrypoint, or each builder will implement a partial version.
+3. **`recipe_sha`** (C-11) — b-engine writes manifests, b-bench writes calibration, b-daemon
+   enforces refusal. If they do not agree on the exact hashed tuple, the refusal is either
+   spurious or absent. Freeze the field list before Wave B.

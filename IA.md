@@ -8,8 +8,8 @@
 
 | Entity | Identity | Source of truth |
 |---|---|---|
-| **Dataset** | slug (e.g. `coco-val2017`) | `~/.imgtag/datasets/<slug>/manifest.json` |
-| **Image** | stable id = xxhash64 of file bytes; carries path + dataset slug | dataset manifest + index shards |
+| **Dataset** | `slug = user_arg or slugify(basename)`; on collision with a DIFFERENT `root_path`, append `-<blake2b6(abspath)>` (never silently merge two folders both called `photos`); the manifest records `root_path` and every result carries slug + root | `~/.imgtag/datasets/<slug>/manifest.json` |
+| **Image** | stable id = **xxhash64 of file bytes** (ADR-7 declares the dep); bytes are read ONCE and both hashed and decoded from that buffer. Content-addressed ⇒ duplicates collapse to one row and a moved file keeps its id; all paths kept in the ids record | dataset manifest + index shards |
 | **IndexJob** | job id | on-disk job status file (A3 lifecycle: queued→running→done/failed, atomic writes) |
 | **Query** | text (+ optional dataset filter) | ephemeral; recent queries ring buffer (observability) |
 | **Candidate** (bench) | method slug (model×runtime×quant) | `bench/candidates/<slug>.json` (frozen results, provenance C5) |
@@ -40,11 +40,31 @@ query text → text encoder (cached) → scored scan → ranked hits (dataset, p
 doors: CLI (imgtag …) · HTTP app (localhost) · agent skill (global) — all call the same core lib
 ```
 
+## Core API — frozen before Wave B (the one contract all four doors build against)
+
+```python
+open_snapshot(slug) -> Snapshot   # EAGER mmap of every shard in the manifest; .count, .model_sha
+search(q: str, *, dataset=None, k=20, min_p=None) -> list[Hit]
+                                  # Hit: id, path, dataset, score, p, exists, why(tags[])
+index(paths, *, dataset, workers=None, full_speed=False, on_progress=None) -> JobId
+job_status(job_id) -> {state, done, in_flight, total, img_s, eta_s, failures[]}
+status() -> {daemon, models, datasets[], rss}
+```
+
+`done` is the DURABLE manifest count; `in_flight` is separate and rendered ghosted — the
+coverage banner and the progress bar read the same number by construction (ORACLE ADR-6).
+Daemon wire protocol = these five as JSON-lines over the UNIX socket (ADR-13), plus a
+`subscribe_progress` stream emitting `job_status` at ≥1Hz (B10). Anything not in this list is
+not cross-door API.
+
 ## KPIs per view (fed by real data only — no placeholders, ever)
 - Fleet: images indexed total, img/s live, datasets count, index bytes.
 - Search: latency ms (shown honestly in UI footer), hits count, coverage % during jobs.
-- Jobs: img/s rolling-10s, ETA ±band, completed/total, failures (with reasons).
+- Jobs: img/s rolling-10s, ETA ±band, durable done + in-flight (never merged), failures with
+  reasons (the skip ledger — a silent skip is a bug, B21).
 - Bench: per-candidate index img/s, search p50/p95, precision@10, hypernym recall, FP rate.
 
 > 2026-07-22: created. UI register: product (design serves the tool) — impeccable init to
 > run at UI-build phase. Ladder here is guidance (full /ladder-abstraction not invoked).
+> 2026-07-22 (rev round 1, editor pass): dataset-slug collision rule, xxhash64 id invariant +
+> single-read, frozen five-call core API + daemon wire protocol, durable-vs-in-flight progress.
