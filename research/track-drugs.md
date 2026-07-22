@@ -10,11 +10,12 @@
 
 Drugs is the hardest of the three tracks because **the labels do not exist** and the
 category is defined by context, not pixels. What we could measure, we measured on 5,328
-images: at the shipped threshold the track finds **18/18 hand-verified drug images (recall
-1.00) while flagging 1.54% of everything else** (AP 0.726, recall .944 at a 1% FP budget),
-and an end-to-end `imgtag index --moderation` run over a deliberately adversarial 200-image
-set returned **24 flags: 18 true, 5 genuinely ambiguous (a lighter, a vape exhale), 1
-false**. What we could NOT measure — recall on cocaine/heroin/meth imagery specifically,
+images: it ranks drug imagery at **AP 0.726 (recall .944 at a 1% false-positive budget)**,
+and at the shipped ADR-14 tiering it surfaces **18/18 hand-verified drug images** while
+calling **0.92% of ordinary photos a violation** and 1.3% a review. End-to-end through the
+real pipeline on a deliberately adversarial 200-image set: **18 violations (15 true, 2
+ambiguous, 1 false) + 6 reviews (3 true, 3 ambiguous) — every one of the 18 drug images
+surfaced, none missed**. What we could NOT measure — recall on cocaine/heroin/meth imagery specifically,
 and any tobacco (review-tier) recall worth shipping — is stated as unmeasured, not
 smoothed over. **Verdict: ship as a recall-first REVIEW QUEUE, `enforcement_ready: false`.**
 
@@ -35,11 +36,11 @@ smoothed over. **Verdict: ship as a recall-first REVIEW QUEUE, `enforcement_read
 | Question | Status | Number |
 |---|---|---|
 | Does it find drug imagery (cannabis, bongs, joints, grinders, vape carts)? | **MEASURED** (18 hand-verified images) | AP 0.726 · R@1%FP **0.944** · R@5%FP 1.00 |
-| How often does it cry wolf on ordinary photos? | **MEASURED** (5,145 negatives: COCO val2017 + hard Unsplash) | **1.54%** at the shipped τ (79 images); 0.91% at the precision point |
+| How often does it cry wolf on ordinary photos? | **MEASURED** (5,145 negatives: COCO val2017 + hard Unsplash) | **0.92% violation** + 1.3% review at the shipped τ, after tier arbitration (§3b); 1.54% before it |
 | Does it find cocaine / heroin / meth / pills-as-drugs? | **NOT MEASURED — no labelled image of any of these exists in a corpus we may use** | — |
 | Does it find *incidental* paraphernalia (a cigarette in someone's hand, a syringe on a tray)? | **MEASURED, and it mostly does not** | AP 0.286 on 36 LVIS+OI images; recall 0.39 at the shipped τ |
 | Tobacco / vape (ADR-14 review tier)? | **MEASURED, and the answer is bad** | recall **0.17** at a 1% FP budget. Shipped, flagged WEAK, `enforcement_ready: false` |
-| End-to-end through the real pipeline? | **MEASURED** | `imgtag index data/drug-probe/strong --moderation` → "Found … 24 images with drugs" = 18 TP / 5 ambiguous / 1 FP |
+| End-to-end through the real pipeline? | **MEASURED** | `imgtag index data/drug-probe/strong --moderation` → *"Found … 18 images with drugs (6 for review)"* — 18/18 drug images surfaced, 1 false violation |
 
 **The structural finding behind that table:** this detector sees **subjects, not objects**.
 A photo *about* drugs scores; a scene that merely *contains* a 20-pixel cigarette does not
@@ -98,6 +99,36 @@ max-subtracted. The reason is that the confusables split into two kinds:
 accident. (Prompt bug found the same way: `"a water pipe used to smoke drugs"` fires on
 literal bathroom plumbing — replaced by `"a glass bong with a bowl and a stem"`.)
 
+## 3b. Tier arbitration — the vaping case, resolved (2026-07-22, after b-daemon's report)
+
+b-daemon's v0 scaffold flagged **a woman vaping in a car at p=0.964** as a drugs violation.
+My v1 reproduced the class of failure at a lower score: `p >= tau` alone made the vape
+exhale a **violation**, because "a person smoking a marijuana joint" and "a person smoking a
+cigarette" are the same picture to a whole-image model.
+
+Fix (measured, not guessed): a **violation** must additionally be explained *better by the
+drug bank than by the tobacco bank*, by `TIER_MARGIN = 0.01`. What loses the arbitration is
+**demoted to review, never dropped** — ADR-14 says a human decides, and a test asserts
+nothing that passes τ can leave the queue.
+
+| Slice | before arbitration | after |
+|---|---|---|
+| 18 hand-verified drug images | 18 violation | **15 violation + 3 review** (the 3 are people smoking) |
+| 128 tobacco/pill keyword photos | 22 violation | **10 violation + 16 review** |
+| 5,000 COCO val2017 | 79 violation (1.54%) | **46 violation (0.92%) + 65 review (1.3%)** |
+| the vaping image | violation | **review** ✅ |
+
+Cost: 3 of 18 drug images move from violation to review. Nothing is missed — both tiers are
+surfaced, counted and searchable — and the price is paid on exactly the images where the
+distinction is genuinely unavailable in pixels.
+
+### The boundary is CONFIG, not code
+`moderation.json → categories.drugs.tobacco_tier ∈ review | violation | none` (plus `tau`,
+`tau_review`). A changed user ruling is a **one-word edit — no retrain, no re-embedding,
+no redeploy of prompts** — because both banks are always scored and only the tier label
+changes. An invalid value falls back to the ADR-14 default rather than taking moderation
+offline. Tests: `test_tobacco_tier_is_config_driven`, `test_config_tier_none_never_emits_review`.
+
 ## 4. What the false positives actually are (all hand-inspected)
 
 At the shipped threshold, 1.54% of ordinary photos flag. The population is not random:
@@ -137,7 +168,8 @@ way, so a future prompt edit cannot silently drop a mitigation.
 
 * **Index-time (ADR-14 seam, live):** `drugs.load_drugs_head(profile)` returns a head whose
   `.score(embeddings, images, ids)` yields `{category:"drugs", p, tier, why, group}` per
-  image. `imgtag.moderation.load_heads` picks it up automatically — verified end-to-end:
+  image, and `.probs(embeddings) -> (p, tier)` as ARRAYS — the shape b-daemon's
+  `Searcher.track_scores()` wants, so plugging it in is one call, not a port. `imgtag.moderation.load_heads` picks it up automatically — verified end-to-end:
   `imgtag index … --moderation` printed *"Found 0 images with nudity (10 for review), 0
   images with weapons, 24 images with drugs"*.
 * **Cost:** one text-tower batch **once per (model, prompt-set)**, cached to
@@ -154,7 +186,10 @@ way, so a future prompt edit cannot silently drop a mitigation.
      `max(prompts) − max(negatives)` (AP 0.31 → 0.57 on the identical slice);
   2. it must **not** subtract `policy_neighbours` (§3), and must read the per-track `platt`
      + `tau` rather than the shared z-score logistic — ADR-3 §2 forbids mixing a raw z-score
-     with a fitted probability.
+     with a fitted probability;
+  3. tiering must go through the arbitration in §3b, or the vaping image is a violation
+     again. Simplest correct integration: call `load_drugs_head(...).probs(snap.emb)` and
+     use the `tier` array it returns.
   Not edited here (file ownership, F2). Escalated to the conductor with this report.
 * **Tier semantics (ADR-14):** `violation` = illegal drugs/paraphernalia; `review` =
   tobacco/vape; anything else `none`. Tobacco is never counted as a violation.

@@ -22,29 +22,35 @@ Everything in `research/track-drugs.md` is labelled measured-vs-not on exactly t
 SCORING (ADR-3 §2 — probability space, and the commissioned background-margin experiment)
 -----------------------------------------------------------------------------------------
 Each concept is a prompt ENSEMBLE: the mean of its templated text embeddings, L2-normalized
-(classic CLIP zero-shot ensembling — cuts single-phrasing noise). Two banks:
+(classic CLIP zero-shot ensembling — cuts single-phrasing noise). FOUR banks, and keeping
+them apart is the whole design:
 
-    positives   drug-context concepts, grouped by subcategory
-    confusables the near-misses that make naive prompts useless: medicine cabinets,
-                kitchen powders, clinical syringes, herbs, incense, tobacco
+    CONCEPTS          drug-context concepts, grouped by subcategory  → VIOLATION tier
+    TOBACCO           cigarettes / cigars / vapes / hookah           → REVIEW tier (ADR-14)
+    BACKGROUND        visually DISTINCT lookalikes (snow, plumbing, ferns) → SUBTRACTED
+    POLICY_NEIGHBOURS visually IDENTICAL benign twins (a clinical syringe) → NEVER
+                      subtracted; they only annotate a flag for the reviewer
 
-    margin = max_cos(image, positives) - max_cos(image, confusables)
+    margin = max_cos(image, CONCEPTS) - max_cos(image, BACKGROUND)
 
 The margin is the feature ADR-3 commissioned ("score minus max over K generic negative
-prompts"), and on this lane's slice it beat both raw max-cosine and the mean-vector form
-search.py currently uses — numbers in research/track-drugs.md §Measured. p = sigmoid over
-the margin, fitted on the labelled slice; `flagged = p >= TAU`.
+prompts"): measured AP 0.726 on the drug slice, vs 0.31 for the mean-vector form
+search.py uses today, and vs 0.04 if POLICY_NEIGHBOURS are subtracted too — that collapse
+is why the two negative banks exist. p = sigmoid(A·margin + B) fitted on the labelled
+slice; `flagged = p >= tau`.
 
-TOBACCO is a POLICY SWITCH, not a fact: cigarettes/cigars/vapes sit in the confusable bank
-by default (tobacco is legal nearly everywhere, and the user's rule said "drugs"). Flip
-`tobacco=True` to move that group to the positive bank. See AMBIGUITIES — the user rules,
-we do not guess.
+TOBACCO is a POLICY KNOB, not a fact. ADR-14 (user ruling 12:50Z) puts it at the REVIEW
+tier, so a cigarette is surfaced but never counted as a drugs violation. The knob lives in
+CONFIG — `moderation.json` → `categories.drugs.tobacco_tier` ∈ review|violation|none — so a
+changed ruling is a one-word edit with no retrain and no re-embedding. See AMBIGUITIES for
+what is still un-ruled; the user rules, we do not guess.
 """
 
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass
+import json
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -180,12 +186,17 @@ PLATT_A, PLATT_B = 105.2162, -6.6182
 TAU = 0.0191              # violation: recall-first — 18/18 on the drug slice, 1.54% FP
 TAU_REVIEW = 0.0316       # review (tobacco): set by a 1% FP budget, NOT by recall (see FIT)
 TAU_PRECISION = 0.0373    # the alternative violation point: recall .94, 0.91% FP
+TIER_MARGIN = 0.01        # violation must beat the tobacco bank by this (see score())
 FIT = {
     "model": "pecore-s16-384-fp32",
     "feature": "margin = max(positive concepts) - max(background concepts)",
     "corpus": "5000 COCO val2017 + 328 Unsplash keyword-probe images",
     "violation": "AP 0.726 · recall .944 at 1% FP · fitted on 18 hand-verified drug "
     "images vs 5145 negatives. tau=0.0191 → 18/18 recall, 79/5145 (1.54%) flagged.",
+    "tier_arbitration": "violation requires the drug bank to beat the tobacco bank by "
+    "TIER_MARGIN: drug-slice violations 18/18 -> 15/18 (the other 3 are people smoking, "
+    "surfaced at review), COCO violations 79 -> 46 (0.9%), tobacco-keyword photos scored "
+    "as violations 22/128 -> 10/128, and the vape-exhale case demotes to review.",
     "review": "WEAK AND SAID SO: tobacco recall at a 1% FP budget is 0.17 (LVIS "
     "smoking labels) / 0.15 (Unsplash smoking photos). A cigarette is usually a "
     "20-pixel object and whole-image embeddings do not see it.",
@@ -223,6 +234,40 @@ AMBIGUITIES = [
 
 def _sigmoid(x):
     return 1.0 / (1.0 + np.exp(-np.asarray(x, np.float64)))
+
+
+# ── the user-rulable knobs live in CONFIG, not in code ────────────────────────────────
+# A ruling ("vaping is/ isn't a violation on my sites") must be a moderation.json edit —
+# never a retrain, never a code change. The prompt banks are the same either way, so
+# flipping `tobacco_tier` re-labels flags instantly with no re-embedding of anything.
+TOBACCO_TIERS = ("review", "violation", "none")
+DEFAULTS = {"tau": None, "tau_review": None, "tobacco_tier": "review"}
+
+
+def policy(config: dict | None = None) -> dict:
+    """Effective policy = module defaults ← moderation.json `categories.drugs` ← argument.
+
+    Unknown/invalid values fall back to the default rather than raising: a typo in a
+    config file must not take moderation offline.
+    """
+    p = {"tau": TAU, "tau_review": TAU_REVIEW, "tobacco_tier": DEFAULTS["tobacco_tier"]}
+    if config is None:
+        try:
+            from pathlib import Path
+
+            data = Path(__file__).resolve().parent.parent / "data" / "moderation.json"
+            config = json.loads(data.read_bytes())["categories"]["drugs"]
+        except (OSError, ValueError, KeyError):
+            config = {}
+    for k in ("tau", "tau_review"):
+        try:
+            if config.get(k) is not None:
+                p[k] = float(config[k])
+        except (TypeError, ValueError):
+            pass
+    if config.get("tobacco_tier") in TOBACCO_TIERS:
+        p["tobacco_tier"] = config["tobacco_tier"]
+    return p
 
 
 def prompts(tobacco: bool = False) -> tuple[list[str], list[str], list[str]]:
@@ -270,14 +315,21 @@ class DrugsScorer:
     tob: np.ndarray | None = None
     neighbours: np.ndarray | None = None
     tobacco: bool = False
+    pol: dict = field(default_factory=policy)
 
     @classmethod
-    def build(cls, backend, tobacco: bool = False, neighbours: bool = True) -> "DrugsScorer":
+    def build(cls, backend, tobacco: bool | None = None, neighbours: bool = True,
+              config: dict | None = None) -> "DrugsScorer":
+        """`tobacco` is derived from CONFIG unless explicitly overridden (see `policy`)."""
+        pol = policy(config)
+        if tobacco is None:
+            tobacco = pol["tobacco_tier"] == "violation"
         p, groups, bg = prompts(tobacco)
         return cls(pos=concept_vectors(backend, p), groups=groups,
                    bg=concept_vectors(backend, bg), names=p, tobacco=tobacco,
                    tob=None if tobacco else concept_vectors(backend, TOBACCO),
-                   neighbours=concept_vectors(backend, POLICY_NEIGHBOURS) if neighbours else None)
+                   neighbours=concept_vectors(backend, POLICY_NEIGHBOURS) if neighbours else None,
+                   pol=pol)
 
     def score(self, emb: np.ndarray) -> dict:
         """emb: [N, D] L2-normalized image embeddings → per-image drugs payload.
@@ -286,6 +338,7 @@ class DrugsScorer:
         paraphernalia), `p_review` the tobacco/vape one. `tier` is the ADR-14 carrier.
         Arrays throughout — one dataset costs two small matmuls.
         """
+        tau, tau_r = self.pol["tau"], self.pol["tau_review"]
         emb = np.asarray(emb, np.float32)
         cp = emb @ self.pos.T                       # [N, P]
         bg = (emb @ self.bg.T).max(1)               # [N]
@@ -295,19 +348,28 @@ class DrugsScorer:
         out = {
             "category": CATEGORY,
             "p": p,
-            "flagged": p >= TAU,
+            "flagged": p >= tau,
             "margin": margin,
             "concept": [self.names[i] for i in best],
             "group": [self.groups[i] for i in best],
-            "tau": TAU,
+            "tau": tau,
             "calibration": "proxy-fitted",   # never claim more than FIT says
         }
         if self.tob is not None:
-            pr = _sigmoid(PLATT_A * ((emb @ self.tob.T).max(1) - bg) + PLATT_B)
+            mt = (emb @ self.tob.T).max(1) - bg
+            pr = _sigmoid(PLATT_A * mt + PLATT_B)
             out["p_review"] = pr
-            out["tier"] = np.where(out["flagged"], "violation",
-                                   np.where(pr >= TAU_REVIEW, "review", "none"))
-            out["tau_review"] = TAU_REVIEW
+            second = "none" if self.pol["tobacco_tier"] == "none" else "review"
+            # ARBITRATION (measured): a joint and a cigarette look alike, so `p >= tau`
+            # alone made every vape exhale a VIOLATION — the exact v0 failure b-daemon hit
+            # at p=.964. A violation now also has to be explained BETTER by the drug bank
+            # than by the tobacco bank, by TIER_MARGIN. Nothing leaves the queue: what
+            # loses the arbitration lands at review, where ADR-14 says a human decides.
+            wins = margin >= mt + TIER_MARGIN
+            out["tier"] = np.where(out["flagged"] & wins, "violation",
+                                   np.where((pr >= tau_r) | out["flagged"], second, "none"))
+            out["flagged"] = out["tier"] == "violation"
+            out["tau_review"] = tau_r
         else:   # tobacco promoted into the violation bank: no separate review tier
             out["tier"] = np.where(out["flagged"], "violation", "none")
         if self.neighbours is not None:      # review aid, never part of the score
@@ -342,6 +404,11 @@ class DrugsHead:
     def __init__(self, scorer: DrugsScorer, model_sha: str):
         self.scorer, self.model_sha = scorer, model_sha
 
+    def probs(self, embeddings):
+        """Arrays for a whole dataset: (p, tier) — what b-daemon's track_scores() wants."""
+        out = self.scorer.score(embeddings)
+        return out["p"], out["tier"]
+
     def score(self, embeddings, images=None, ids=None) -> list[dict]:
         out = self.scorer.score(embeddings)
         return [{"category": CATEGORY, "p": round(float(p), 4), "tier": str(t),
@@ -358,7 +425,8 @@ def _cache_path(model_sha: str, tobacco: bool, root=None):
     return d / f"drugs-{spec_sha(tobacco)}.npz"
 
 
-def load_drugs_head(profile=None, backend=None, tobacco: bool = False, root=None):
+def load_drugs_head(profile=None, backend=None, tobacco: bool | None = None, root=None,
+                    config: dict | None = None):
     """Loader called by `imgtag.moderation.load_heads(profile)`. None = track unavailable.
 
     Never raises: a missing model or an unreadable cache means "no drugs track on this
@@ -367,6 +435,9 @@ def load_drugs_head(profile=None, backend=None, tobacco: bool = False, root=None
     try:
         from ..core import models as _models
 
+        pol = policy(config)
+        if tobacco is None:
+            tobacco = pol["tobacco_tier"] == "violation"
         if backend is None:
             name = (profile or {}).get("model") or _models.DEFAULT_BACKEND
             backend = _models.load_backend(name, profile or {}, vision=False)
@@ -376,9 +447,10 @@ def load_drugs_head(profile=None, backend=None, tobacco: bool = False, root=None
             z = np.load(cache)
             sc = DrugsScorer(pos=z["pos"], groups=groups, bg=z["bg"], names=p,
                              tob=z["tob"] if "tob" in z else None,
-                             neighbours=z["nb"] if "nb" in z else None, tobacco=tobacco)
+                             neighbours=z["nb"] if "nb" in z else None, tobacco=tobacco,
+                             pol=pol)
         else:
-            sc = DrugsScorer.build(backend, tobacco=tobacco)
+            sc = DrugsScorer.build(backend, tobacco=tobacco, config=config)
             cache.parent.mkdir(parents=True, exist_ok=True)
             tmp = cache.parent / (cache.stem + ".tmp.npz")  # np.savez appends .npz itself
             np.savez(tmp, pos=sc.pos, bg=sc.bg, **({"tob": sc.tob} if sc.tob is not None else {}),
@@ -393,6 +465,7 @@ def track_spec() -> dict:
     """The `drugs` entry of src/imgtag/data/moderation.json (v2 schema, conductor-owned
     file, this key owned by track-drugs). `negatives` are subtracted; `policy_neighbours`
     MUST NOT be — subtracting them was measured to collapse AP 0.58 → 0.04."""
+    pol = policy({})          # module defaults, not whatever is on disk right now
     pos, _, bg = prompts()
     return {
         "label": "drugs / drug paraphernalia",
@@ -405,6 +478,9 @@ def track_spec() -> dict:
         "platt": [PLATT_A, PLATT_B],
         "tau": TAU,
         "tau_review": TAU_REVIEW,
+        # THE user-rulable knob: "review" (ADR-14 default) | "violation" | "none".
+        # Changing it here re-tiers every flag with no retrain and no re-embedding.
+        "tobacco_tier": pol["tobacco_tier"],
         "calibration": "proxy-fitted",
         "enforcement_ready": False,
         "spec_sha": spec_sha(),

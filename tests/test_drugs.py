@@ -137,3 +137,37 @@ def test_moderation_json_drugs_track_matches_this_module():
     assert track["enforcement_ready"] is False
     # the measured law: benign look-alikes are explained, never subtracted
     assert not set(track["policy_neighbours"]) & set(track["negatives"])
+
+
+# ── the tobacco boundary is CONFIG, not code (lead's ask: a ruling, not a retrain) ────
+def test_tobacco_tier_is_config_driven():
+    assert D.policy({})["tobacco_tier"] == "review"          # ADR-14 default
+    assert D.policy({"tobacco_tier": "violation"})["tobacco_tier"] == "violation"
+    assert D.policy({"tobacco_tier": "none"})["tobacco_tier"] == "none"
+    assert D.policy({"tobacco_tier": "banana"})["tobacco_tier"] == "review"  # typo ≠ outage
+    assert D.policy({"tau": 0.5})["tau"] == 0.5
+    assert D.policy({"tau": "oops"})["tau"] == D.TAU
+
+
+def test_config_tier_none_never_emits_review():
+    sc = D.DrugsScorer.build(FakeBackend(), config={"tobacco_tier": "none", "tau": 0.99})
+    emb = _unit(np.stack([sc.tob[0], sc.pos[0]]))
+    assert "review" not in set(sc.score(emb)["tier"])
+
+
+def test_violation_requires_beating_the_tobacco_bank():
+    """The measured v0 failure: a vape exhale scored as a drugs VIOLATION. A violation now
+    has to be explained better by the drug bank than by the tobacco bank (TIER_MARGIN)."""
+    sc = D.DrugsScorer.build(FakeBackend(), config={"tau": 0.0, "tau_review": 0.0})
+    tobacco_like = _unit(sc.tob[0][None])
+    out = sc.score(tobacco_like)
+    assert out["tier"][0] == "review" and not out["flagged"][0]
+    drug_like = sc.score(_unit(sc.pos[0][None]))
+    assert drug_like["tier"][0] == "violation"
+
+
+def test_nothing_that_passes_tau_leaves_the_queue():
+    """Losing the arbitration must DEMOTE to review, never drop the image."""
+    sc = D.DrugsScorer.build(FakeBackend(), config={"tau": 0.0, "tau_review": 1.0})
+    emb = _unit(sc.tob[:2])
+    assert set(sc.score(emb)["tier"]) <= {"violation", "review"}

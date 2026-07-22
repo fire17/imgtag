@@ -150,6 +150,7 @@
    ],
    "tau": 0.0191,
    "tau_review": 0.0316,
+   "tobacco_tier": "review",
    "calibration": "proxy-fitted",
    "enforcement_ready": false,
    "spec_sha": "7e950ff6eac4bc75",
@@ -158,6 +159,7 @@
     "feature": "margin = max(positive concepts) - max(background concepts)",
     "corpus": "5000 COCO val2017 + 328 Unsplash keyword-probe images",
     "violation": "AP 0.726 \u00b7 recall .944 at 1% FP \u00b7 fitted on 18 hand-verified drug images vs 5145 negatives. tau=0.0191 \u2192 18/18 recall, 79/5145 (1.54%) flagged.",
+    "tier_arbitration": "violation requires the drug bank to beat the tobacco bank by TIER_MARGIN: drug-slice violations 18/18 -> 15/18 (the other 3 are people smoking, surfaced at review), COCO violations 79 -> 46 (0.9%), tobacco-keyword photos scored as violations 22/128 -> 10/128, and the vape-exhale case demotes to review.",
     "review": "WEAK AND SAID SO: tobacco recall at a 1% FP budget is 0.17 (LVIS smoking labels) / 0.15 (Unsplash smoking photos). A cigarette is usually a 20-pixel object and whole-image embeddings do not see it.",
     "caveat": "small positive sets (18 violation / 36 review). Wide-CI estimates on ONE corpus, not a benchmark. Recall on cocaine/heroin/meth imagery specifically is UNMEASURED \u2014 no labelled image of it exists in any corpus we may use."
    },
