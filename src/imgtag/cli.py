@@ -61,9 +61,14 @@ def cmd_index(args) -> int:
         argv = [sys.executable, "-m", "imgtag.cli", "index", str(args.path), "--dataset", ds,
                 "--wait", "--job-id", job_id]
         for flag, v in (("--model", args.model), ("--geometry", args.geometry), ("--workers", args.workers),
-                        ("--batch", args.batch), ("--intra-op", args.intra_op), ("--precision", args.precision)):
+                        ("--batch", args.batch), ("--intra-op", args.intra_op), ("--precision", args.precision),
+                        ("--meta-csv", args.meta_csv), ("--moderation-hook", args.moderation_hook)):
             if v:
                 argv += [flag, str(v)]
+        if args.moderation:
+            argv.append("--moderation")
+        for kv in args.meta or []:
+            argv += ["--meta", kv]
         if args.full_speed:
             argv.append("--full-speed")
         if args.no_recursive:
@@ -82,9 +87,14 @@ def cmd_index(args) -> int:
             prof[k] = v
     if args.precision:
         prof["precision_explicit"] = True
+    from .core.indexer import parse_meta
+
     s = index(
         args.path,
         ds,
+        meta=parse_meta(args.meta),
+        meta_csv=args.meta_csv,
+        moderation=args.moderation_hook or args.moderation,
         backend=args.model,
         profile=prof,
         workers=args.workers,
@@ -99,9 +109,40 @@ def cmd_index(args) -> int:
         s,
         f"indexed {s['indexed']} images ({s['skipped']} unchanged, {s['failed']} failed) "
         f"in {s['seconds']}s = {s['img_s']} img/s  [{s['model_id']}, {s['workers']} workers, "
-        f"batch {s['batch']}, stages/img {s['stages_ms_per_img']}]",
+        f"batch {s['batch']}, stages/img {s['stages_ms_per_img']}]"
+        + (f"\n{_moderation_line(s['moderation'])}" if s.get("moderation_active") else ""),
     )
     return 0
+
+
+def _moderation_line(counts: dict) -> str:
+    from .core.indexer import moderation_summary
+
+    return moderation_summary(counts or {})
+
+
+def _flags_rollup(dataset: str, limit: int = 200) -> dict:
+    """Per-dataset moderation rollup, read straight from the ids records (no model)."""
+    snap = store.open_snapshot(dataset)
+    counts: dict[str, dict] = {}
+    flagged = []
+    for r in snap.ids:
+        fl = r.get("flags") or []
+        if not fl:
+            continue
+        for f in fl:
+            tier = f.get("tier", "violation")
+            counts.setdefault(tier, {})
+            counts[tier][f["category"]] = counts[tier].get(f["category"], 0) + 1
+        if len(flagged) < limit:
+            flagged.append({"image_id": r["image_id"], "path": r["path"], "dataset": r.get("dataset", dataset),
+                            "categories": fl, "meta": r.get("meta", {})})
+    from .core.indexer import merge_counts
+
+    return {"dataset": dataset, "total": snap.count, "counts": merge_counts(counts),
+            "calibration": (snap.manifest.get("moderation") or {}).get("calibration", "unfitted"),
+            "enforcement_ready": (snap.manifest.get("moderation") or {}).get("enforcement_ready", False),
+            "flagged": flagged, "truncated": len(flagged) >= limit}
 
 
 def _backend_names() -> list[str]:
@@ -141,6 +182,20 @@ def cmd_info(args) -> int:
         job["tookMs"] = round((time.perf_counter() - t0) * 1000, 2)
         _out(args, job, json.dumps(job, indent=1))
         return 0
+    if getattr(args, "flags", False):
+        names = [args.dataset] if args.dataset else store.list_datasets()
+        rolls = [_flags_rollup(n) for n in names]
+        from .core.indexer import merge_counts
+
+        total = merge_counts({})
+        for r in rolls:
+            for tier, per_cat in r["counts"].items():
+                for cat, n in per_cat.items():
+                    total[tier][cat] = total[tier].get(cat, 0) + n
+        obj = {"datasets": rolls, "counts": total, "tookMs": round((time.perf_counter() - t0) * 1000, 2)}
+        _out(args, obj, "\n".join(f"{r['dataset']:24s} " + _moderation_line(r["counts"]) for r in rolls)
+             or "no datasets")
+        return 0
     if args.dataset:
         man = store.read_manifest(args.dataset)
         jobs = [j for j in list_jobs() if j.get("dataset") == args.dataset][:5]
@@ -178,6 +233,21 @@ def cmd_manage(args) -> int:
               for n in store.list_datasets()]
         _out(args, {"datasets": ds, "tookMs": round((time.perf_counter() - t0) * 1000, 2)},
              "\n".join(f"{d['dataset']:24s} {d['count']:>7} imgs  {d['model_id']}" for d in ds) or "no datasets")
+        return 0
+    if args.action == "meta":
+        man = store.read_manifest(args.dataset, home)
+        if args.set:
+            from .core.indexer import parse_meta
+
+            man["meta"] = {**man.get("meta", {}), **parse_meta(args.set)}
+            man["updated"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            d = store.dataset_dir(args.dataset, home)
+            tmp = d / "manifest.json.tmp"
+            tmp.write_text(json.dumps(man, indent=1))
+            os.replace(tmp, d / "manifest.json")  # same atomic swap the writer uses
+        _out(args, {"dataset": args.dataset, "meta": man.get("meta", {}),
+                    "tookMs": round((time.perf_counter() - t0) * 1000, 2)},
+             json.dumps(man.get("meta", {}), indent=1))
         return 0
     if args.action == "verify":
         # ADR-6 integrity: byte counts are the authority; recompute against them.
@@ -241,13 +311,32 @@ def cmd_manage(args) -> int:
         # A delete racing an index job must be UNAMBIGUOUS: refuse with the documented
         # dataset-locked code rather than delete bytes a live (or queued) writer is about
         # to recreate — that would silently undo the user's delete and leave orphans.
-        live = next((j for j in list_jobs()
-                     if j.get("dataset") == args.dataset and j.get("state") in ("queued", "running")), None)
-        if live:
+        live = [j for j in list_jobs()
+                if j.get("dataset") == args.dataset and j.get("state") in ("queued", "running")]
+        if live and not args.force:
+            j = live[0]
             raise store.LockedError(
-                f"{args.dataset} has an active job {live['job_id']} ({live['state']}) — "
-                f"wait for it to finish, then delete"
+                f"{args.dataset} has an active job {j['job_id']} ({j['state']}) — wait for it "
+                f"to finish, or `manage delete {args.dataset} --force` to abort it and delete"
             )
+        if live:  # --force: abort first, THEN delete, so no writer can resurrect the dataset
+            from .core.progress import request_abort
+
+            for j in live:
+                request_abort(j["job_id"])
+            deadline = time.time() + 20
+            while time.time() < deadline:
+                still = [j for j in list_jobs() if j.get("dataset") == args.dataset
+                         and j.get("state") in ("queued", "running")]
+                if not still:
+                    break
+                time.sleep(0.1)
+            else:
+                raise store.LockedError(
+                    f"{args.dataset}: job(s) {[j['job_id'] for j in live]} did not stop within 20s — "
+                    f"nothing deleted"
+                )
+            _err(f"aborted job(s) {', '.join(j['job_id'] for j in live)} before deleting")
         if not d.exists():
             raise store.UnknownDatasetError(args.dataset)
         lock = d / ".writer.lock"
@@ -378,6 +467,8 @@ def cmd_search(args) -> int:
                 "score": round(float(scores[i]), 6),
                 "p": round(float(1 / (1 + np.exp(-(float(scores[i]) - 0.22) * 40))), 4),
                 "why": {"path": "text", "tag": None, "calibrated": False},
+                "meta": r.get("meta", {}),      # generic per-image metadata (B18 provenance)
+                "flags": r.get("flags", []),    # moderation, when a detector ran
             })
     hits.sort(key=lambda h: (-h["score"], h["image_id"]))  # deterministic ties (B18e)
     hits = hits[: args.k]
@@ -466,22 +557,35 @@ def build_parser() -> argparse.ArgumentParser:
     i.add_argument("--batch", type=int)
     i.add_argument("--intra-op", type=int, dest="intra_op")
     i.add_argument("--precision", choices=["fp32", "fp16", "int8"])
+    i.add_argument("--meta", action="append", metavar="KEY=VALUE",
+                   help="metadata applied to every image in this job (repeatable)")
+    i.add_argument("--meta-csv", dest="meta_csv", metavar="FILE",
+                   help="per-image metadata: CSV with a path/filename column + any other columns")
+    i.add_argument("--moderation", action="store_true",
+                   help="run the moderation tracks (imgtag.moderation.load_heads) during indexing")
+    i.add_argument("--moderation-hook", dest="moderation_hook", metavar="MODULE:FN",
+                   help="override the dispatcher with one detect() callable (dev/tests)")
     i.set_defaults(fn=cmd_index)
 
     n = sub.add_parser("info", help="datasets, jobs, profile", parents=[common])
     n.add_argument("dataset", nargs="?")
     n.add_argument("--dataset", dest="dataset_flag_info")
     n.add_argument("--job", help="report one job's live status")
+    n.add_argument("--flags", action="store_true", help="moderation rollup (all datasets, or one with --dataset)")
     n.set_defaults(fn=cmd_info)
 
     m = sub.add_parser("manage", help="create/rename/reindex/delete a dataset", parents=[common])
-    m.add_argument("action", choices=["list", "create", "rename", "reindex", "delete", "verify"])
+    m.add_argument("action", choices=["list", "create", "rename", "reindex", "delete", "verify", "meta"])
     m.add_argument("dataset", nargs="?")
     m.add_argument("new", nargs="?", help="target name for `manage rename <old> <new>`")
     m.add_argument("--to")
     m.add_argument("--path")
     m.add_argument("--model")
     m.add_argument("--yes", "-y", action="store_true", help="no-op: imgtag never prompts (B20)")
+    m.add_argument("--set", action="append", metavar="KEY=VALUE",
+                   help="meta: set dataset-level metadata (repeatable)")
+    m.add_argument("--force", action="store_true",
+                   help="delete: abort any in-flight job for this dataset first, then delete")
     m.set_defaults(fn=cmd_manage)
 
     s = sub.add_parser("search", help="semantic search", parents=[common])

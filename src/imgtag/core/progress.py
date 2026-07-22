@@ -44,11 +44,29 @@ def list_jobs(home: Path | None = None, limit: int = 50) -> list[dict]:
     return out
 
 
+def abort_path(job_id: str, home: Path | None = None) -> Path:
+    return jobs_dir(home) / f"{job_id}.abort"
+
+
+def request_abort(job_id: str, home: Path | None = None) -> None:
+    """Ask a running job to stop. A file, not a signal: the writer may be a detached
+    process in another session, and the kernel-owned flock is what protects the data —
+    this only needs to be a flag the coordinator polls."""
+    p = abort_path(job_id, home)
+    p.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    p.write_text(str(time.time()))
+
+
+def clear_abort(job_id: str, home: Path | None = None) -> None:
+    abort_path(job_id, home).unlink(missing_ok=True)
+
+
 class Job:
     """One index job's status file. Cheap: writes are throttled and event-driven
     (B10(d): the emitter must cost <=1% of run wall time — no polling thread)."""
 
     def __init__(self, job_id: str, dataset: str, total: int, home: Path | None = None, **extra):
+        self._home = home
         self.path = jobs_dir(home) / f"{job_id}.json"
         self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         self._hist: deque[tuple[float, int]] = deque()
@@ -80,6 +98,14 @@ class Job:
 
     def finish(self, **extra) -> None:
         self.state.update(state="done", inflight=0, eta_s=0.0, **extra)
+        self._write(force=True)
+
+    def aborted(self) -> bool:
+        """True once someone asked this job to stop (e.g. `manage delete --force`)."""
+        return abort_path(self.state["job_id"], self._home).exists()
+
+    def abort(self, reason: str = "aborted by request") -> None:
+        self.state.update(state="aborted", inflight=0, error=reason)
         self._write(force=True)
 
     def fail(self, reason: str) -> None:

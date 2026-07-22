@@ -36,12 +36,185 @@ MAX_PIXELS = 80_000_000  # B21: the decompression bomb is refused by a pixel cap
 FILE_TIMEOUT_S = 5  # B21: every file resolved or skipped within 5s
 
 
+def parse_meta(pairs) -> dict:
+    """``--meta key=value`` (repeatable) -> dict. Job-level: applies to every image."""
+    out = {}
+    for p in pairs or []:
+        if "=" not in p:
+            raise ValueError(f"--meta expects key=value, got {p!r}")
+        k, v = p.split("=", 1)
+        out[k.strip()] = v.strip()
+    return out
+
+
+def load_meta_csv(path, root: Path | None = None) -> dict:
+    """CSV -> {image key: {column: value}}. One column must be `path` or `filename`;
+    every other column becomes per-image metadata (account ids, dates, whatever).
+
+    Keys are matched later by absolute path, then by basename, so a CSV written against
+    relative paths on another machine still lands.
+    """
+    import csv
+
+    rows: dict[str, dict] = {}
+    with open(path, newline="") as f:
+        rdr = csv.DictReader(f)
+        key_col = next((c for c in (rdr.fieldnames or []) if c and c.lower() in ("path", "filename", "file")), None)
+        if not key_col:
+            raise ValueError(f"{path}: needs a `path`, `filename` or `file` column; got {rdr.fieldnames}")
+        for row in rdr:
+            raw = (row.get(key_col) or "").strip()
+            if not raw:
+                continue
+            meta = {k: v for k, v in row.items() if k != key_col and k and v not in (None, "")}
+            p = Path(raw).expanduser()
+            if not p.is_absolute() and root:
+                p = (root / p)
+            rows[str(p.resolve() if p.exists() else p)] = meta
+            rows.setdefault(Path(raw).name, meta)  # basename fallback
+    return rows
+
+
 def scan(root: Path, recursive: bool = True) -> list[Path]:
     root = Path(root).expanduser()
     if root.is_file():
         return [root]
     it = root.rglob("*") if recursive else root.glob("*")
     return sorted(p for p in it if p.suffix.lower() in IMAGE_EXTS and p.is_file())
+
+
+# ---------------------------------------------------------------- moderation hook
+
+MODERATION_CATEGORIES = ("nudity", "weapons", "drugs")
+
+
+def load_moderation_hook(spec=None, profile: dict | None = None, log=lambda m: None):
+    """Resolve the index-time moderation detector. Returns a callable or None.
+
+    PRIMARY PATH — the conductor-owned dispatcher (`imgtag.moderation.load_heads`):
+    each track exports a Head with `.score(embeddings, images, ids) -> [{category, p,
+    tier}]` per ADR-14. This function loads every head that can load on this machine and
+    fans a batch across them; a track whose model files are absent simply is not there.
+
+    OVERRIDE PATH — `spec="module:function"` (or $IMGTAG_MODERATION), a single callable
+    `detect(embs, recs, images=None)` with the same per-record return shape. Used by
+    tests and by anyone plugging in a detector outside the package.
+
+    Either way the detector is called POST-EMBEDDING, BATCH-WISE, on the coordinator
+    (never in a decode worker), so it may reuse the L2-normalized embeddings it is handed
+    and cost ~0, or run its own model. It must never raise: exceptions are caught,
+    counted, and indexing continues — moderation is a summary layer, not a gate on the
+    user's index. Detectors needing pixels set `wants_images = True`; under
+    geometry="worker" no pixels exist on the coordinator and they are handed None.
+    """
+    import importlib
+
+    spec = spec if isinstance(spec, str) else os.environ.get("IMGTAG_MODERATION")
+    if spec:
+        try:
+            mod, _, fn = spec.partition(":")
+            return getattr(importlib.import_module(mod), fn or "detect")
+        except (ImportError, AttributeError) as e:
+            log(f"moderation hook {spec!r} unavailable ({type(e).__name__}) — indexing without it")
+            return None
+    try:
+        heads = importlib.import_module("imgtag.moderation").load_heads(profile or {})
+    except (ImportError, AttributeError, Exception) as e:  # a track's loader may itself fail
+        if not isinstance(e, (ImportError, AttributeError)):
+            log(f"moderation dispatcher failed ({type(e).__name__}: {e}) — indexing without it")
+        return None
+    if not heads:
+        return None
+    log(f"moderation heads loaded: {', '.join(sorted(heads))}")
+
+    def detect(embs, recs, images=None):
+        per: list[list[dict]] = [[] for _ in recs]
+        for name, head in heads.items():
+            try:
+                out = _call_head(head, embs, images, recs) or []
+            except Exception as e:
+                log(f"moderation head {name!r} raised {type(e).__name__}: {e} — skipped for this batch")
+                continue
+            for i, flags in enumerate(out[: len(per)]):
+                for f in (flags if isinstance(flags, list) else [flags]):
+                    if f:
+                        per[i].append(f)
+        return per
+
+    detect.wants_images = any(getattr(h, "wants_images", False) or hasattr(h, "score_images")
+                              for h in heads.values())
+    detect.heads = heads
+    return detect
+
+
+def _call_head(head, embs, images, recs):
+    """Call a track head through whichever shape it actually implements.
+
+    The documented seam is `score(embeddings, images, ids) -> [{category,p,tier}]`. The
+    nudity track ships `score_images(list[PIL.Image]) -> [{category,p,flagged}]` plus a
+    tensor-only `score(batch)`; the PIL path is UNAMBIGUOUS so it is supported here. A
+    bare `score(batch)` is NOT guessed at — feeding it embeddings would silently produce
+    numbers that mean nothing, which is worse than the loud skip the caller gets.
+    """
+    if hasattr(head, "score_images"):
+        if images is None:
+            raise RuntimeError("head needs pixels but this batch has none (geometry=worker)")
+        from PIL import Image as _Image
+
+        return head.score_images([_Image.fromarray(im) for im in images])
+    return head.score(embs, images, recs)
+
+
+def _apply_moderation(hook, embs, recs, images, counts: dict, log) -> int:
+    """Attach ADR-14 flags to recs and accumulate per-TIER, per-category counts.
+
+    Returns 1 if the detector failed for this batch (counted, never fatal).
+    """
+    try:
+        wants = getattr(hook, "wants_images", False)
+        out = hook(embs, recs, images if (images is not None or not wants) else None)
+    except Exception as e:  # never let a detector break the index
+        log(f"moderation hook raised {type(e).__name__}: {e} — flags skipped for this batch")
+        return 1
+    for rec, flags in zip(recs, out or []):
+        keep = []
+        for f in flags or []:
+            # ADR-14: tier is the carrier. Legacy `flagged: True` maps to violation so an
+            # older detector still counts for something instead of vanishing silently.
+            tier = f.get("tier") or ("violation" if f.get("flagged") else "none")
+            if tier == "none":
+                continue
+            keep.append({"category": f["category"], "p": round(float(f.get("p", 1.0)), 4), "tier": tier})
+            counts.setdefault(tier, {})
+            counts[tier][f["category"]] = counts[tier].get(f["category"], 0) + 1
+        if keep:
+            rec["flags"] = keep
+    return 0
+
+
+def empty_counts() -> dict:
+    return {t: {c: 0 for c in MODERATION_CATEGORIES} for t in ("violation", "review")}
+
+
+def merge_counts(counts: dict) -> dict:
+    """Fill the fixed ADR-14 shape so consumers never branch on a missing key."""
+    out = empty_counts()
+    for tier, per_cat in (counts or {}).items():
+        for cat, n in (per_cat or {}).items():
+            out.setdefault(tier, {})
+            out[tier][cat] = out[tier].get(cat, 0) + n
+    return out
+
+
+def moderation_summary(counts: dict) -> str:
+    """The user's phrasing, verbatim, per ADR-14 tier (violations lead; review follows)."""
+    c = merge_counts(counts)
+    order = list(MODERATION_CATEGORIES) + [k for k in sorted(c.get("violation", {})) if k not in MODERATION_CATEGORIES]
+    line = "Found " + ", ".join(f"{c['violation'].get(k, 0)} images with {k}" for k in order)
+    review = c.get("review", {})
+    if any(review.values()):
+        line += " · review tier: " + ", ".join(f"{v} {k}" for k, v in sorted(review.items()) if v)
+    return line
 
 
 # ---------------------------------------------------------------- workers
@@ -196,6 +369,9 @@ def index(
     workers: int | None = None,
     job_id: str | None = None,
     recursive: bool = True,
+    meta: dict | None = None,
+    meta_csv=None,
+    moderation: str | None = None,
     log=lambda m: None,
     on_progress=None,
 ) -> dict:
@@ -203,7 +379,13 @@ def index(
     from multiprocessing.shared_memory import SharedMemory
 
     files = scan(Path(path), recursive)
+    root = Path(path).expanduser()
+    job_meta = dict(meta or {})
+    per_image_meta = load_meta_csv(meta_csv, root if root.is_dir() else root.parent) if meta_csv else {}
+    mod_counts: dict[str, dict] = {}
+    mod_errors = 0
     prof = dict(profile or load_profile(home))
+    hook = load_moderation_hook(moderation, prof, log) if moderation else None
     name = backend or prof.get("backend") or models.DEFAULT_BACKEND
     geometry = prof.get("geometry", "central")
     be = models.load_backend(name, prof, vision=(geometry != "worker"))
@@ -211,6 +393,14 @@ def index(
     batch = int(prof.get("batch", 2))
     nslots = min(128, max(16, 4 * batch, 4 * workers))
     slot_bytes = be.size * be.size * 3
+    if hook is not None and getattr(hook, "wants_images", False) and geometry == "worker":
+        # a detector that needs pixels cannot be fed under the per-worker geometry (only
+        # embeddings cross that boundary), so the JOB drops to the central session — a
+        # measured throughput cost, taken deliberately and stated, never a silent skip
+        log("moderation needs pixels — using the central-session geometry for this job")
+        geometry = "central"
+        be = models.load_backend(name, prof, vision=True)
+        workers = worker_count(prof.get("cores"), prof.get("mem_available_mb"), full_speed, geometry)
     worker_be = None
     if geometry == "worker":
         # each worker owns a session at intra_op=1; the coordinator only stores
@@ -277,18 +467,24 @@ def index(
             pend_embs: list[np.ndarray] = []
             pend_recs: list[dict] = []
             prior = w.count
+            aborted = False
             t_start = time.time()
 
             def flush_batch():
                 nonlocal t_infer
                 if not pend_recs:
                     return
+                nonlocal mod_errors
                 if worker_be:  # workers already embedded; we only store
                     embs = np.stack(pend_embs)
+                    images = None
                 else:
+                    images = np.stack([slab[s] for s in pend_slots])
                     t = time.perf_counter()
-                    embs = be.embed_images(np.stack([slab[s] for s in pend_slots]))
+                    embs = be.embed_images(images)
                     t_infer += time.perf_counter() - t
+                if hook is not None:
+                    mod_errors += _apply_moderation(hook, embs, pend_recs, images, mod_counts, log)
                 w.append(embs, pend_recs.copy())
                 for s in pend_slots:
                     free_q.put(s)
@@ -297,6 +493,10 @@ def index(
                 pend_recs.clear()
 
             while received < len(todo):
+                if job.aborted():  # `manage delete --force`: stop cleanly, keep the index consistent
+                    log(f"job {w.job_id} aborted by request after {w.count - prior} images")
+                    aborted = True
+                    break
                 t = time.perf_counter()
                 try:
                     msg = ready_q.get(timeout=0.5)
@@ -319,17 +519,20 @@ def index(
                         pend_embs.append(np.frombuffer(msg["emb"], np.float32))
                     else:
                         pend_slots.append(msg["slot"])
-                    pend_recs.append(
-                        {
-                            "image_id": msg["image_id"],
-                            "path": msg["path"],
-                            "dataset": dataset,
-                            "w": msg["w"],
-                            "h": msg["h"],
-                            "mtime": msg["mtime"],
-                            "size": msg["size"],
-                        }
-                    )
+                    rec = {
+                        "image_id": msg["image_id"],
+                        "path": msg["path"],
+                        "dataset": dataset,
+                        "w": msg["w"],
+                        "h": msg["h"],
+                        "mtime": msg["mtime"],
+                        "size": msg["size"],
+                    }
+                    m = {**job_meta, **per_image_meta.get(msg["path"], {}),
+                         **per_image_meta.get(Path(msg["path"]).name, {})}
+                    if m:
+                        rec["meta"] = m
+                    pend_recs.append(rec)
                     if len(pend_recs) >= batch:
                         flush_batch()
                 job.update(w.count, inflight=received - w.count)
@@ -359,9 +562,37 @@ def index(
                     "queue_wait": round(t_queue * 1000 / max(1, n - prior), 2),
                 },
                 "flushes": w.flushes,
+                "meta": job_meta,
+                "moderation": merge_counts(mod_counts),
+                "moderation_active": hook is not None,
+                "moderation_errors": mod_errors,
             }
+            if job_meta:  # dataset-level metadata lives in the manifest, merged across jobs
+                w.manifest["meta"] = {**w.manifest.get("meta", {}), **job_meta}
+            if hook is not None:
+                prev = (w.manifest.get("moderation") or {}).get("counts", {})
+                total = merge_counts(prev)
+                for tier, per_cat in merge_counts(mod_counts).items():
+                    for cat, n in per_cat.items():
+                        total[tier][cat] = total[tier].get(cat, 0) + n
+                w.manifest["moderation"] = {
+                    "counts": total, "schema": "ADR-14",
+                    # honesty: tau is unfitted until b-bench fits it on labeled ground truth
+                    "calibration": "unfitted", "enforcement_ready": False,
+                    "updated": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                }
+            if job_meta or hook is not None:
+                w._commit()
+            if hook is not None:
+                log(moderation_summary(mod_counts))
             job.update(w.count, 0, summary["stages_ms_per_img"], force=True)
-            job.finish(indexed=n, seconds=summary["seconds"], img_s=summary["img_s"])
+            job.state["moderation"] = summary["moderation"]
+            job.state["meta"] = job_meta
+            summary["aborted"] = aborted
+            if aborted:
+                job.abort(f"aborted after {n - prior} images")
+            else:
+                job.finish(indexed=n, seconds=summary["seconds"], img_s=summary["img_s"])
         except BaseException as e:
             job.fail(f"{type(e).__name__}: {e}")
             raise
