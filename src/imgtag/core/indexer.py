@@ -87,9 +87,16 @@ def scan(root: Path, recursive: bool = True) -> list[Path]:
 # ---------------------------------------------------------------- moderation hook
 
 MODERATION_CATEGORIES = ("nudity", "weapons", "drugs", "safety")
+#: ADR-14 / VISION-ADDENDA 14:16Z tier ranking: alert > violation > review > match > none.
+#: ENFORCEMENT tiers drive the "Found N images with drugs…" summary and the moderation
+#: totals. CONTENT tiers (match) are per-image category chips for the detail view — a
+#: counting/content track is not a policy violation, so its tiers route to a SEPARATE
+#: content bucket and never pollute the enforcement counts.
+ENFORCEMENT_TIERS = ("alert", "violation", "review")
+CONTENT_TIERS = ("match",)
 #: ADR-14 amendment: "alert" is the highest tier (safety track — person-down + danger
 #: context); plain person-down is "review". Ordered highest-first for reporting.
-MODERATION_TIERS = ("alert", "violation", "review")
+MODERATION_TIERS = ENFORCEMENT_TIERS  # back-compat alias (empty_counts / summary shape)
 
 
 def load_moderation_hook(spec=None, profile: dict | None = None, log=lambda m: None):
@@ -271,14 +278,29 @@ def empty_counts() -> dict:
     return {t: {c: 0 for c in MODERATION_CATEGORIES} for t in MODERATION_TIERS}
 
 
-def merge_counts(counts: dict) -> dict:
-    """Fill the fixed ADR-14 shape so consumers never branch on a missing key."""
-    out = empty_counts()
-    for tier, per_cat in (counts or {}).items():
+def accumulate(total: dict, add: dict) -> dict:
+    """total += add over the {tier: {category: n}} shape, defensively — an UNKNOWN tier
+    (a track lane shipping a new tier before the engine knows it) is counted under its own
+    name, never a KeyError. Forward-compatible, exactly like b-daemon's reader."""
+    for tier, per_cat in (add or {}).items():
+        t = total.setdefault(tier, {})
         for cat, n in (per_cat or {}).items():
-            out.setdefault(tier, {})
-            out[tier][cat] = out[tier].get(cat, 0) + n
-    return out
+            t[cat] = t.get(cat, 0) + n
+    return total
+
+
+def merge_counts(counts: dict) -> dict:
+    """Fill the fixed enforcement shape so consumers never branch on a missing key."""
+    return accumulate(empty_counts(), counts)
+
+
+def split_tiers(counts: dict) -> tuple[dict, dict]:
+    """(enforcement, content) — content (match + any tier outside ENFORCEMENT_TIERS) is
+    kept apart so it can never inflate the moderation totals or the summary line."""
+    enf, content = {}, {}
+    for tier, per_cat in (counts or {}).items():
+        (enf if tier in ENFORCEMENT_TIERS else content)[tier] = dict(per_cat or {})
+    return enf, content
 
 
 def _moderation_spec_version():
@@ -695,6 +717,7 @@ def index(
             w._flush_pending()  # make the tail durable before we report done
             wall = time.time() - t_start
             n = w.count
+            _enf, _content = split_tiers(mod_counts)  # enforcement vs content (match) tiers
             summary = {
                 "job_id": w.job_id,
                 "dataset": dataset,
@@ -719,7 +742,8 @@ def index(
                 },
                 "flushes": w.flushes,
                 "meta": job_meta,
-                "moderation": merge_counts(mod_counts),
+                "moderation": merge_counts(_enf),
+                "content": _content,
                 "moderation_active": hook is not None,
                 "moderation_requested": bool(moderation),
                 "moderation_errors": mod_errors,
@@ -734,23 +758,27 @@ def index(
                     "categories": sorted(w.manifest.get("tracks", {})),
                     "tiers": getattr(hook, "specs", {}),
                 }
+                stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
                 prev = (w.manifest.get("moderation") or {}).get("counts", {})
-                total = merge_counts(prev)
-                for tier, per_cat in merge_counts(mod_counts).items():
-                    for cat, n in per_cat.items():
-                        total[tier][cat] = total[tier].get(cat, 0) + n
                 w.manifest["moderation"] = {
-                    "counts": total, "schema": "ADR-14",
+                    "counts": accumulate(merge_counts(prev), _enf), "schema": "ADR-14",
                     # honesty: tau is unfitted until b-bench fits it on labeled ground truth
-                    "calibration": "unfitted", "enforcement_ready": False,
-                    "updated": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                    "calibration": "unfitted", "enforcement_ready": False, "updated": stamp,
                 }
+                if _content:  # per-image content chips (match tier) — a separate bucket,
+                    # NEVER folded into the enforcement totals or the "Found…" summary
+                    prevc = (w.manifest.get("content") or {}).get("counts", {})
+                    w.manifest["content"] = {
+                        "counts": accumulate(accumulate({}, prevc), _content),
+                        "tiers": list(CONTENT_TIERS), "updated": stamp,
+                    }
             if job_meta or hook is not None:
                 w._commit()
             if moderation:
-                log(moderation_summary(mod_counts, active=hook is not None))
+                log(moderation_summary(_enf, active=hook is not None))
             job.update(w.count, 0, summary["stages_ms_per_img"], force=True)
             job.state["moderation"] = summary["moderation"]
+            job.state["content"] = _content
             job.state["meta"] = job_meta
             summary["aborted"] = aborted
             if aborted:

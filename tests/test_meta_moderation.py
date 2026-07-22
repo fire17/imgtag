@@ -263,3 +263,57 @@ def test_prebuilt_view_matches_reopen_bit_for_bit(tmp_path):
 
     # per image (both enumerate the same folder, sorted) the scores are identical
     np.testing.assert_allclose(sorted(view_scores), sorted(ref_scores), atol=1e-6)
+
+
+# ---------------------------------------------------------------- tier taxonomy (P1 regression)
+
+
+def content_and_unknown_detector(embs, recs, images=None):
+    """Emits a CONTENT tier (match) and an UNKNOWN tier — neither may crash the index nor
+    inflate the enforcement counts (the sports.py 'match' KeyError, generalized)."""
+    out = []
+    for i, r in enumerate(recs):
+        out.append([
+            {"category": "people", "p": float(i), "tier": "match"},          # content tier
+            {"category": "weapons", "p": 0.9, "tier": "violation"} if i == 0 else
+            {"category": "future", "p": 0.5, "tier": "some_new_tier"},        # unknown tier
+        ])
+    return out
+
+
+content_and_unknown_detector.specs = {"people": {"tau_review": 0.0}, "weapons": {"tau_violation": 0.5}}
+
+
+def test_split_and_accumulate_are_defensive():
+    from imgtag.core.indexer import accumulate, split_tiers
+
+    # a brand-new tier the engine has never heard of is counted, never a KeyError
+    got = accumulate(accumulate({}, {"violation": {"a": 1}}), {"totally_new": {"b": 2}})
+    assert got == {"violation": {"a": 1}, "totally_new": {"b": 2}}
+    enf, content = split_tiers({"violation": {"a": 1}, "match": {"b": 2}, "weird": {"c": 3}})
+    assert enf == {"violation": {"a": 1}}
+    assert content == {"match": {"b": 2}, "weird": {"c": 3}}  # everything non-enforcement
+
+
+@needs_model
+def test_content_tier_head_does_not_crash_and_routes_correctly(tmp_path, imgs):
+    """P1: a head emitting 'match' (or any non-enforcement tier) must not KeyError, its
+    counts must NOT appear in the moderation totals, and the summary must stay clean."""
+    from imgtag.core.indexer import moderation_summary
+
+    home = tmp_path / "home"
+    s = index(imgs, "ds", profile=PROFILE, home=home, workers=2,
+              moderation=f"{__name__}:content_and_unknown_detector")
+    assert s["moderation_active"] and s["moderation_errors"] == 0
+    # enforcement bucket has weapons; content bucket has the match + unknown tiers
+    assert s["moderation"]["violation"]["weapons"] == 1
+    assert "match" not in s["moderation"] and "some_new_tier" not in s["moderation"]
+    assert s["content"]["match"]["people"] == 4
+    assert s["content"]["some_new_tier"]["future"] == 3
+
+    man = store.read_manifest("ds", home)
+    assert "match" not in man["moderation"]["counts"]           # never pollutes enforcement
+    assert man["content"]["counts"]["match"]["people"] == 4     # lands in its own bucket
+    # the user's summary line is enforcement-only — a content tier can't crowd it
+    line = moderation_summary(store.read_manifest("ds", home)["moderation"]["counts"])
+    assert "people" not in line and "1 images with weapons" in line
