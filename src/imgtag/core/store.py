@@ -211,20 +211,69 @@ def dataset_flags(dataset: str, home: Path | None = None, snap=None) -> dict:
     return out
 
 
+def _platt(x, ab) -> np.ndarray:
+    """Fitted score -> probability, the project's Platt convention (tags.platt_apply,
+    b-daemon's _margin_p): ``p = 1/(1+exp(A*x + B))`` clipped, or a bare sigmoid when
+    no pair. Inlined (not imported) so store carries no dependency on a track lane's file
+    — the two-line formula is trivially identical and there is nothing to drift."""
+    x = np.asarray(x, np.float64)
+    if not ab:
+        return 1.0 / (1.0 + np.exp(-x))
+    return 1.0 / (1.0 + np.exp(np.clip(ab[0] * x + ab[1], -30, 30)))
+
+
+def _derive_arbitrated(scores: np.ndarray, spec: dict) -> list[str]:
+    """The `margin_arbitrated` derivation (track-drugs' contract, 1631abf) — reproduces
+    the head's two-margin arbitration from the STORED margins, so ADR-15's free-τ-re-derive
+    still holds (margins are stored, tiers are not). Columns: [margin, margin_review].
+
+        violation iff sigmoid(platt·margin) >= tau AND margin >= margin_review + tier_margin
+        else review iff sigmoid(platt·margin_review) >= tau_review OR sigmoid(platt·margin) >= tau
+        else none
+    """
+    margin, margin_review = scores[:, 0], scores[:, 1]
+    tau = float(spec.get("tau", 0.0))
+    tau_r = float(spec.get("tau_review", tau))
+    arb = spec.get("arbitrated_storage") or {}
+    tier_margin = float(spec.get("tier_margin", arb.get("tier_margin", 0.0)))
+    platt = spec.get("platt")
+    p_m, p_mr = _platt(margin, platt), _platt(margin_review, platt)
+    out = []
+    for i in range(len(margin)):
+        if np.isnan(margin[i]):
+            out.append("unknown")
+        elif p_m[i] >= tau and margin[i] >= margin_review[i] + tier_margin:
+            out.append("violation")
+        elif p_mr[i] >= tau_r or p_m[i] >= tau:
+            out.append("review")
+        else:
+            out.append("none")
+    return out
+
+
 def derive_tiers(scores, spec: dict) -> list[str]:
     """Raw scores + a track spec -> ADR-14/15 tier labels. Pure, deterministic, and the
-    ONE place the mapping lives, so daemon, CLI and bench cannot disagree (B25d).
+    ONE place the mapping lives, so daemon, CLI and bench cannot disagree (B25d). Returns
+    one tier PER ROW (== per image), NaN (not scored) -> "unknown".
 
-    Bands are read from the spec, highest first; a score below every band is "none",
-    and NaN (not scored) is "unknown" rather than a silently-passing "none".
+    Two derivation modes, both spec-driven so any future track reuses them:
+    - `margin_arbitrated` (scorer or col_roles==[margin,margin_review]): the two-column
+      arbitration rule above.
+    - band (default): highest τ band the score clears, else "none".
     """
+    s = np.asarray(scores, np.float32)
+    if (spec.get("scorer") == "margin_arbitrated" or spec.get("col_roles") == ["margin", "margin_review"]) \
+            and s.ndim == 2 and s.shape[1] >= 2:
+        return _derive_arbitrated(s, spec)
+
     def _tau_of(tier):  # byte-identical to b-daemon's tau_of: tau_<tier>, or `tau` for violation
         return spec.get(f"tau_{tier}", spec.get("tau") if tier == "violation" else None)
 
     bands = [(t, float(_tau_of(t))) for t in ("alert", "violation", "review") if _tau_of(t) is not None]
     bands.sort(key=lambda b: -b[1])
+    col = s[:, 0] if s.ndim == 2 else s  # a multi-col non-arbitrated track tiers on col 0
     out = []
-    for v in np.asarray(scores, np.float32).reshape(-1):
+    for v in col.reshape(-1):
         if np.isnan(v):
             out.append("unknown")
             continue

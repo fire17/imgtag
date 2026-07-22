@@ -314,3 +314,36 @@ def test_dataset_flags_uses_fitted_tau(tmp_path, monkeypatch):
     # manifest recorded NO spec (tracks_spec absent) — fitted file must still drive tiers
     tiers = store.dataset_flags("ds", tmp_path)["weapons"]["tiers"]
     assert tiers == ["violation", "review", "none"], tiers
+
+
+def test_derive_tiers_margin_arbitrated_branch():
+    """track-drugs' arbitrated derivation (1631abf): two stored margins reproduce the
+    head's arbitration, so ADR-15's free-τ-re-derive still holds. _platt is byte-identical
+    to b-daemon's _margin_p (verified against tags.platt_apply)."""
+    import numpy as np
+
+    # a monotonic platt so each branch is unambiguous: p = sigmoid(10*margin)
+    spec = {"scorer": "margin_arbitrated", "col_roles": ["margin", "margin_review"],
+            "platt": [-10.0, 0.0], "tau": 0.5, "tau_review": 0.5, "tier_margin": 0.1}
+    rows = np.array([
+        [0.30, 0.00],    # p_m high AND margin >= margin_review + tier_margin -> violation
+        [0.30, 0.25],    # p_m high but margin < margin_review + tier_margin -> demoted review
+        [-0.30, 0.30],   # p_m low, p_mr high -> review
+        [-0.30, -0.30],  # both low -> none
+        [float("nan"), 0.0],  # not scored -> unknown
+    ], np.float32)
+    assert store.derive_tiers(rows, spec) == ["violation", "review", "review", "none", "unknown"]
+
+    # detected by scorer OR by col_roles; a non-arbitrated 2-col track tiers on col 0
+    assert store.derive_tiers(rows, {"col_roles": ["margin", "margin_review"], "platt": [-10.0, 0.0],
+                                     "tau": 0.5, "tier_margin": 0.1})[0] == "violation"
+    band = store.derive_tiers(np.array([[0.9, 0.1], [0.1, 0.9]], np.float32), {"tau_violation": 0.5})
+    assert band == ["violation", "none"] and len(band) == 2  # per-ROW, col 0, length == N
+
+
+def test_platt_matches_tags_platt_apply():
+    import numpy as np
+
+    from imgtag.core.tags import platt_apply
+    ab, xs = [103.018, -5.6314], np.array([0.0, 0.03, 0.06, 0.1], np.float32)
+    np.testing.assert_allclose(store._platt(xs, ab), np.asarray(platt_apply(xs, ab), np.float64), atol=1e-9)
