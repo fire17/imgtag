@@ -48,3 +48,11 @@ i want track to be able to categorize images if they have 1 person in them (even
 ## 2026-07-22 ~13:29Z — violence/abuse track (verbatim)
 
 and one track for general violence or abuse
+
+## 2026-07-22 ~13:42Z — track self-improvement protocol + agents-never-operate law (verbatim)
+
+tell the agent that did the drugs track to keep going (ill add a /goal to it) to continue on expanding and improving it's track, do autoresearch loop to improve correctness of confidence levels, and to deepend different categories or subcategories of drugs and to be able to detect them all better - 
+
+think about the process of how you give that subagnet to imrpove its own track and create a mini skill in this projects folder (not global, or remind me to make global later, we need to undersand how to make it more generic for other usecases where tracks are a thing), and it would be called to tell the track subagent to improve itself - and that skill in itself should have and run a darwin skill and autoresearch improvement cycle (or several) to improve the way we tell subagents how to improve their own tracks, measureing our success based on the change in rate of improvement of the subagents (inner loop, we are the outerloop observers) - does all of that makes sense?
+
+and i hope this goes without saying - the agents can check (sample selective) images and see them themselves in order for them to conduct tests - but they should never be used for actually doing the process of categorization or whatever the track does - everything has to be programatic and be able to run the same with no agents afterwards - agents shouldnt waste their tokens on verifying images for tracks themselves if that makes sense - make sure that all working subagents are working on improving the system and or at indentifying or improving their tracks and that they are not really wasting tokens

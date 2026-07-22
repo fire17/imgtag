@@ -46,6 +46,23 @@ Re-scoring a track over 10k images is one matvec pass (~ms) + one file swap. The
 loop may run per-track autoresearch (better prompts, better teachers, better fits) under
 the bench gates; a track upgrade that regresses its acceptance set is reverted.
 
+**T4 — Agents verify, never operate (user law 13:42Z).** The runtime is 100% programmatic:
+no agent is ever in the scoring/categorization path, and the system runs identically with
+zero agents present. Agents may LOOK at selectively-sampled images only to conduct tests,
+diagnose failures, and calibrate — never to perform the track's job, never to bulk-verify.
+Token spend rule: every working agent is either improving the system or improving its
+track; eyeballing beyond selective test samples is waste and gets stopped.
+
+## The improvement loops (T3 operationalized)
+
+- **Inner loop**: a track agent improves its own track under `.claude/skills/improve-track`
+  (the project-local briefing protocol): autoresearch → refit → acceptance gates → sidecar
+  re-score → measured delta reported to the ledger.
+- **Outer loop**: the conductor observes `.deify/track-improvement-ledger.json` (per
+  invocation: track, metric deltas, wall/tokens spent) and darwin-improves the BRIEFING
+  PROTOCOL itself — fitness = the change in rate of improvement across invocations, not
+  any single track's score. The skill self-improves; the tracks inherit the better briefs.
+
 ## Adding track #101
 
 `imgtag track add <category>` (spec entry + optional fitted head) → one scoring pass
