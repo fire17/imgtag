@@ -111,13 +111,35 @@ def test_search_latency():
     and always print the measured value; never quote a cold number as the B20 result.
     """
     warm = _daemon_running()
-    _, ms = run("search", "vehicle", "--json")  # discard first (page cache)
-    _, ms = run("search", "parked cars at night", "--json")
+    run("search", "vehicle", "--json")  # discard the first (may be the call that starts the daemon)
+    p, ms = run("search", "parked cars at night", "--json")
+    served = parsed(p).get("served_by")
     limit, label = (LIMITS["search"], "B20 warm-daemon") if warm else (2000, "B13 cold-process")
-    print(f"search latency: {ms:.0f}ms (daemon={'warm' if warm else 'absent'}, limit {limit}ms {label})")
+    print(f"search latency: {ms:.0f}ms served_by={served} (limit {limit}ms {label})")
+    if warm:
+        # ADR-5's warm path is only real if the daemon actually answered — an in-process
+        # fallback that happens to be fast is not the budgeted path.
+        assert served == "daemon", f"daemon resident but query served_by={served!r} (ADR-13 client path)"
     assert ms <= limit, f"search took {ms:.0f}ms > {limit}ms ({label})"
     if not warm:
         pytest.skip(f"B20 ceiling untested: no resident daemon; cold path {ms:.0f}ms ≤2s (B13) only")
+
+
+def _settle(job_id, timeout=60.0):
+    """Block until a job leaves queued/running — deleting a dataset out from under a live
+    writer is its own contract (see test_delete_during_active_job_is_safe); tests that only
+    want cleanup must not race it."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        p, _ = run("info", "--job", job_id, "--json")
+        try:
+            state = json.loads(p.stdout).get("state")
+        except Exception:
+            return None
+        if state not in ("queued", "running"):
+            return state
+        time.sleep(0.25)
+    return "timeout"
 
 
 @needs_cli
@@ -144,7 +166,46 @@ def test_index_returns_job_id_without_blocking(tmp_path):
         assert job["state"] in ("queued", "running", "done", "failed", "aborted")
         assert set(job) >= {"done", "inflight", "failed", "total"}
     finally:
+        _settle(doc.get("job_id"))
         run("manage", "delete", ds, "--yes", "--json")
+
+
+@needs_cli
+def test_delete_during_active_job_is_safe(tmp_path):
+    """A delete issued while an index job is in flight must be UNAMBIGUOUS.
+
+    Either the CLI refuses it (exit 3, dataset-locked — the documented code) or it deletes
+    and the dataset STAYS deleted. What it must never do is report success/unknown and then
+    let the detached writer recreate the dataset: the user's delete would be silently undone
+    and the recreated shards are orphan bytes by B12's definition.
+    """
+    from pathlib import Path
+
+    from PIL import Image
+
+    src = tmp_path / "imgs"
+    src.mkdir()
+    for i in range(60):
+        Image.new("RGB", (128, 128), (i % 255, 80, 160)).save(src / f"{i}.jpg")
+    ds = "imgtag-delete-race-test"
+    root = Path.home() / ".imgtag" / "datasets" / ds
+    # The window is timing-dependent (queued vs running writer) — probe it a few times so a
+    # lucky ordering cannot report the race as fixed.
+    for attempt in range(3):
+        p, _ = run("index", str(src), "--dataset", ds, "--json")
+        job_id = parsed(p).get("job_id")
+        try:
+            d, _ = run("manage", "delete", ds, "--yes", "--json")
+            assert d.returncode in (0, 3), (
+                f"attempt {attempt}: delete during an in-flight job exited {d.returncode} "
+                f"(expected 0, or 3 dataset-locked); stderr={d.stderr[:200]}"
+            )
+            _settle(job_id)
+            if d.returncode == 0:
+                assert not root.exists(), f"attempt {attempt}: deleted dataset resurrected by the in-flight job"
+        finally:
+            _settle(job_id)
+            run("manage", "delete", ds, "--yes", "--json")
 
 
 @needs_cli
