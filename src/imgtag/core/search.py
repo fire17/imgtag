@@ -400,12 +400,13 @@ class Searcher:
         def best(sl):  # max similarity over a concept group (empty group -> -inf)
             return cos[:, sl].max(1) if sl.stop > sl.start else np.full(n, -1e9, np.float32)
 
+        from .store import resolve_track_cfg  # ONE loader, shared with store-side (no split-brain)
+
         model_id = snap.manifest.get("model_id", "")
-        base_model = model_id.rsplit("-", 1)[0] if model_id else ""
         cats, counts = {}, {}
         for name, g in groups.items():
-            # fitted head (per-model tau/platt) wins over the spec's declarations
-            cfg = {**spec[name], **fitted_head(name, base_model), **fitted_head(name, model_id)}
+            # fitted-file-WINS precedence, byte-identical to store-side derivation
+            cfg = resolve_track_cfg(name, model_id, spec[name])
             tiers = [t for t in TIER_ORDER if t in g and g[t].stop > g[t].start]
             if not tiers:
                 continue

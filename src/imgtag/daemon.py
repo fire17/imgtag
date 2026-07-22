@@ -556,7 +556,10 @@ class Handler(BaseHTTPRequestHandler):
             raise FileNotFoundError(f"no app file {rel!r} (b-app has not landed it yet)")
         ctypes = {".html": "text/html", ".js": "text/javascript", ".css": "text/css",
                   ".json": "application/json", ".svg": "image/svg+xml", ".png": "image/png"}
-        self._send(200, f.read_bytes(), ctypes.get(f.suffix, "application/octet-stream"))
+        # no-store: the app is served live during feel-testing, so a stale cached app.js
+        # after a b-app commit must never masquerade as "the feature didn't ship".
+        self._send(200, f.read_bytes(), ctypes.get(f.suffix, "application/octet-stream"),
+                   {"Cache-Control": "no-store"})
 
 
 class UnixHTTPServer(ThreadingHTTPServer):

@@ -615,12 +615,12 @@ def test_content_track_emits_a_per_prompt_label(home, monkeypatch):
 def test_fitted_head_file_overrides_spec_thresholds(home, monkeypatch, tmp_path):
     """Per-model tau lives in data/moderation/<category>-<model_id>.json (TRACKS.md T3),
     and wins over the spec — so a refit is a file swap, no code change."""
+    import imgtag.core.store as ST
     fitdir = tmp_path / "moderation"
     fitdir.mkdir()
     (fitdir / "weapons-fake.json").write_text(json.dumps(
         {"calibration": "fitted", "scorer": "margin", "tau": -9.9, "tau_review": -9.9}))
-    monkeypatch.setattr(S, "DATA", tmp_path)
-    S.fitted_head.cache_clear()
+    monkeypatch.setattr(ST, "_DATA", tmp_path)  # the shared loader reads store._DATA
     spec = {"version": 2, "categories": {"weapons": {
         "label": "w", "violation": ["cat"], "review": ["dog"], "negatives": ["sky"],
         "scorer": "margin"}}}
@@ -629,7 +629,6 @@ def test_fitted_head_file_overrides_spec_thresholds(home, monkeypatch, tmp_path)
     t = S.Searcher(home, backend=be).track_scores("d1")
     assert t["categories"]["weapons"]["calibration"] == "fitted"  # came from the head file
     assert int(t["counts"]["weapons"]["violation"]) > 0
-    S.fitted_head.cache_clear()
 
 
 def test_image_tracks_lists_every_track_ranked(home, monkeypatch):
