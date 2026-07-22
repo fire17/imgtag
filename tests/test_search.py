@@ -730,8 +730,10 @@ def test_derive_unfitted_shared_contract():
     Contract: per-tier margins -> tiers by exceedance + absolute-margin floor, fail-open."""
     n = 100
     # a genuine tail (the z-floor is 3 sigma): rows 0-1 strongly violation, 2-3 review, rest ~0
-    viol = np.zeros(n, np.float32); viol[:2] = 0.20; viol[2:4] = -0.05
-    rev = np.zeros(n, np.float32); rev[2:4] = 0.20; rev[:2] = -0.05
+    viol = np.zeros(n, np.float32)
+    viol[:2], viol[2:4] = 0.20, -0.05
+    rev = np.zeros(n, np.float32)
+    rev[2:4], rev[:2] = 0.20, -0.05
     r = S.derive_unfitted({"violation": viol, "review": rev})
     assert r["tiers"] == ["violation", "review"]
     v, rv = r["is"]["violation"], r["is"]["review"]
@@ -744,3 +746,36 @@ def test_derive_unfitted_shared_contract():
     # corpus_stats override is honoured (reuse precomputed mean/std)
     r3 = S.derive_unfitted({"violation": viol}, corpus_stats={"violation": (0.0, 0.05)})
     assert r3["is"]["violation"][:2].all()
+
+
+def test_head_arbitrated_track_consumed_not_rebanded(home, monkeypatch):
+    """A track that declares scorer='margin_arbitrated' is scored by its HEAD's (p, tier)
+    — the head owns the arbitration (drugs' vape->review); the reader never re-bands. The
+    calibration LABEL is never relabeled to 'fitted' (stays proxy-fitted)."""
+    class FakeHead:
+        model_sha = "f" * 64
+        def probs(self, emb):
+            n = len(emb)
+            tiers = np.array(["none"] * n, dtype=object)
+            tiers[0] = "review"   # the head arbitrates row 0 to review (e.g. a vape)
+            tiers[1] = "violation"
+            p = np.zeros(n, np.float32)
+            p[0] = 0.6
+            p[1] = 0.8
+            return p, tiers
+    import imgtag.core.search as CS
+    spec = {"version": 2, "categories": {"drugs": {
+        "label": "d", "violation": ["car"], "review": ["boat"], "negatives": ["sky"],
+        "scorer": "margin_arbitrated", "calibration": "proxy-fitted",
+        "gate_safe": True, "evidence_cap": 0.947}}}
+    monkeypatch.setattr(CS, "tracks", lambda: spec)
+    be = build(home, "d1", ["car"] * 3 + ["misc"] * 5)
+    s = searcher(home, be)
+    monkeypatch.setattr(s, "_track_head", lambda *a, **k: FakeHead())
+    t = s.track_scores("d1")
+    c = t["categories"]["drugs"]
+    # tiers come straight from the head (row0 review, row1 violation), not re-banded
+    assert c["is"]["review"][0] and c["is"]["violation"][1]
+    assert int(c["is"]["violation"].sum()) == 1 and int(c["is"]["review"].sum()) == 1
+    # label NEVER relabeled to fitted, enforcement stays false
+    assert c["calibration"] == "proxy-fitted" and c["enforcement_ready"] is False

@@ -339,6 +339,7 @@ class Searcher:
         self._tags: dict[str, TagTable | None] = {}
         self._tracks: dict[str, tuple[tuple, dict]] = {}  # moderation scores per generation
         self._track_vecs: dict = {}
+        self._heads: dict = {}  # arbitrated track heads (drugs), cached per (category, model_sha)
         self._qvec = lru_cache(maxsize=cache)(self._embed_uncached)
         self._own_backend = backend is None  # only drop what we loaded ourselves
         self.text_loaded = False
@@ -391,6 +392,56 @@ class Searcher:
         return self._tags[sha]
 
     # -- moderation ------------------------------------------------
+    def _track_head(self, category: str, cfg: dict, manifest: dict):
+        """Load a track's arbitrated head (drugs), cached per model. Returns None if the
+        head module/model is unavailable — the caller falls back to prompt-bank derivation,
+        never breaks. The head owns the tobacco-vs-drug arbitration (consume, never re-band)."""
+        key = (category, manifest.get("model_sha"))
+        if key in self._heads:
+            return self._heads[key]
+        head = None
+        try:
+            from importlib import import_module
+
+            mod = import_module(f"imgtag.moderation.{category}")
+            loader = getattr(mod, f"load_{category}_head", None)
+            if loader is not None:
+                head = loader(backend=self._backend) if self._backend else loader()
+                if head is not None and getattr(head, "model_sha", None) not in (None, manifest.get("model_sha")):
+                    head = None  # sha-guard: never a wrong-model head
+        except Exception:
+            head = None
+        self._heads[key] = head
+        return head
+
+    def _head_cats(self, name: str, cfg: dict, head, snap, tiers: list, g) -> dict:
+        """Build the per-category record from a head's arbitrated (p, tier) — the head is
+        authoritative, so tiers come straight from it (no re-banding)."""
+        p, tier_arr = head.probs(np.asarray(snap.emb, np.float32))
+        p = np.asarray(p, np.float32)
+        tier_arr = np.asarray([str(t) for t in tier_arr])
+        is_masks = {t: (tier_arr == t) for t in tiers}
+        # per-tier p = the head's p where it assigned that tier (0 elsewhere), for the panel
+        prob = {t: np.where(is_masks[t], p, 0.0).astype(np.float32) for t in tiers}
+        n = len(snap.ids)
+        return {
+            "tiers": tiers, "p": prob, "is": is_masks,
+            "moderation": not cfg.get("content_track") and not set(tiers) <= CONTENT_TIERS,
+            # The head's arbitrated tiers are authoritative (it GATES via gate_safe +
+            # evidence_cap, independently spread-verified). But the calibration LABEL is
+            # NEVER relabeled to "fitted" — it stays exactly what the spec declares
+            # ("proxy-fitted"), so a caller shows the honest caution, never full-calibrated
+            # confidence. enforcement_ready stays false regardless.
+            "calibration": cfg.get("calibration", "unfitted"),
+            "spec_calibration": cfg.get("calibration", "unfitted"),
+            "enforcement_ready": bool(cfg.get("enforcement_ready", False)),
+            "neighbour": None,
+            # a head owns its own labels; expose none here (its `why`/`group` ride via score())
+            "argc": {t: np.full(n, g[t].start, int) for t in tiers},
+            "labels": {t: None for t in tiers},
+            "base": {t: g[t].start for t in tiers},
+        }
+
     def track_scores(self, dataset: str) -> dict:
         """Per-image scores for every track, over whatever TIERS its spec declares.
 
@@ -455,6 +506,19 @@ class Searcher:
             cfg = {**spec[name], **fit(name, base_model), **fit(name, model_id)}
             tiers = [t for t in TIER_ORDER if t in g and g[t].stop > g[t].start]
             if not tiers:
+                continue
+            # HEAD-ARBITRATED tracks (spec opts in with scorer="margin_arbitrated", e.g.
+            # drugs' tobacco routing vape->review): CONSUME the head's (p, tier), never
+            # re-band from tau — re-banding a single margin resurrects the head's fixed
+            # defects (the user's vape->review policy is not approximable). The head owns
+            # arbitration; my prompt-bank derivation is only the fallback for tracks without
+            # one. gate_safe + evidence_cap were independently spread-verified (2026-07-22:
+            # non-saturated, FP 0.45% on 2000 real negatives), so a proxy-fitted head here
+            # may gate, label stays "proxy-fitted", enforcement_ready stays false.
+            head = self._track_head(name, cfg, snap.manifest) if cfg.get("scorer") == "margin_arbitrated" else None
+            if head is not None:
+                cats[name] = self._head_cats(name, cfg, head, snap, tiers, g)
+                counts[name] = {t: int(cats[name]["is"][t].sum()) for t in tiers}
                 continue
             # A PROXY fit does not gate (ruling after b-app's audit: the drugs proxy
             # logistic produced 218 benign violations at a saturated p=0.99 — a fit worse
