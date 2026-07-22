@@ -171,3 +171,37 @@ def test_nothing_that_passes_tau_leaves_the_queue():
     sc = D.DrugsScorer.build(FakeBackend(), config={"tau": 0.0, "tau_review": 1.0})
     emb = _unit(sc.tob[:2])
     assert set(sc.score(emb)["tier"]) <= {"violation", "review"}
+
+
+# ── refit v2: the four measured defects b-daemon/b-app reported, each pinned ───────────
+def test_review_band_is_below_violation():
+    """Defect #1: tau_review > tau made the review tier unreachable. Never again."""
+    assert D.TAU_REVIEW < D.TAU
+    assert D.track_spec()["tau_review"] < D.track_spec()["tau"]
+    # and a config that tries to invert it is repaired, not served
+    pol = D.policy({"tau": 0.02, "tau_review": 0.5})
+    assert pol["tau_review"] < pol["tau"]
+
+
+def test_evidence_cap_makes_p099_unreachable():
+    """Defect #4: 218 violations all at p=0.99. The cap is (n+1)/(n+2); nothing may exceed it."""
+    assert D.P_MAX == (D.N_POSITIVES + 1) / (D.N_POSITIVES + 2)
+    assert D.P_MAX < 0.95
+    sc = D.DrugsScorer.build(FakeBackend())
+    # even an embedding identical to a positive concept cannot reach 0.99
+    out = sc.score(_unit(sc.pos[:3]))
+    assert out["p"].max() <= D.P_MAX + 1e-9
+
+
+def test_serrated_leaf_and_benign_object_negatives_present():
+    """Defect #3: raspberry leaf scored p=0.92. The FP families are now named negatives."""
+    blob = " ".join(D.BACKGROUND)
+    for fam in ("raspberry", "japanese maple", "serrated", "fire hydrant", "soap bubbles"):
+        assert fam in blob, f"missing b-app FP family: {fam}"
+
+
+def test_n_positives_matches_labels_file():
+    """The evidence cap is only honest if N_POSITIVES tracks the real label count."""
+    p = Path(__file__).resolve().parents[1] / "data/drug-probe/labels.json"
+    if p.is_file():
+        assert D.N_POSITIVES == len(json.loads(p.read_bytes())["drug"])

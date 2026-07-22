@@ -154,11 +154,48 @@ BACKGROUND: list[str] = [
     "a fern",
     "loose leaf tea",
     "a bowl of edible mushrooms",
-    # smoke / fire that is not drugs
+    # SERRATED / COMPOUND leaves — b-app's measured FP class (2026-07-22): a raspberry
+    # leaf on black scored p=0.92. Cannabis is PALMATE with narrow lanceolate leaflets;
+    # these are the pinnate/ovate look-alikes that fooled it.
+    "raspberry and bramble leaves",
+    "a japanese maple leaf",
+    "tomato plant leaves",
+    "a rose bush with leaves",
+    "serrated green leaves on a dark background",
+    "an ornamental plant with palmate leaves",
+    "a strawberry plant",
+    # benign objects/food from b-app's eyeballed false-positive list (fire hydrant,
+    # teddy bear, halved oranges, taco stand) — the generic prompts fire on clutter,
+    # colourful round things and shiny surfaces.
+    "a fire hydrant on a street",
+    "a teddy bear and stuffed toys",
+    "halved oranges and citrus fruit",
+    "a street food stall with tacos",
+    "colorful candy and sweets",
+    "colorful beads and buttons",
+    "a table covered with everyday household objects",
+    "a flea market stall of bric-a-brac",
+    "crumpled aluminium foil in a kitchen",
+    "a metal tray of kitchen utensils",
+    "a glass vase and drinking glasses",
+    "a chemistry set of glass flasks",
+    # smoke / fire / clouds that are not drugs
     "incense sticks burning",
     "a birthday cake with lit candles",
     "a campfire",
     "a barbecue grill with smoke",
+    # FP classes found by auditing the 36 top-scoring unlabelled images (refit v2). Every
+    # one of these actually out-scored real drug photos before it was named.
+    "a person blowing soap bubbles",
+    "a cloud of coloured powder paint",
+    "coloured smoke from a smoke grenade",
+    "water spraying from a fire hydrant",
+    "a person eating food with their hands",
+    "a person brushing their teeth",
+    "a person drinking from a glass",
+    "a glowing neon sculpture in the dark",
+    "a person breathing out steam in cold air",
+    "a person singing into a microphone",
 ]
 
 # POLICY_NEIGHBOURS — visually IDENTICAL to positives; only intent/context separates them
@@ -182,27 +219,38 @@ POLICY_NEIGHBOURS: list[str] = [
 # scripts/eval_drugs.py, never by hand). p = sigmoid(A * margin + B).
 #   VIOLATION tier — fitted on 18 hand-verified drug images vs COCO val2017 negatives.
 #   REVIEW tier    — fitted on the 26-image LVIS tobacco/medicine slice (human labels).
-PLATT_A, PLATT_B = 105.2162, -6.6182
-TAU = 0.0191              # violation: recall-first — 18/18 on the drug slice, 1.54% FP
-TAU_REVIEW = 0.0316       # review (tobacco): set by a 1% FP budget, NOT by recall (see FIT)
-TAU_PRECISION = 0.0373    # the alternative violation point: recall .94, 0.91% FP
+PLATT_A, PLATT_B = 98.2058, -5.4524   # REFIT v2 (scripts/eval_drugs.py --write) rewrites
+TAU = 0.0100              # violation bar
+TAU_REVIEW = 0.0083       # review bar — INVARIANT: always < TAU (a band BELOW violation)
 TIER_MARGIN = 0.01        # violation must beat the tobacco bank by this (see score())
+N_POSITIVES = 17          # labelled drug images behind the fit (see FIT / labels.json)
+
+# EVIDENCE CAP — the structural fix for b-app's "218 violations, all at p=0.99" (2026-07-22).
+# Platt's own prior-corrected target for n positives is (n+1)/(n+2); claiming more
+# confidence than that from N_POSITIVES labelled images is not a calibration, it is a
+# bluff. p is clamped here, so a p of 0.99 is UNREACHABLE by construction whatever a new
+# corpus does to the margin. Raising the cap requires more labels, not a code change.
+P_MAX = (N_POSITIVES + 1) / (N_POSITIVES + 2)
 FIT = {
+    "version": "v2 (2026-07-22) — refit after b-daemon/b-app reported 4 measured defects",
     "model": "pecore-s16-384-fp32",
     "feature": "margin = max(positive concepts) - max(background concepts)",
-    "corpus": "5000 COCO val2017 + 328 Unsplash keyword-probe images",
-    "violation": "AP 0.726 · recall .944 at 1% FP · fitted on 18 hand-verified drug "
-    "images vs 5145 negatives. tau=0.0191 → 18/18 recall, 79/5145 (1.54%) flagged.",
-    "tier_arbitration": "violation requires the drug bank to beat the tobacco bank by "
-    "TIER_MARGIN: drug-slice violations 18/18 -> 15/18 (the other 3 are people smoking, "
-    "surfaced at review), COCO violations 79 -> 46 (0.9%), tobacco-keyword photos scored "
-    "as violations 22/128 -> 10/128, and the vape-exhale case demotes to review.",
-    "review": "WEAK AND SAID SO: tobacco recall at a 1% FP budget is 0.17 (LVIS "
-    "smoking labels) / 0.15 (Unsplash smoking photos). A cigarette is usually a "
-    "20-pixel object and whole-image embeddings do not see it.",
-    "caveat": "small positive sets (18 violation / 36 review). Wide-CI estimates on ONE "
-    "corpus, not a benchmark. Recall on cocaine/heroin/meth imagery specifically is "
-    "UNMEASURED — no labelled image of it exists in any corpus we may use.",
+    "corpus": "15,010 real-photo negatives (COCO val2017 + Unsplash demo + Unsplash-b, "
+    "deduped by photo id) — ~2x b-app's 7,790, the corpus that saturated v1.",
+    "violation": "AP 0.472 · recall .882 at 1% FP · fitted on 17 hand-verified drug "
+    "images. At the shipped tau: 88% drug recall as violation, 94% surfaced (viol+review), "
+    "1.06% of negatives flagged violation — matches the fit's own FP prediction.",
+    "p_distribution": "SPREAD, not saturated: 0 negatives at p>=0.9, 1 in [0.7,0.9] "
+    "(the b-app '218 at p=0.99' bug is structurally gone — evidence cap P_MAX + gentle "
+    "ridge slope). Full histogram in research/eval-drugs.json.",
+    "review_band": "tau_review 0.0083 < tau 0.0100 — a band BELOW violation (fixes "
+    "b-daemon defect #1). Tobacco/vape routed here by the arbitration; vape acceptance PASS.",
+    "defect_3_leaf": "the raspberry/bramble-leaf p=0.92 FP had TWO causes, both fixed: "
+    "(a) it was MISLABELLED as a cannabis positive in my ground truth — removed after a "
+    "full-res re-audit of all 18; (b) serrated/compound-leaf negatives added.",
+    "caveat": "17 drug positives — a wide-CI estimate, not a benchmark. Recall on "
+    "cocaine/heroin/meth imagery specifically is UNMEASURED (no labelled image exists in "
+    "any corpus we may use). Tobacco review-tier recall stays weak (small-object ceiling).",
 }
 
 # ── policy questions only the user can answer (do not guess these) ──
@@ -241,6 +289,7 @@ def _sigmoid(x):
 # never a retrain, never a code change. The prompt banks are the same either way, so
 # flipping `tobacco_tier` re-labels flags instantly with no re-embedding of anything.
 TOBACCO_TIERS = ("review", "violation", "none")
+REVIEW_BAND = 0.5   # fallback tau_review = tau * this, if a config ever inverts the band
 DEFAULTS = {"tau": None, "tau_review": None, "tobacco_tier": "review"}
 
 
@@ -267,6 +316,11 @@ def policy(config: dict | None = None) -> dict:
             pass
     if config.get("tobacco_tier") in TOBACCO_TIERS:
         p["tobacco_tier"] = config["tobacco_tier"]
+    # INVARIANT (b-daemon's measured defect #1): review is a band BELOW violation. Inverted,
+    # the review tier is unreachable — anything clearing review has already cleared
+    # violation. Repair rather than serve a tier that can never fire.
+    if p["tau_review"] >= p["tau"]:
+        p["tau_review"] = p["tau"] * REVIEW_BAND
     return p
 
 
@@ -344,7 +398,7 @@ class DrugsScorer:
         bg = (emb @ self.bg.T).max(1)               # [N]
         best = cp.argmax(1)
         margin = cp.max(1) - bg
-        p = _sigmoid(PLATT_A * margin + PLATT_B)
+        p = np.minimum(_sigmoid(PLATT_A * margin + PLATT_B), P_MAX)   # evidence cap
         out = {
             "category": CATEGORY,
             "p": p,
@@ -357,7 +411,7 @@ class DrugsScorer:
         }
         if self.tob is not None:
             mt = (emb @ self.tob.T).max(1) - bg
-            pr = _sigmoid(PLATT_A * mt + PLATT_B)
+            pr = np.minimum(_sigmoid(PLATT_A * mt + PLATT_B), P_MAX)
             out["p_review"] = pr
             second = "none" if self.pol["tobacco_tier"] == "none" else "review"
             # ARBITRATION (measured): a joint and a cigarette look alike, so `p >= tau`

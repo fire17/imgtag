@@ -99,6 +99,33 @@ max-subtracted. The reason is that the confusables split into two kinds:
 accident. (Prompt bug found the same way: `"a water pipe used to smoke drugs"` fires on
 literal bathroom plumbing — replaced by `"a glass bong with a bowl and a stem"`.)
 
+## 3a. REFIT v2 — four measured defects from integration, all fixed (2026-07-22)
+
+b-daemon folded the v1 spec into the live reader and b-app ran it on a real 7,790-image
+index. Four defects came back; all four are now fixed and pinned by tests. Refit corpus:
+**15,010 deduped real-photo negatives** (COCO val2017 + Unsplash-demo + Unsplash-b) — ~2×
+b-app's pool, deliberately including the corpus that saturated v1.
+
+| # | Defect (measured) | Root cause | Fix | Verify |
+|---|---|---|---|---|
+| 4 | **218 violations all at p=0.99**, first 21 all benign (fire hydrant, teddy bear, halved oranges) | logistic slope A≈105 fit on 17 positives → razor-thin p=0.02→0.99 band over margin [0.025,0.106]; any heavier tail saturates | **evidence cap** `P_MAX=(n+1)/(n+2)=0.944` (p≥0.95 unreachable by construction) + **ridge-regularized** gentler slope, fit on the full real pool | p-histogram now SPREADS: **0 negatives at p≥0.9**, 1 in [0.7,0.9]; violation rate **1.06%** ≈ the fit's own prediction |
+| 3 | **raspberry/bramble leaf on black → p=0.92** | TWO causes: (a) that image was **mislabelled as a cannabis positive in my ground truth** — a contaminated positive taught "any serrated leaf = cannabis"; (b) no compound-leaf negatives | full-res re-audit of all 18 positives (1 mislabel found + removed → 17); serrated/compound-leaf + benign-object negatives added | leaf → **none, p=0.0017**; true cannabis bud unchanged (zero recall cost) |
+| 1 | **tau_review (0.0316) > tau (0.0191)** → review tier unreachable | review bar set by an independent FP budget, not as a band | review is now a **band BELOW violation**; asserted in `policy()` and a test | tau_review **0.0083 < tau 0.0100** |
+| 2 | a vape → violation (policy says review) | `p≥tau` alone can't separate "smoking a joint" from "smoking a cigarette" | tier arbitration (§3b) + vape in the acceptance suite | vape → **review** (acceptance PASS) |
+
+**Also found and fixed — a dedupe/labelling bug the bigger corpus exposed:** the Unsplash
+corpora *contain* the drug-probe photos (same photo ids), so a labelled cannabis image was
+being counted as a NEGATIVE by whichever corpus indexed it first (it was atop the "false
+positives" — the very symptom). The eval now maps drug-probe labels first, so a positive
+keeps its label wherever it appears.
+
+**Post-refit operating point** (shipped τ=0.0100, full 15k pool): drug recall **0.88 as
+violation / 0.94 surfaced** (violation+review), **1.06% of negatives** flagged violation +
+0.69% review, **0 tobacco images wrongly called a violation**. AP fell 0.73→0.47 vs the v1
+number — because v1's 0.73 was measured on 5k COCO only; on 15k diverse real photos with the
+mislabel removed, 0.47 is the honest number. The six-image acceptance suite (our two: vape,
+leaf) passes. Full histogram + numbers: `research/eval-drugs.json`.
+
 ## 3b. Tier arbitration — the vaping case, resolved (2026-07-22, after b-daemon's report)
 
 b-daemon's v0 scaffold flagged **a woman vaping in a car at p=0.964** as a drugs violation.
