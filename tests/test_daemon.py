@@ -141,9 +141,11 @@ def test_search_endpoint_provenance_and_no_match(live):
     assert r["coverage"] == {"indexed": 30, "total": 30}
 
     # unfitted calibration on this fixture -> fail-open: a ranking, never a false no-match
+    # "boat" is orthogonal to this cat/car/tree corpus -> nothing dense-similar -> honest
+    # no-match via the global dense floor (holds even while the free-text logistic is
+    # unfitted; b-bench's rule). A query WITH dense neighbours would fail open instead.
     st, r = get(live, "/api/search?q=boat&dataset=d1")
-    assert st == 200 and r["calibration"] == "unfitted"
-    assert r["hits"] and r["no_match"] is False
+    assert st == 200 and r["hits"] == [] and r["no_match"] is True
 
 
 def test_datasets_and_jobs_endpoints(live):

@@ -87,14 +87,20 @@ def test_provenance_complete_over_20_queries(home):
     assert seen >= 20
 
 
-def test_no_match_is_honest_only_when_calibration_is_fitted(home):
-    """A query orthogonal to every row returns zero hits AND says so — but only once a
-    real fit exists to justify the veto."""
-    be = build(home, "d1", ["cat"] * 20)
+def test_no_match_is_honest_via_calibrated_tag_or_dense_floor(home):
+    """Two honest no-match routes. (a) A calibrated tag present but not cleared -> gated
+    veto, calibration "fitted". (b) A query orthogonal to everything -> dense-floor veto,
+    holds even when no calibrated tag engaged (calibration honestly "unfitted")."""
+    be = build(home, "d1", ["cat"] * 18 + ["car"] * 2)
     write_tags(home, be.model_sha, ["cat"], ["calibrated"], [[-12.0, 6.0]], [0.5])
-    r = searcher(home, be).search("boat", "d1", k=5)
-    assert r["calibration"] == "fitted"
-    assert r["hits"] == [] and r["no_match"] is True
+    s = searcher(home, be)
+    # (a) "cat" IS the calibrated tag and fires -> a real fitted result
+    r = s.search("cat", "d1", k=5)
+    assert r["calibration"] == "fitted" and r["hits"]
+    # (b) "boat" is orthogonal to cat+car -> honest no-match via the dense floor; the label
+    # is "unfitted" because no calibrated tag gated it (the veto came from density, not tau)
+    r = s.search("boat", "d1", k=5)
+    assert r["hits"] == [] and r["no_match"] is True and r["calibration"] == "unfitted"
 
 
 def test_unfitted_calibration_fails_OPEN(home):
@@ -105,11 +111,16 @@ def test_unfitted_calibration_fails_OPEN(home):
     assert r["calibration"] == "unfitted"
     assert len(r["hits"]) == 5 and r["no_match"] is False
     assert r["hits"][0]["p"] >= r["hits"][-1]["p"]  # still a ranking, just an unjudged one
-    # an unfitted TAG table does not rescue the gate either
+    # an unfitted TAG table does not rescue the gate: a query with real dense neighbours
+    # ("car") still fails open (ranks), never a false no-match
     write_tags(home, be.model_sha, ["car"], ["calibrated"], [None], [None])
     s = searcher(home, be)
-    r = s.search("boat", "d1", k=3)
+    r = s.search("car", "d1", k=3)
     assert r["calibration"] == "unfitted" and r["hits"] and r["no_match"] is False
+    # but a query with NOTHING dense-similar ("boat" is orthogonal here) is an honest
+    # no-match via the global dense floor — that holds even unfitted (b-bench's rule)
+    r = s.search("boat", "d1", k=3)
+    assert r["no_match"] is True and r["hits"] == []
 
 
 def test_determinism_ties_broken_by_image_id(home):

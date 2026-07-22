@@ -57,6 +57,13 @@ Z_A, Z_B = 1.6, -4.0  # the Z-SCALE pair: p = sigmoid(Z_A*z + Z_B). Used by the 
 # feature. Kept SEPARATE from (TEXT_A, TEXT_B) because the two features live on different
 # scales — feeding a z-score through the cosine pair saturates every probability to 1.0.
 TAU = 0.5  # probability floor for "this is a match"
+# Global DENSE floor (raw cosine, model-scale). Below it NOTHING in the corpus is even
+# remotely similar, so an honest no-match is safe REGARDLESS of calibration (b-bench's
+# recommendation: honest-no-match only when no calibrated tag passes AND dense < floor).
+# Above it a free-text query returns its ranking recall-first — a real query like "a red
+# sports car" (cos ~0.28) shows cars instead of a false no-match, since the free-text
+# logistic is only my measured default until a CAL-SET text fit lands (tags.json has none).
+GLOBAL_COS_FLOOR = 0.18
 THETA_SYN = 0.90  # near-tag rule: inherit a tag's calibration only at cos >= theta_syn
 K_STD = 3.0  # dataset-layer effective tau = max(tau_tag, mean + K_STD*std)
 # Counting a tag as PRESENT for the ALL-SOME-ANY spectrum is ranking, not gating, and gets
@@ -262,6 +269,7 @@ class TagTable:
         self.theta_syn = float(meta.get("theta_syn", THETA_SYN))
         self.text_logistic = tuple(meta.get("text_logistic") or (TEXT_A, TEXT_B))
         self.text_feature = meta.get("text_feature", TEXT_FEATURE)
+        self.text_fitted = "text_logistic" in meta  # a real CAL-SET fit for the FREE-TEXT path
         # A fit exists only if someone FITTED it: an explicit text logistic in the file, or
         # at least one tag carrying both a Platt pair and a tau (b-bench's CAL-SET output).
         self.fitted = bool(meta.get("text_logistic")) or any(
@@ -772,6 +780,7 @@ class Searcher:
         n = len(snap.ids)
         if n == 0:
             return {"hits": [], "gated": False, "indexed": 0, "collapsed": 0, "best_p_text": 0.0,
+                    "best_cos": 0.0, "dense_dead": True, "text_fitted": False,
                     "text_tower": "skipped", "load_ms": 0.0, "terms": [],
                     "calibration": "unfitted"}
         table = self.tags(man)
@@ -779,7 +788,10 @@ class Searcher:
         # fit for this model_sha the engine returns the honest ranking and says so; it does
         # not pretend that "nothing matched" when what it really means is "I cannot judge".
         fitted = bool(table and table.fitted)
-        floor = TAU if fitted else -1.0
+        # The free-text path may hard-gate to no-match ONLY when its logistic is a real
+        # CAL-SET fit. b-bench fitted the TAG path (per-tag tau) but not the free-text one,
+        # so text stays recall-first: rank, don't veto (fail-open law).
+        text_fitted = bool(table and getattr(table, "text_fitted", False))
         cands = self._name_candidates(table, query) if table is not None else []
         groups = self.concepts(table, query) if table is not None else []
         if groups:
@@ -874,10 +886,24 @@ class Searcher:
         # the tiebreak. p is in [0,1), so `matched + p` orders both in one pass.
         rank = matched.astype(np.float32) + (mean_p if n_concepts else p)
         top = np.argpartition(-rank, min(k, n) - 1)[:k] if k < n else np.arange(n)
+        # Per-row keep mask (recall-first, b-bench). A row shows if it is dense-similar
+        # (raw cos >= the global floor — the honest display floor for an unfitted text
+        # path) OR a fitted threshold accepts it. So "a red sports car" shows the cars it
+        # is genuinely near, while "boat" over cats shows nothing (honest no-match).
+        row_cos = s if s is not None else (tag_cos.max(1) if tag_cos is not None else None)
+        keep_row = np.zeros(n, bool)
+        if row_cos is not None:
+            keep_row |= row_cos >= GLOBAL_COS_FLOOR
+        if fitted:  # calibrated tag gate
+            keep_row |= p_tag >= TAU
+        if text_fitted:  # a real free-text fit may also admit rows
+            keep_row |= p_text >= TAU
+        # best raw cosine over the corpus — the DENSE signal, independent of calibration
+        best_cos = float(row_cos.max()) if row_cos is not None else 0.0
         hits = []
         for i in top:
             i = int(i)
-            if p[i] < floor:
+            if not keep_row[i]:
                 continue
             rec = snap.ids[i]
             if p_tag[i] > p_text[i] and col[i] >= 0:
@@ -931,11 +957,20 @@ class Searcher:
             )
         hits.sort(key=_order)  # ALL-SOME-ANY, then p, then image id (B18e determinism)
         hits, collapsed = dedupe(hits)
+        # honest no-match for THIS dataset: no calibrated tag cleared its tau AND nothing is
+        # even dense-similar (raw cos below the global floor). Independent of the free-text
+        # logistic, so it holds before a CAL-SET text fit exists.
+        dense_dead = best_cos < GLOBAL_COS_FLOOR
         return {"hits": hits[:k], "gated": gated, "indexed": n, "collapsed": collapsed,
-                "best_p_text": float(p_text.max()),
+                "best_p_text": float(p_text.max()), "best_cos": best_cos,
+                "dense_dead": dense_dead, "text_fitted": text_fitted,
                 "text_tower": ("loaded" if load_ms else "warm") if use_text else "skipped",
                 "load_ms": load_ms, "terms": [t for t, _ in groups],
-                "calibration": "fitted" if fitted else "unfitted"}
+                # HONEST per-query label: "fitted" only when a calibrated tag actually gated
+                # THIS result. A free-text or uncalibrated-tag result is "unfitted" even
+                # though a fitted tag table exists — the label reflects what scored the hits,
+                # so a caller never shows "calibrated confidence" on an unfitted text result.
+                "calibration": "fitted" if gated else "unfitted"}
 
     def search(self, query: str, dataset: str | None = None, k: int = 50, strict: bool = False,
                text: str = "auto", track: str | None = None, tier: str | None = None) -> dict:
@@ -945,6 +980,7 @@ class Searcher:
         names = [dataset] if dataset else list_datasets(self.home)
         hits: list[dict] = []
         indexed, gated, best_text, load_ms, collapsed = 0, False, 0.0, 0.0, 0
+        best_cos, dense_dead, text_fitted = 0.0, True, False
         tower, terms, calibration = "skipped", [], "unfitted"
         for name in names:
             r = self.search_one(query, name, k=k, strict=strict, text=text, track=track, tier=tier)
@@ -952,6 +988,9 @@ class Searcher:
             indexed += r["indexed"]
             gated |= r["gated"]
             best_text = max(best_text, r["best_p_text"])
+            best_cos = max(best_cos, r["best_cos"])
+            dense_dead = dense_dead and r["dense_dead"]  # dead only if dead EVERYWHERE
+            text_fitted = text_fitted or r["text_fitted"]
             load_ms += r["load_ms"]
             collapsed += r["collapsed"]
             tower = r["text_tower"] if tower == "skipped" else tower
@@ -983,11 +1022,14 @@ class Searcher:
             # parsed multi-term query (quoted spans stay ONE element); absent when n < 2
             **({"terms": terms} if terms else {}),
             "hits": hits[:k],
-            # An honest no-match requires a real threshold to have rejected everything:
-            # no calibrated tag cleared its tau AND nothing cleared the free-text floor.
-            # Unfitted calibration can only ever report "no rows", never "no match".
-            "no_match": (not hits) if calibration != "fitted"
-                        else (not hits and not gated and best_text < TAU),
+            # Honest no-match, recall-first (b-bench): true when no calibrated tag cleared
+            # its tau AND either the corpus is dense-dead (nothing remotely similar) or the
+            # free-text path is genuinely fitted and rejected everything. An UNFITTED
+            # free-text threshold never manufactures a no-match on a query that has real
+            # dense neighbours ("a red sports car" shows cars, not nothing).
+            "no_match": (not hits) or (
+                not gated and (dense_dead or (text_fitted and best_text < TAU))
+            ),
         }
 
 
