@@ -93,9 +93,38 @@ Legend: **APPLIED** (fix landed) · **SKIP-COVERED** (critical-fix pass already 
 | M-4 | APPLIED | ADR-3: tag table owner = b-engine, location `~/.imgtag/models/<model_sha>/`, one schema; b-bench writes calibration in, b-daemon reads only |
 | M-5 | APPLIED | IA gains the frozen five-call core API + daemon wire protocol |
 
+## ROUND 2 (rev-oracle §ROUND 2 + the spike-siglip2 ruling — conductor brief extension)
+
+All rulings ADOPTED as instructed. Note: R2's re-read was of commit `80112d2` (pre-fix), so
+several of its "still open" items were already closed at `66227ff`; those are marked
+SKIP-COVERED with what closed them. The one real leftover it caught — ADR-4's stale
+"fp16 shards / narrow-store-wide-compute" text — is fixed.
+
+| id | verdict | note |
+|---|---|---|
+| R2 leftover (ADR-4 fp16 shards) | APPLIED | sentence now reads: storage is **f32** per ADR-2; the fp16-shard refinement is marked SUPERSEDED, and the falls-off-BLAS measurement is kept as the *reason* f16 was dropped (6–48× slower matmul + 9.3ms@10k / 97ms@100k convert) |
+| R2-1 | APPLIED | ADR-11 POLITE workers = **min(clamp(ncpu−2,2,8), floor(mem_budget_MB / per_worker_RSS_MB))**, per-worker RSS MEASURED by `imgtag doctor` on first run and reported first-class by `bench resources`; ORT loads weights in **external-data format** so weight pages are file-backed/page-cache-shared across workers (also stated in ADR-10c) |
+| R2-2 | APPLIED | ADR-10(d) autotune axes now name **worker×thread GEOMETRY** (per-worker sessions vs central session, workers×intra) alongside precision/threads/batch/per-worker-RSS; the 12×1 result is labeled **"M3 E-core artifact, NON-PORTABLE"** at its citation in ADR-4 |
+| R2-3 | APPLIED | ADR-11 "shared-box hygiene" clause: `posix_fadvise(DONTNEED)` after each decode, `madvise(MADV_RANDOM)` on shard mmaps, `oom_score_adj=+500` (we die first), optional `RLIMIT_AS` 2GB; B15 post-run probe ≥95% of solo 60s AFTER the job; B8 restated as "our total footprint ≤1.5GB regardless of what co-tenants use" (no ≥6.5GB-free claim existed post-critical-pass) |
+| R2-4 | APPLIED | ADR-11 'cores' = `sched_getaffinity()` → cgroup v2 `cpu.max` quota/period → (v1 fallback) → `os.cpu_count()` LAST, with the container-lies note and `doctor` printing the resolved value + source |
+| R2-5 | APPLIED | BUDGETS: **B1/B2/B3/B13 split into `-dev` PROXY rows and 🐧 target rows** with interim floors ≥8 img/s · ≤25min POLITE (≤12min FULL) · p50 ≤80ms/p95 ≤200ms · ≤4s cold disk, each "locked only at the first real-server bench, no proxy number published as a product claim"; header states the split + 🖥/🐧 semantics; ORACLE §7 gains **clause (g)** (unlabeled proxy number = stop-and-escalate); the B1/B2-unreachable risk row was already added in round 1 and now points at the split |
+| R2-6 | SKIP-COVERED (round 1) | ADR-1: OpenVINO REQUIRED bench slot on the Linux target, not on the Mac |
+| R2-7 | SKIP-COVERED (round 1) + APPLIED | ADR-4 already sets fp32-until-`doctor`; the ruling's "(ADR-10d)" home now says it too, inside the autotune axes |
+| R2-8 | SKIP-COVERED (round 1) + APPLIED | ADR-13 existed (socket-only, flock singleton, stale takeover, version/model-upgrade restart); this pass renamed the opt-in to **`--tcp` (127.0.0.1 only)** and marked the systemd user unit an **optional** install extra |
+| R2-9 | APPLIED | B13🐧 carries the contended-shared-disk honesty note explicitly ("honest cold numbers there will be worse and that is the number that counts") |
+| R2-10 | APPLIED (revised) | ADR-6 flush cadence moved from T=1.5s to the ruling's **`min(2.0s, 500 rows)`**, fsync batched per flush never per row, POLITE never fsyncs more than once per 2s. Safe because B11's ≤2s visibility is measured FROM the manifest commit, not from decode |
+| R2-11 | SKIP-COVERED (round 1) | ADR-4 already carries "target-profile ranking ≠ quality ranking" incl. SigLIP2's ~1.5GB fp32 pair = the whole B8 budget |
+| spike-siglip2 ruling | APPLIED | (1) ADR-4 SigLIP2 line: official int8 vision = SPEED variant that **FAILS B24** (cos 0.7846 / p05 0.65; car recall@5 0.40 vs 0.80), quality anchor is fp32, any int8 must be self-quantized weight-only + pass B24. (2) Blacklist generalized: **downloaded int8 VISION towers fail as a CLASS, 2 for 2** — every quantized vision artifact passes B24 before ANY use; text-tower int8 passed everywhere measured (0.98–0.99), so fp32-vision/int8-text is the safe default shape. (3) Field log `2026-07-22 11:25Z` — the gate caught it on day one, before any index existed |
+
+Note: `BUDGETS.md` was concurrently edited by another writer between the two passes (inline
+🐧 planning figures on B2/B3). Those numbers were PRESERVED and promoted into the split rows —
+nothing reverted.
+
 ## Counts
 
-**APPLIED 57 · SKIP-COVERED 7 (4 of them with an added detail) · CONFLICT 0.**
+Round 1: **APPLIED 57 · SKIP-COVERED 7 · CONFLICT 0.**
+Round 2: **APPLIED 9 · SKIP-COVERED 4 (2 with added detail) · CONFLICT 0.**
+Total: **APPLIED 66 · SKIP-COVERED 11 · CONFLICT 0.**
 
 ## Notes for the conductor (no ruling needed, but worth knowing)
 
@@ -110,9 +139,9 @@ Legend: **APPLIED** (fix landed) · **SKIP-COVERED** (critical-fix pass already 
    ADR-10(c) — both were load-bearing for B8/B15 clauses this pass added, so leaving them
    dangling would have made BUDGETS reference rules that did not exist. R2-3's `oom_score_adj`/
    `RLIMIT_AS` and page-cache clauses landed inside B15 via A-I1/A-I5. **R2-5 (per-profile
-   speed rows) landed only partially**: B1/B13 now carry PROXY vs 🐧 NOT-MEASURED cells, but
-   B2/B3/B4 still have single thresholds — a conductor call on whether every speed row needs a
-   two-row split is the one open item from that finding.
+   speed rows) landed only partially** in round 1 — **CLOSED in round 2**: B1/B2/B3/B13 are now
+   split dev/🐧 with interim floors. B4 stays single-threshold on purpose (🖥 UI-only, measured
+   over localhost).
 4. `bench` verbs referenced by the new rows and not previously named: `bench artifacts`,
    `bench egress`, `bench footprint`, `bench politeness`, `bench resources --tree`,
    `bench index --headtohead`, `bench search --no-cache-prewarm`. b-bench's brief should carry

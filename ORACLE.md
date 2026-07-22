@@ -82,10 +82,12 @@ highest-bar protocol — verbatim vision, budgets as tests, honest verification,
   loudly on mismatch (same mechanism as the model/manifest refusal). Re-calibration is
   structurally impossible to forget, not a discipline.
 - **ADR-4 Pluggable model backends; Apache-2.0 default.** Bench roster (2026-07-22):
-  PE-Core-S16-384 + T16-384 (Apache; export spike first), SigLIP2-base-224 (Apache,
-  official ONNX — quality anchor; its official int8 files must THEMSELVES pass the B24
-  fidelity gate vs their fp32 before being trusted — official ≠ audited, per the broken
-  Xenova int8 precedent), SigLIP-v1-base (Apache, small text tower),
+  PE-Core-S16-384 + T16-384 (Apache; export spike first), SigLIP2-base-224 (Apache, official
+  ONNX — **the QUALITY ANCHOR is its fp32**; the official onnx-community **int8 vision export
+  is a SPEED variant that FAILS B24**: measured 2026-07-22 by spike-siglip2 at mean cos 0.7846
+  / p05 0.65 vs its own fp32, with real quality damage — COCO "car" recall@5 0.40 int8 vs 0.80
+  fp32, every GT rank worse or equal. Any int8 we ship must be SELF-quantized weight-only and
+  pass B24), SigLIP-v1-base (Apache, small text tower),
   UForm (Apache, Matryoshka 64d dark horse), OpenCLIP ViT-B/32 (MIT control),
   MobileCLIP2-S0/S2 (apple-amlr — REFERENCE CEILING ONLY, opt-in plugin, never default,
   never in published artifacts), rclip (system-level head-to-head baseline).
@@ -98,20 +100,30 @@ highest-bar protocol — verbatim vision, budgets as tests, honest verification,
   quant = the one untested axis, gets a bench slot). **FIDELITY GATE (CI): cos ≥0.98 AND
   top-1 NN ranking agreement ≥0.90 vs fp32** — ranking agreement is the metric that
   matters, mean cosine hides rank flips (per-channel scored 0.83 agreement at cos 0.955).
-  ☠️ BLACKLIST: `Xenova/mobileclip_s0` vision int8 ONNX — numerically broken (cos 0.008
-  vs its own fp32) AND 3.4× slower; MobileCLIP vision towers stay fp32 or self-quantized
-  behind the gate (Ente's fp32-vision/int8-text split independently corroborates).
+  ☠️ BLACKLIST — **downloaded int8 VISION towers fail fidelity as a CLASS (2 for 2 measured):**
+  `Xenova/mobileclip_s0` (cos 0.008 vs its own fp32, AND 3.4× slower) and onnx-community's
+  official `SigLIP2-base` int8 vision (cos 0.785, car recall halved). **Every quantized vision
+  artifact, whatever its source, passes B24 before ANY use** — official ≠ audited. Text-tower
+  int8 has passed everywhere measured (0.98–0.99), so the fp32-vision / int8-text split (Ente's
+  choice) is the safe default shape; MobileCLIP vision towers stay fp32 or self-quantized
+  behind the gate.
   Parallelism geometry is **host-probed, not fixed**: the 12 workers × 1 ORT intra-op thread
-  = 181 img/s result is an **ARM PROXY** whose stated cause (ORT's intra-op pool being
-  scheduled onto efficiency cores) is Apple-specific and does not transfer to x86. `imgtag
-  doctor` sweeps `workers × intra_op × batch × precision` under the memory ceiling (ADR-10c);
-  on ≤4-core hosts expect single-process/multi-thread to win on memory alone.
+  = 181 img/s result is an **M3 E-CORE ARTIFACT, NON-PORTABLE** — its stated cause (ORT's
+  intra-op pool scheduled onto efficiency cores) is Apple-specific and has no x86 analogue;
+  label it that way wherever it is cited. `imgtag doctor` sweeps `workers × intra_op × batch ×
+  precision` AND the session geometry itself (per-worker sessions vs one central session) under
+  the memory ceiling (ADR-10c); on ≤4-core hosts expect single-process/multi-thread to win on
+  memory alone.
   **Default precision on any host that has not been through `doctor` is fp32** — int8 is
   enabled only by a measured win on that host (ADR-10e); the recipe above is how we quantize,
   not a promise that we will (pre-VNNI x86 losing to quantization is the normal case there,
   not an anomaly). Batch axis: export with a **dynamic** batch axis, run with a **fixed** batch
   B from the bench, and pad the final partial batch to B (discarding padded rows) — one shape
-  for the entire run, no MLAS re-planning. Embeddings are stored f32 (ADR-2; f16 dropped).
+  for the entire run, no MLAS re-planning. **Embedding storage is f32** (ADR-2; the earlier
+  "fp16 shards / narrow-store-wide-compute" refinement is SUPERSEDED — f16 was measured
+  lossless as *storage* but numpy f16/int8 matmul falls off BLAS entirely, 6–48× slower, and
+  the convert step costs 9.3ms@10k/97ms@100k, so the narrow store bought nothing at our scale.
+  The falls-off-BLAS fact stands and is exactly why f16 was dropped.)
   **Target-profile ranking ≠ quality ranking:** SigLIP2 is the quality ANCHOR (reference for
   how good we could be — its fp32 pair is ~1.5GB, the entire B8 budget for one model); the
   shippable default on the 8GB profile is the best model whose vision tower + resident text
@@ -146,10 +158,11 @@ highest-bar protocol — verbatim vision, budgets as tests, honest verification,
     counts back to the coordinator, which merges them. Two processes calling
     `os.replace("manifest.json")` is last-write-wins and silently loses shard counts.
   - **Flush cadence:** the flusher is its own thread on a `Condition.wait(timeout=T)` loop and
-    flushes when `pending ≥ N` **or** `T` elapses with `pending > 0` (default N=500 rows,
-    T=1.5s — inside B11's 2s visibility with headroom for the fsync pair; on the POLITE profile
-    the writer coalesces and never fsyncs more often than once per 1.5s, because `ionice` does
-    not throttle fsync and frequent fsyncs hurt co-tenants). Also flush on job end, on
+    flushes at `min(T, N-rows)` boundaries — default **T=2.0s** (aligned with B11's ≤2s
+    visibility, which is measured FROM the manifest commit) or N=500 rows, whichever comes
+    first. **fsync is batched per flush, never per row**, and the POLITE profile never fsyncs
+    more than once per 2s: `ionice` does not throttle fsync, and frequent fsyncs on a shared
+    disk hurt co-tenants measurably. Also flush on job end, on
     queue-drain, and on SIGTERM/SIGINT (install handlers). Without the timer the tail of a job
     (slow TIFFs, a stalled queue) stays invisible far past B11 — possibly forever if aborted.
     `bench politeness` reports commits/s; `bench concurrent` includes a **stalled-tail** case.
@@ -204,17 +217,26 @@ highest-bar protocol — verbatim vision, budgets as tests, honest verification,
   per-worker RSS as a first-class number and `imgtag doctor` measures it on the host before
   choosing geometry. Mitigation that makes multi-process affordable: export with external-data
   weights and load them mmap'd/read-only shared across workers, `arena_extend_strategy=
-  kSameAsRequested`, mem-pattern off; (d) **first-run autotune**: `imgtag
-  doctor` runs a ~30s micro-bench on the actual deploy machine (fp32 vs int8, thread
-  count, batch size — int8 winners differ per ISA) and stores the recipe in the machine
-  profile; "generic and ready" means the engine adapts itself, not that we guessed;
+  kSameAsRequested`, mem-pattern off (external-data weights are file-backed, so those pages are
+  page-cache-shared across workers instead of copied per process); (d) **first-run autotune**:
+  `imgtag doctor` runs a ~30s micro-bench on the actual deploy machine — fp32 vs int8 (**and
+  on an unprofiled x86 host the default stays fp32 until int8 proves itself here**), thread
+  count, batch size, per-worker RSS, and **worker×thread GEOMETRY (per-worker sessions vs one
+  central session, workers × intra_op)** — the axis most likely to invert between the ARM dev
+  box and the x86 target — then stores the recipe in the machine profile; "generic and ready"
+  means the engine adapts itself, not that we guessed;
   (e) quant decisions are PER-ARCH — NEON results never transfer to AVX2 (clip.cpp
   anomaly was x86; DeepSparse win was AVX512-VNNI; measure on target). Revisit if: the
   user later asks for Mac-local optimization (add profile, change no defaults).
 
 - **ADR-11 Resource policy — ONE place, both throughput and politeness measured from the
   SAME run** (rev round 1, rev-arch C-4/C-5/C-6). POLITE (default): decode_workers =
-  clamp(ncpu−2, 2, 8) · ORT intra_op=2, inter_op=1 · total threads ≤ ncpu−1 asserted at
+  **min(clamp(ncpu−2, 2, 8), floor(mem_budget_MB / per_worker_RSS_MB))** — the CPU clamp AND
+  the memory cap, whichever is smaller; `per_worker_RSS_MB` is MEASURED by `imgtag doctor` on
+  first run (never assumed) and is a first-class `bench resources` number. ORT sessions load
+  weights in **external-data format** so weight pages are file-backed and page-cache-shared
+  across workers rather than copied per interpreter. · ORT intra_op=2, inter_op=1 · total
+  threads ≤ ncpu−1 asserted at
   startup · os.nice(10) set IN EACH worker initializer (not only inherited). FULL
   (`--full-speed`): workers=ncpu, no nice. B1 headline = POLITE run; FULL number always
   labeled. **"ncpu" means EFFECTIVE cores**, resolved in this order: `len(os.sched_getaffinity(0))`
@@ -240,10 +262,19 @@ highest-bar protocol — verbatim vision, budgets as tests, honest verification,
   `Process.exitcode is not None` — otherwise a dead worker's slots leak from the free list and
   a long run silently degrades to a hang. Non-JPEG decodes capped
   by semaphore(4) (draft() is JPEG-only; PNG/HEIC full decodes are the biggest RAM term).
-  Pipeline geometry (central session vs per-worker sessions) is a bench-swept axis; the
+  Pipeline geometry (central session vs per-worker sessions) is a `doctor`-swept axis; the
   policy's totals govern either. Memory arithmetic vs B8 is re-measured, never assumed
   (spawn start-method means zero COW sharing — 16 workers ≈ 1.4GB of interpreters alone;
   hence the clamp).
+  **Shared-box hygiene (non-negotiable on the primary target — `nice` and `ionice` do NOT
+  cover any of it):** `posix_fadvise(POSIX_FADV_DONTNEED)` on each image file after decoding it
+  (streaming 10k images through the page cache evicts a co-tenant's hot working set — their CPU
+  looks unchanged while their latency triples, and a during-run CPU probe sees nothing);
+  `madvise(MADV_RANDOM)` on shard mmaps; `oom_score_adj = +500` on every process we own — **we
+  die first, the co-tenant never does**; optional `RLIMIT_AS` at 2GB as a hard backstop.
+  B15 asserts the other half: the co-workload probe is re-measured for 60s AFTER our job ends
+  and must be back to ≥95% of solo (page-cache recovery) — a during-run pass alone does not
+  satisfy B15.
 
 - **ADR-13 Daemon lifecycle — one contract, verbatim-implementable** (rev round 1, rev-arch I-5
   + rev-oracle R2-8; ADR-12 left unassigned so review references stay stable). Unspecified,
@@ -251,8 +282,8 @@ highest-bar protocol — verbatim vision, budgets as tests, honest verification,
   per call, destroying ADR-5's whole rationale.
   - **Transport: UNIX domain socket** `~/.imgtag/daemon.sock`, mode 0600, per user — never a
     TCP port on a shared box (port conflicts, multi-user collisions, and a privacy leak:
-    binding TCP exposes one tenant's photo search to the others). `--http 127.0.0.1:PORT` is
-    opt-in for the local app and refuses non-loopback binds. `~/.imgtag` is 0700 (B22).
+    binding TCP exposes one tenant's photo search to the others). **`--tcp` is an opt-in flag**
+    for the app's browser use; it binds 127.0.0.1 ONLY and refuses any non-loopback bind. `~/.imgtag` is 0700 (B22).
   - **Single instance:** the daemon holds `fcntl.flock(LOCK_EX)` on `~/.imgtag/daemon.lock`
     for its lifetime — the SAME kernel-owned pattern as the index writer (ADR-6), no pid
     heuristics. It publishes `~/.imgtag/daemon.json` = `{pid, version, socket, http_port|null,
@@ -270,7 +301,8 @@ highest-bar protocol — verbatim vision, budgets as tests, honest verification,
   - **Idle policy:** default `--idle-timeout 0` (never exit) — immich's `model_ttl=300` is the
     proven anti-pattern; RAM protection comes from the CLI's in-process mode and `--text-ttl`
     (ADR-5), not from evicting the daemon.
-  - **Deployment:** ship a systemd **user** unit (`imgtag --install-service`) with `MemoryMax=`,
+  - **Deployment:** an OPTIONAL systemd **user** unit install extra (`imgtag --install-service`,
+    never required to run) with `MemoryMax=`,
     `CPUWeight=`, `Nice=10`; no root, no system-wide install, restart-on-crash, survives a
     reboot. `imgtag status` reports daemon pid, version, socket, uptime, loaded models + shas,
     warm/cold, tree-RSS — B13/B8 are measured through it.
@@ -427,11 +459,18 @@ sampling — are allowed and marked dev-only); (d) you are about to relax a budg
 user data, or write outside the allowed surfaces: the ImgTag tree, ~/.imgtag,
 ~/.claude/skills/imgtag* (the vision-mandated skill install), and the session scratchpad;
 (e) an export/quantization fight exceeds its timebox; (f) you catch yourself guessing a
-number you could measure.
+number you could measure; **(g) you are about to report a PROXY number without its PROXY
+label, or to compare a dev-machine number against a target-profile (🐧) budget.**
 "I stopped because X" is a success report. Silent grinding is the only failure.
 
 ## 8. Field log (append-only: symptom → what worked; timestamps are UTC, always suffixed Z)
 
+- 2026-07-22 11:25Z · **SigLIP2's OFFICIAL onnx-community int8 VISION export FAILS parity**
+  (spike-siglip2): mean cos 0.7846, p05 0.65 vs its own fp32 (healthy ≥0.99), COCO "car"
+  recall@5 0.40 int8 vs 0.80 fp32, every GT rank worse-or-equal. Second broken OFFICIAL int8
+  after `Xenova/mobileclip_s0` — downloaded int8 vision towers now fail as a CLASS, 2 for 2.
+  The B24 gate caught it on day one, before a single index was built. Lesson: the fidelity gate
+  pays for itself before the product exists; official ≠ audited, ever.
 - 2026-07-22 11:05Z · **UNRECONCILED — ViT-B/32-class int8 vision throughput measured at
   75.5 / 113.4 / 157.9 / 181.2 img/s** by different lanes under different geometry and machine
   load (runtime §2.1 thr4-bs8, runtime §3.2 self-quantized thr4-bs4, priorart §1.3 intra_op=8
