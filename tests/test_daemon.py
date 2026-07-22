@@ -459,3 +459,18 @@ def test_alert_images_is_the_only_deduped_alert_rollup(live, monkeypatch):
     summed = d["counts"]["safety"]["alert"] + d["counts"]["violence"]["alert"]
     assert d["alert_total"] <= summed and d["alert_total"] == len(set(d["alert_images"]))
     assert r["alert_total"] == len(set(r["alert_images"]))  # cross-dataset also deduped
+
+
+def test_image_tracks_endpoint(live):
+    """The per-image all-tracks panel endpoint (VISION-ADDENDA 14:16Z)."""
+    iid = get(live, "/api/images?dataset=d1&limit=1")[1]["items"][0]["image_id"]
+    st, r = D.request("GET", f"/api/image/d1/{iid}/tracks", home=live)
+    assert st == 200 and r["image_id"] == iid and r["dataset"] == "d1"
+    assert isinstance(r["tracks"], list) and r["tracks"]
+    for t in r["tracks"]:
+        assert {"category", "label", "kind", "p", "tier", "scored", "calibration"} <= set(t)
+        assert t["kind"] in ("moderation", "content")
+    st, r = D.request("GET", "/api/image/d1/ffffffffffffffff/tracks", home=live)
+    assert st == 404 and r["exit_code"] == 4
+    st, r = D.request("GET", "/api/image/d1/x/tracks?bogus=1", home=live)
+    assert st == 400  # unknown param rejected

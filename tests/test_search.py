@@ -630,3 +630,34 @@ def test_fitted_head_file_overrides_spec_thresholds(home, monkeypatch, tmp_path)
     assert t["categories"]["weapons"]["calibration"] == "fitted"  # came from the head file
     assert int(t["counts"]["weapons"]["violation"]) > 0
     S.fitted_head.cache_clear()
+
+
+def test_image_tracks_lists_every_track_ranked(home, monkeypatch):
+    """VISION-ADDENDA 14:16Z: per-image panel shows EVERY track, ranked, fired first."""
+    spec = {"version": 2, "categories": {
+        "weapons": {"label": "weapons", "violation": ["car"], "review": ["boat"], "negatives": ["sky"]},
+        "sports":  {"label": "sports", "content_track": True, "match": ["cat"], "negatives": ["sky"]},
+        "drugs":   {"label": "drugs", "violation": ["dog"], "review": ["cup"], "negatives": ["sky"]}}}
+    monkeypatch.setattr(S, "tracks", lambda: spec)
+    be = build(home, "d1", ["car"] + ["tree"] * 19)  # row 0 is a "car" (weapons/violation)
+    s = searcher(home, be)
+    iid = s.snapshot("d1").ids[0]["image_id"]
+    r = s.image_tracks("d1", iid)
+    assert r["image_id"] == iid and r["dataset"] == "d1"
+    cats = {t["category"] for t in r["tracks"]}
+    assert cats == {"weapons", "sports", "drugs"}  # ALL tracks present, even ~0 ones
+    for t in r["tracks"]:
+        assert set(t) >= {"category", "label", "kind", "p", "tier", "scored", "calibration"}
+        assert t["kind"] == ("content" if t["category"] == "sports" else "moderation")
+        assert t["tier"] is None or isinstance(t["tier"], str)  # "none" or a tier name
+    # the fired track (weapons on a car) ranks above a no-signal track
+    fired = [t for t in r["tracks"] if t["tier"] not in (None, "none")]
+    assert fired and fired[0]["category"] == "weapons"
+    assert r["tracks"][0]["category"] == "weapons"  # fired-first ordering
+
+
+def test_image_tracks_unknown_image_404s(home, monkeypatch):
+    monkeypatch.setattr(S, "tracks", lambda: {"version": 2, "categories": {}})
+    be = build(home, "d1", ["cat"] * 3)
+    with pytest.raises(FileNotFoundError):
+        searcher(home, be).image_tracks("d1", "deadbeefdeadbeef")

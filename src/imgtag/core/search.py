@@ -536,6 +536,56 @@ class Searcher:
         out.sort(key=lambda f: tier_rank(f["tier"]))
         return out
 
+    def image_tracks(self, dataset: str, image_id: str) -> dict:
+        """Every registered track's confidence for ONE image (VISION-ADDENDA 14:16Z).
+
+        EVERY track appears — including ones scoring ~0 (the user said "each one of our
+        tracks") — so a panel can rank the full set and show "no signal" rather than
+        omitting. A track that fired reports its winning tier + label; one that scored but
+        cleared nothing reports ``tier: "none"``; one whose scorer is unavailable (a
+        dedicated head not warm, no sidecar yet) reports ``scored: false`` so the overlay
+        shows "score pending", never a fake 0. p is the CALIBRATED probability per track —
+        comparable within ``kind`` (all moderation on the margin scale, content on cosine);
+        a caller should rank within kind, not blindly across (moderation vs content differ).
+        """
+        snap = self.snapshot(dataset)
+        row = next((j for j, r in enumerate(snap.ids) if r["image_id"] == image_id), None)
+        if row is None:
+            raise FileNotFoundError(f"image {image_id!r} not in dataset {dataset!r}")
+        spec = tracks().get("categories") or {}
+        tr = self.track_scores(dataset) if spec else {"categories": {}}
+        cats = tr.get("categories") or {}
+        out = []
+        for name, cfg in spec.items():
+            c = cats.get(name)
+            entry = {"category": name, "label": cfg.get("label", name),
+                     "kind": "content" if (cfg.get("content_track") or c and not c["moderation"])
+                     else "moderation"}
+            if not c:  # spec present but reader could not score it (head-only track, no sidecar)
+                entry.update(scored=False, p=None, tier=None,
+                             calibration=cfg.get("calibration", "unfitted"))
+                out.append(entry)
+                continue
+            # winning tier = the highest-severity tier that fired; else "none"
+            fired = [t for t in c["tiers"] if c["is"][t][row]]
+            tier = min(fired, key=tier_rank) if fired else "none"
+            p = max(float(c["p"][t][row]) for t in c["tiers"]) if c["tiers"] else 0.0
+            entry.update(scored=True, p=round(p, 4), tier=tier,
+                         calibration=c["calibration"], spec_calibration=c["spec_calibration"],
+                         enforcement_ready=c["enforcement_ready"])
+            if tier != "none":
+                lab = c["labels"].get(tier)
+                if lab:
+                    k = int(c["argc"][tier][row]) - c["base"][tier]
+                    if 0 <= k < len(lab):
+                        entry["label_value"] = lab[k]
+            out.append(entry)
+        # rank: fired first (by severity), then by p — the panel's default order
+        out.sort(key=lambda e: (e.get("tier") in (None, "none"), tier_rank(e.get("tier") or "match"),
+                                -(e.get("p") or 0.0)))
+        return {"image_id": image_id, "dataset": dataset,
+                "path": snap.ids[row]["path"], "tracks": out}
+
     def track_state(self, dataset: str, category: str) -> dict:
         """One category's calibration state — the SAME value /api/moderation reports, so
         two screens of the app can never disagree about a threshold."""

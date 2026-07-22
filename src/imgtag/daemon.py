@@ -34,6 +34,8 @@ Endpoints::
     GET  /api/jobs                               job status files (progress.list_jobs)
     GET  /api/events                             SSE, <=1s freshness, from the job files
     GET  /api/thumb/<dataset>/<image_id>?s=256   draft-decoded JPEG, LRU disk cache <=200MB
+    GET  /api/image/<dataset>/<image_id>/tracks  every track's confidence for one image
+                                                 (ranked; VISION-ADDENDA 14:16Z detail panel)
     POST /api/index {path, dataset}              spawns `imgtag index`, returns {job_id}
     POST /api/shutdown                           ADR-13 version/model-upgrade restart
     GET  /  /app/*                               b-app's static files, when present
@@ -97,6 +99,7 @@ PARAMS = {  # unknown query params are a 400, never silently ignored (b-app foun
     "/api/moderation": {"dataset", "limit", "source"},
     "/api/images": {"dataset", "offset", "limit"},
     "/api/thumb": {"s"},
+    "/api/image": set(),  # /api/image/<ds>/<id>/tracks takes no query params
 }
 
 
@@ -363,8 +366,10 @@ class Handler(BaseHTTPRequestHandler):
         q = urllib.parse.parse_qs(u.query)
         d = self.daemon
         try:
-            known = PARAMS.get(u.path if not u.path.startswith("/api/thumb/") else "/api/thumb")
-            unknown = sorted(set(q) - known) if known else []
+            route = ("/api/thumb" if u.path.startswith("/api/thumb/")
+                     else "/api/image" if u.path.startswith("/api/image/") else u.path)
+            known = PARAMS.get(route)
+            unknown = sorted(set(q) - known) if known is not None else []
             if unknown:
                 raise ValueError(
                     f"unknown query parameter(s) {', '.join(unknown)} for {u.path} "
@@ -471,6 +476,12 @@ class Handler(BaseHTTPRequestHandler):
                 self.events()
             elif u.path.startswith("/api/thumb/"):
                 self.thumb(u.path, q)
+            elif u.path.startswith("/api/image/") and u.path.endswith("/tracks"):
+                parts = u.path.split("/")  # /api/image/<dataset>/<image_id>/tracks
+                if len(parts) != 6:
+                    raise ValueError("usage: /api/image/<dataset>/<image_id>/tracks")
+                self.json(d.searcher.image_tracks(
+                    urllib.parse.unquote(parts[3]), urllib.parse.unquote(parts[4])))
             elif u.path == "/" or (APP_DIR / u.path.lstrip("/")).is_file() or u.path.startswith("/app/"):
                 self.static(u.path)  # assets resolve at BOTH / and /app/ (b-app relative refs)
             else:
