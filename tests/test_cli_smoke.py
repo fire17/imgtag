@@ -135,3 +135,15 @@ def test_no_undefined_names_in_engine_sources():
     p = subprocess.run(cmd, capture_output=True, text=True, timeout=300,
                        cwd=str(__import__("pathlib").Path(__file__).resolve().parents[1]))
     assert p.returncode == 0, p.stdout[-1500:]
+
+
+def test_bench_verb_dispatches_to_bench_cli():
+    """The `bench` seam: main() hands `bench <sub>` to b-bench's own dispatch (BUDGETS
+    surface), and normal verbs still parse — the interception must not shadow them."""
+    p = subprocess.run(CLI + ["bench", "--help"], capture_output=True, text=True, timeout=60,
+                       stdin=subprocess.DEVNULL)
+    assert p.returncode == 0 and "bench" in p.stdout
+    # a bogus bench subcommand is bench's usage error (exit 2), never a top-level crash
+    q = subprocess.run(CLI + ["bench", "nosuchsub"], capture_output=True, text=True, timeout=60,
+                       stdin=subprocess.DEVNULL)
+    assert q.returncode == 2 and "Traceback" not in q.stderr

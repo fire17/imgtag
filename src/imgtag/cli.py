@@ -679,6 +679,13 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv=None) -> int:
+    argv = sys.argv[1:] if argv is None else list(argv)
+    if argv and argv[0] == "bench":
+        # `bench` owns its own subparser surface (BUDGETS test commands); hand the rest
+        # straight to b-bench's dispatch rather than re-declaring it here.
+        from .bench.cli import main as bench_main
+
+        return bench_main(argv[1:])
     args = build_parser().parse_args(argv)
     try:
         return args.fn(args)
