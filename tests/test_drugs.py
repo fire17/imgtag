@@ -232,3 +232,19 @@ def test_head_emits_both_arbitration_margins_but_stays_single_col_until_flip():
     for f in h.score(emb):
         assert set(f["cols"]) == {"margin", "margin_review"}
         assert f["tier"] in ("violation", "review", "none")
+
+
+# ── platt convention: emitted platt MUST reproduce the head p under the PROJECT's
+# platt_apply (b-engine caught the inverted sign; this is the regression guard) ──
+def test_emitted_platt_reproduces_head_p_under_project_convention():
+    from imgtag.core.tags import platt_apply  # project convention: 1/(1+exp(A*m+B))
+    sc = D.DrugsScorer.build(FakeBackend())
+    emb = _unit(np.random.default_rng(7).normal(size=(32, FakeBackend.dim)))
+    out = sc.score(emb)
+    margin = np.asarray(out["margin"], np.float64)
+    head_p = np.minimum(1.0 / (1.0 + np.exp(-(D.PLATT_A * margin + D.PLATT_B))), D.P_MAX)
+    proj_platt = D.track_spec()["platt"]                       # what the daemon/store consume
+    proj_p = np.minimum(np.asarray(platt_apply(margin, proj_platt), np.float64), D.P_MAX)
+    assert np.allclose(head_p, proj_p, atol=1e-6), "emitted platt inverts vs the head"
+    # and the direction is right: a benign (margin≈0) image is LOW p, not 0.9964
+    assert float(platt_apply(np.array([0.0]), proj_platt)[0]) < 0.05

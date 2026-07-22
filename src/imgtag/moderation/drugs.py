@@ -569,7 +569,14 @@ def track_spec() -> dict:
         "policy_neighbours": POLICY_NEIGHBOURS,
         "templates": list(TEMPLATES),
         "scorer": "margin",
-        "platt": [PLATT_A, PLATT_B],
+        # PLATT CONVENTION FIX (b-engine caught it, 2026-07-22): this module scores with the
+        # STANDARD sigmoid `p = 1/(1+exp(-(A·m+B)))`, but the whole project — tags.platt_apply,
+        # search._margin_p, and b-engine's derive_tiers — uses `p = 1/(1+exp(A·m+B))` =
+        # sigmoid(-(A·m+B)). Same [A,B] → INVERTED p (benign margin=0 read as p≈0.9964 — the
+        # exact symptom b-engine reported). So the EMITTED platt is negated: platt_apply on it
+        # reproduces this module's head p EXACTLY (no split-brain). My head keeps its own [A,B].
+        "platt": [-PLATT_A, -PLATT_B],
+        "platt_convention": "platt_apply: p = 1/(1+exp(A*margin+B))",
         "tau": TAU,
         "tau_review": TAU_REVIEW,
         # THE user-rulable knob: "review" (ADR-14 default) | "violation" | "none".

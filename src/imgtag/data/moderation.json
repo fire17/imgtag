@@ -440,24 +440,48 @@
    ],
    "scorer": "margin",
    "platt": [
-    103.018,
-    -5.6314
+    -103.018,
+    5.6314
    ],
+   "platt_convention": "platt_apply: p = 1/(1+exp(A*margin+B))",
    "tau": 0.0198,
    "tau_review": 0.0071,
    "tobacco_tier": "review",
    "calibration": "proxy-fitted",
    "enforcement_ready": false,
+   "gate_safe": true,
+   "evidence_cap": 0.9474,
+   "gate_evidence": {
+    "auroc_tp_vs_fp": 0.9979,
+    "violation_fp_rate": 0.0044,
+    "p_negatives_ge_0.9": 0,
+    "acceptance": {
+     "vape": "review",
+     "raspberry_leaf": "none"
+    },
+    "corpus": "15,010 deduped real-photo negatives + 17 hand-verified drug TPs",
+    "verify_with": "uv run python scripts/eval_drugs.py  (confidence block)"
+   },
+   "arbitrated_storage": {
+    "col_roles": [
+     "margin",
+     "margin_review"
+    ],
+    "scorer": "margin_arbitrated",
+    "tier_margin": 0.01,
+    "rule": "violation iff sigmoid(platt\u00b7margin) >= tau AND margin >= margin_review + tier_margin; else review iff sigmoid(platt\u00b7margin_review) >= tau_review OR sigmoid(platt\u00b7margin) >= tau (demoted); else none."
+   },
    "spec_sha": "af22f0dd7bef3d00",
    "fit": {
-    "version": "v2 (2026-07-22) \u2014 refit after b-daemon/b-app reported 4 measured defects",
+    "version": "improve-track round 1 (2026-07-22) \u2014 subcategory deepening + confidence-correctness; on top of the v2 4-defect refit",
     "model": "pecore-s16-384-fp32",
     "feature": "margin = max(positive concepts) - max(background concepts)",
-    "corpus": "15,010 real-photo negatives (COCO val2017 + Unsplash demo + Unsplash-b, deduped by photo id) \u2014 ~2x b-app's 7,790, the corpus that saturated v1.",
-    "violation": "AP 0.472 \u00b7 recall .882 at 1% FP \u00b7 fitted on 17 hand-verified drug images. At the shipped tau: 88% drug recall as violation, 94% surfaced (viol+review), 1.06% of negatives flagged violation \u2014 matches the fit's own FP prediction.",
-    "p_distribution": "SPREAD, not saturated: 0 negatives at p>=0.9, 1 in [0.7,0.9] (the b-app '218 at p=0.99' bug is structurally gone \u2014 evidence cap P_MAX + gentle ridge slope). Full histogram in research/eval-drugs.json.",
-    "review_band": "tau_review 0.0083 < tau 0.0100 \u2014 a band BELOW violation (fixes b-daemon defect #1). Tobacco/vape routed here by the arbitration; vape acceptance PASS.",
-    "defect_3_leaf": "the raspberry/bramble-leaf p=0.92 FP had TWO causes, both fixed: (a) it was MISLABELLED as a cannabis positive in my ground truth \u2014 removed after a full-res re-audit of all 18; (b) serrated/compound-leaf negatives added.",
+    "corpus": "15,010 real-photo negatives (COCO val2017 + Unsplash demo + Unsplash-b, deduped by photo id) vs 17 hand-verified drug images.",
+    "confidence": "AUROC 0.998 (TP-vs-FP, threshold-free, the headline metric); separation margin 0.27 (TP-median p 0.28 vs FP-p99 0.010); ECE 0.0005 / Brier 0.0007 on the labelled support (noisy, read as direction). Shipped tau FP rate 0.51%, Wilson-95 CI [0.41%, 0.63%].",
+    "operating": "at tau=0.0198: drug recall .941 as violation, 0.44% of negatives flagged violation (66/15010) + 0.67% review, 0 tobacco wrongly a violation. Round 1 vs v2: AUROC 0.9968->0.9979, violation FP 1.06%->0.44%, drug recall .88->.94.",
+    "subcategory_round": "8 candidate prompts promoted (A/B-gated: raised AUROC AND did not lift the FP band); 5 over-generic candidates REJECTED (snorting-straw dFP99 +0.0073, heroin-spoon +0.0019, scale+cash +0.0012). New 'staging' subcategory. Only cannabis + smoking_apparatus have labelled TP; the rest are unmeasured coverage.",
+    "p_distribution": "SPREAD, not saturated: 0 negatives at p>=0.9 (evidence cap P_MAX + ridge slope); the b-app '218 at p=0.99' bug is structurally gone.",
+    "review_band": "tau_review < tau \u2014 a band BELOW violation (b-daemon defect #1). Tobacco/vape routed here by the arbitration; vape acceptance PASS.",
     "caveat": "17 drug positives \u2014 a wide-CI estimate, not a benchmark. Recall on cocaine/heroin/meth imagery specifically is UNMEASURED (no labelled image exists in any corpus we may use). Tobacco review-tier recall stays weak (small-object ceiling)."
    },
    "policy_questions": 10
@@ -583,10 +607,9 @@
     54.0,
     -2.54
    ],
-   "tau_alert": 0.055,
-   "tau_violation": 0.071,
-   "tau_review": 0.044,
-   "tier_margin": 0.005,
+   "tau_alert": 0.95,
+   "tau_violation": 0.85,
+   "tau_review": 0.46,
    "calibration": "fp-budget",
    "enforcement_ready": false,
    "spec_sha": "02e64288dcb1cac8"
