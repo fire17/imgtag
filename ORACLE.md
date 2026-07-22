@@ -462,6 +462,7 @@ highest-bar protocol — verbatim vision, budgets as tests, honest verification,
 - No dataset bytes in git (data/ ignored); no Unsplash redistribution; no apple-amlr
   weights in defaults or published artifacts.
 - Every spawned agent: explicit non-Fable model + effort; MODEL line first in reports.
+- `git add -A` is FORBIDDEN in this repo — explicit paths only (784MB lesson, field log 11:48Z).
 - Nothing leaves the machine without fire17's explicit confirmation (registry law #2).
 
 ## 7. Escalation contract (for every worker on this project)
@@ -512,6 +513,13 @@ label, or to compare a dev-machine number against a target-profile (🐧) budget
   lane complete-via-cross-checks in the gap. Lesson: disk truth led message truth by 20
   minutes — check the file BEFORE pinging, and re-check before declaring a lane missing.
 
+- 2026-07-22 11:48Z · 784MB of model weights found COMMITTED (conductor's own `git add
+  -A` at bc1f70f swept freshly-downloaded files before the subdir gitignore existed;
+  caught by spike-siglip2's hygiene check). Untracked same hour; small json/config files
+  retained deliberately. **OPEN DEBT: `git filter-repo` history rewrite (611MB .git) —
+  MUST run when all lanes quiesce and BEFORE any publish** (publish is a rule-2
+  confirmation event anyway). Standing law: `git add -A` is FORBIDDEN in this repo —
+  every lane adds explicit paths (wave-b-briefs already says so; now it's an invariant).
 - 2026-07-22 11:40Z · Isolated RSS probes (contention-immune): tokenizer.json 551MB
   resident, SigLIP2 int8 text 757MB, PE-Core int8 text 154MB. ADR-5 premise falsified as
   written → revised same hour (resident set = tag table + binary tokenizer; text tower
