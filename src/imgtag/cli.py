@@ -15,17 +15,15 @@ import sys
 import time
 from pathlib import Path
 
-from .core import models, store
+from .core import store
 from .core.doctor import autotune, load_profile, save_profile, usable_cores
 from .core.progress import list_jobs, read_job
 
-EXIT = {
-    store.LockedError: 3,
-    store.UnknownDatasetError: 4,
-    store.ModelMismatchError: 5,
-    store.CorruptIndexError: 6,
-    models.ModelUnavailableError: 7,
-}
+# Mapped BY NAME so `models` (and with it onnxruntime, ~15ms) stays out of the import
+# path of info/status/manage — B20 gives info a 200ms budget and it should not be spent
+# loading an inference runtime it never uses.
+EXIT = {"LockedError": 3, "UnknownDatasetError": 4, "ModelMismatchError": 5,
+        "CorruptIndexError": 6, "ModelUnavailableError": 7, "CalibrationMismatchError": 5}
 NO_MATCH_FLOOR = 0.20  # provisional dense floor; b-daemon replaces it with the calibrated tau
 
 
@@ -105,6 +103,13 @@ def cmd_index(args) -> int:
     return 0
 
 
+def _backend_names() -> list[str]:
+    """Registry names straight from the bundled data file — listing backends must not
+    import an inference runtime."""
+    data = Path(__file__).resolve().parent / "data" / "backends.json"
+    return sorted(k for k in json.loads(data.read_bytes()) if not k.startswith("_"))
+
+
 def _daemon_state() -> dict:
     """Endpoint record published by the daemon (ADR-13); b-daemon owns writing it."""
     p = store.imgtag_home() / "daemon.json"
@@ -154,7 +159,7 @@ def cmd_info(args) -> int:
                    "model_sha": m["model_sha"], "dim": m["dim"],
                    "updated": m.get("updated"), "bytes": sum(s["emb_bytes"] + s["ids_bytes"] for s in m["shards"])})
     obj = {"datasets": ds, "jobs": list_jobs(limit=10), "home": str(store.imgtag_home()),
-           "daemon": _daemon_state(), "profile": load_profile(), "backends": sorted(models.registry()),
+           "daemon": _daemon_state(), "profile": load_profile(), "backends": _backend_names(),
            "tookMs": round((time.perf_counter() - t0) * 1000, 2)}
     _out(args, obj, "\n".join(f"{d['dataset']:24s} {d['count']:>7} imgs  {d['model_id']}" for d in ds) or "no datasets")
     return 0
@@ -242,10 +247,71 @@ def cmd_manage(args) -> int:
     return 0
 
 
+def _search_via_daemon(args, t0: float):
+    """Return an exit code if the daemon answered, else None (caller falls back)."""
+    import http.client
+    import socket
+    import urllib.parse
+
+    sock_p = store.imgtag_home() / "daemon.sock"
+    qs = {"q": args.query, "k": args.k}
+    if args.dataset:
+        qs["dataset"] = args.dataset
+    path = "/api/search?" + urllib.parse.urlencode(qs)
+
+    def ask(timeout: float):
+        # 8 lines of stdlib instead of `from .daemon import request`: importing the daemon
+        # module pulls onnxruntime + core.search (~40ms) into the hot query path, which is
+        # exactly the cost the daemon exists to remove.
+        c = http.client.HTTPConnection("localhost", timeout=timeout)
+        c.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        c.sock.settimeout(timeout)
+        c.sock.connect(str(sock_p))
+        try:
+            c.request("GET", path)
+            r = c.getresponse()
+            return r.status, json.loads(r.read())
+        finally:
+            c.close()
+
+    try:
+        status, body = ask(30.0)
+    except OSError:  # no daemon yet: ADR-13 says start one, then retry
+        try:
+            from .daemon import ensure_daemon
+
+            if not ensure_daemon(backend=args.model):
+                _err("daemon unavailable — answering in-process (cold model load)")
+                return None
+            status, body = ask(30.0)
+        except Exception as e:
+            _err(f"daemon start failed ({type(e).__name__}) — answering in-process")
+            return None
+    except Exception as e:  # socket died mid-flight: never fail the user's query (ADR-13)
+        _err(f"daemon request failed ({type(e).__name__}) — answering in-process")
+        return None
+    if status != 200:
+        # the daemon reports {error: message, code: ExceptionName, exit_code: n}
+        b = body if isinstance(body, dict) else {}
+        code = int(b.get("exit_code") or EXIT.get(b.get("code") or b.get("error"), 1))
+        if args.json:
+            json.dump(body if isinstance(body, dict) else {"error": "DaemonError", "exit": code}, sys.stdout)
+            sys.stdout.write("\n")
+        _err(f"error: {(body or {}).get('message', body)}")
+        return code
+    body["clientMs"] = round((time.perf_counter() - t0) * 1000, 2)
+    body.setdefault("served_by", "daemon")
+    _out(args, body, "\n".join(f"{h['score']:.4f}  {h['dataset']:12s} {h['image_id']}  {h['path']}"
+                               for h in body.get("hits", [])) or "no match")
+    return 0
+
+
 def cmd_search(args) -> int:
-    """Thin f32 scan. ponytail: b-daemon owns core/search.py (calibration, tag fusion,
-    hypernym expansion); this fallback keeps the CLI + e2e honest until it lands, and
-    labels its probability as uncalibrated."""
+    """ADR-13 client: talk to the resident daemon, else start one, else answer in-process.
+
+    A cold in-process query pays a full ORT text-session load (~500ms); the daemon holds
+    it warm, which is the entire rationale of ADR-5. `--no-daemon` forces the local path.
+    """
     import numpy as np
 
     t0 = time.perf_counter()
@@ -255,7 +321,14 @@ def cmd_search(args) -> int:
                     "coverage": {"indexed": 0, "total": 0}, "hits": [], "no_match": True,
                     "calibrated": False}, "no datasets indexed")
         return 0
+
+    if not args.no_daemon:
+        served = _search_via_daemon(args, t0)
+        if served is not None:
+            return served
+
     snaps = [store.open_snapshot(n) for n in names]
+    from .core import models
     # the manifest decides the model AND its precision — the query must live in the same
     # embedding space as the index (int8 vs fp32 vision differ at cos ~0.94)
     mid = snaps[0].manifest["model_id"]
@@ -299,6 +372,8 @@ def cmd_search(args) -> int:
 
 
 def cmd_doctor(args) -> int:
+    from .core import models
+
     if args.fetch:
         paths = models.fetch(args.fetch, log=_err)
         _out(args, {"fetched": [str(p) for p in paths]}, f"fetched {len(paths)} files")
@@ -389,6 +464,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--dataset")
     s.add_argument("-k", type=int, default=50)
     s.add_argument("--model")
+    s.add_argument("--no-daemon", action="store_true",
+                   help="answer in-process instead of via the resident daemon (ADR-13 fallback)")
     s.set_defaults(fn=cmd_search)
 
     d = sub.add_parser("doctor", help="autotune this machine (~30s)", parents=[common])
@@ -412,8 +489,10 @@ def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
     try:
         return args.fn(args)
-    except tuple(EXIT) as e:
-        code = EXIT[type(e)]
+    except Exception as e:
+        code = EXIT.get(type(e).__name__)
+        if code is None:
+            raise
         if args.json:
             json.dump({"error": type(e).__name__, "message": str(e), "exit": code}, sys.stdout)
             sys.stdout.write("\n")
