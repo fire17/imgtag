@@ -590,6 +590,16 @@ def serve(home: Path | None = None, tcp: int | None = None, backend: str | None 
     os.ftruncate(lock_fd, 0)
     os.write(lock_fd, json.dumps({"pid": os.getpid(), "since": time.time()}).encode())
 
+    # --tcp is STICKY: the port lives in daemon.json (ADR-13's endpoint record), so a
+    # flag-free restart keeps the browser app alive. `--tcp 0` disables, `--tcp N` overrides
+    # and persists. Three outages came from a lane restarting without the flag.
+    if tcp is None:
+        try:
+            tcp = json.loads(rec_p.read_bytes()).get("http_port")
+        except (OSError, ValueError):
+            tcp = None
+    if tcp == 0:
+        tcp = None
     if sock_p.exists():  # ADR-13: only the flock holder may unlink the socket
         sock_p.unlink()
     d = Daemon(home, backend, text_ttl, watermark_mb)
@@ -615,7 +625,7 @@ def serve(home: Path | None = None, tcp: int | None = None, backend: str | None 
     # the socket is reachable, or a client that polls the socket path wins the race and
     # reads a missing record.
     rec = {"pid": os.getpid(), "version": VERSION, "socket": str(sock_p), "http_port": port,
-           "started_at": d.started, "models": d.model_shas()}
+           "running": True, "started_at": d.started, "models": d.model_shas()}
     tmp = rec_p.with_suffix(".tmp")
     tmp.write_text(json.dumps(rec, indent=1))
     os.chmod(tmp, 0o600)
@@ -641,11 +651,18 @@ def serve(home: Path | None = None, tcp: int | None = None, backend: str | None 
         for s in servers:
             s.shutdown()
             s.server_close()
-        for p in (sock_p, rec_p):
-            try:
-                p.unlink()
-            except OSError:
-                pass
+        try:
+            sock_p.unlink()  # ADR-13: the flock holder owns the socket, live or dead
+        except OSError:
+            pass
+        # The record SURVIVES as a stopped record: it is what makes --tcp sticky across a
+        # flag-free restart. `running: false` + no socket is how a door knows it is dead.
+        try:
+            rec_p.write_text(json.dumps({**rec, "pid": None, "running": False,
+                                         "stopped_at": time.time()}, indent=1))
+            os.chmod(rec_p, 0o600)
+        except OSError:
+            pass
         fcntl.flock(lock_fd, fcntl.LOCK_UN)
         os.close(lock_fd)
     return 0
@@ -728,7 +745,9 @@ def ensure_daemon(home: Path | None = None, timeout: float = 2.0, backend: str |
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser("imgtag-daemon", description="resident imgtag search daemon")
     ap.add_argument("--tcp", type=int, metavar="PORT",
-                    help="also bind 127.0.0.1:PORT (opt-in, loopback only) for the web app")
+                    help="also bind 127.0.0.1:PORT (opt-in, loopback only) for the web app. "
+                         "STICKY: persisted in daemon.json and inherited by a flag-free "
+                         "restart; --tcp 0 turns it off.")
     ap.add_argument("--home", type=Path, default=None, help="override ~/.imgtag")
     ap.add_argument("--backend", default=None, help="preload this model backend by name")
     ap.add_argument("--idle-timeout", type=float, default=0.0,

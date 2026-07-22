@@ -764,8 +764,10 @@ class Searcher:
                            spectrum="all" if matched[i] == n_concepts else
                                     ("some" if matched[i] > 1 else "any"))
             flags = self.flags_for(tr, i) if tr.get("categories") else []
-            extra = {kk: vv for kk, vv in rec.items()
-                     if kk not in ("image_id", "path", "dataset", "row", "w", "h", "flags")}
+            # The user's metadata is exactly `rec["meta"]` (VISION-ADDENDA 12:33Z). It is
+            # HOISTED, not swept: sweeping unknown fields buried it one level deep AND
+            # leaked the indexer's internal bookkeeping (mtime/size) into a public field.
+            extra = rec.get("meta") or {}
             hits.append(
                 {
                     "image_id": rec["image_id"],
@@ -784,8 +786,7 @@ class Searcher:
                     # STORED: what the indexer recorded when this row was written. Kept
                     # under its own name so a UI can never show two numbers as one.
                     **({"flags_stored": rec["flags"]} if rec.get("flags") else {}),
-                    # generic index-time metadata (account ids, dates, ...) passed through
-                    # verbatim from the ids record — whatever b-engine writes, we return
+                    # generic index-time metadata (account ids, dates, ...) verbatim
                     **({"meta": extra} if extra else {}),
                 }
             )

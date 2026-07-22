@@ -379,13 +379,16 @@ def test_generic_metadata_passthrough(home):
     be = FakeBackend()
     embs = np.stack([be._vec("cat")] * 3 + [be._vec("misc")] * 20)
     recs = [{"image_id": f"{i:016x}", "path": f"/img/{i}.jpg", "dataset": "d1", "w": 4, "h": 4,
-             "account_id": "acct-7", "captured": "2026-07-01"} for i in range(23)]
+             "mtime": 1784724524.24, "size": 824,  # indexer bookkeeping: must NOT surface
+             "meta": {"account_id": "acct-7", "captured": "2026-07-01"}} for i in range(23)]
     with Writer("d1", be, home) as w:
         w.append(embs, recs)
     r = S.Searcher(home, backend=be).search("cat", "d1", k=3)
     assert r["hits"]
     for h in r["hits"]:
+        # hoisted verbatim, one level deep exactly as the contract says
         assert h["meta"] == {"account_id": "acct-7", "captured": "2026-07-01"}
+        assert "mtime" not in h["meta"] and "size" not in h["meta"] and "meta" not in h["meta"]
         assert h["w"] == 4 and h["h"] == 4  # known fields stay top-level, not in meta
 
 

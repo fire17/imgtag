@@ -124,7 +124,9 @@ def test_shutdown_removes_socket_and_record(short_tmp):
         time.sleep(0.05)
     D.request("POST", "/api/shutdown", home=home)
     t.join(timeout=10)
-    assert not sock.exists() and not rec.exists()
+    assert not sock.exists()
+    stopped = json.loads(rec.read_bytes())  # record survives, marked dead (sticky --tcp)
+    assert stopped["running"] is False and stopped["pid"] is None
 
 
 # ---------------------------------------------------------------- endpoints
@@ -381,3 +383,36 @@ def test_plain_search_never_triggers_moderation(live):
     st, r = get(live, "/api/search?q=cat&dataset=d1&k=3")
     assert st == 200 and not s._tracks  # nothing computed, nothing cached
     assert all("flags" not in h for h in r["hits"])
+
+
+def test_tcp_port_is_sticky_across_restarts(short_tmp):
+    """A flag-free restart must not silently kill the browser app (ADR-13 record)."""
+    home = short_tmp / "h3"
+    home.mkdir()
+    sock, _, rec = D.daemon_paths(home)
+
+    def boot(**kw):
+        t = threading.Thread(target=D.serve, kwargs={"home": home, "log": lambda *_: None, **kw},
+                             daemon=True)
+        t.start()
+        for _ in range(100):
+            if sock.exists():
+                break
+            time.sleep(0.05)
+        return t
+
+    t = boot(tcp=8931)
+    assert json.loads(rec.read_bytes())["http_port"] == 8931
+    D.request("POST", "/api/shutdown", home=home)
+    t.join(timeout=10)
+
+    t = boot()  # flag-free restart INHERITS the port
+    port = json.loads(rec.read_bytes())["http_port"]
+    assert port == 8931
+    D.request("POST", "/api/shutdown", home=home)
+    t.join(timeout=10)
+
+    t = boot(tcp=0)  # explicit 0 disables it
+    assert json.loads(rec.read_bytes())["http_port"] is None
+    D.request("POST", "/api/shutdown", home=home)
+    t.join(timeout=10)
