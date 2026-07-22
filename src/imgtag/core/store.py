@@ -120,6 +120,22 @@ TRACKS_DIR = "tracks"
 NOT_SCORED = np.float32("nan")
 
 
+def spec_sha(spec: dict) -> str:
+    """16-hex sha256 of a track's spec — the derivation-layer's cache/refusal key.
+
+    Canonical form agreed with b-daemon (the reader/derivation owner): sha256 of the
+    spec serialized with sorted keys and no whitespace, first 16 hex chars. Both sides
+    hash IDENTICALLY so a reader can trust a sidecar without re-scoring."""
+    import hashlib
+
+    blob = json.dumps(spec, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(blob).hexdigest()[:16]
+
+
+def track_meta_path(dataset: str, category: str, home: Path | None = None) -> Path:
+    return dataset_dir(dataset, home) / TRACKS_DIR / f"{category}.json"
+
+
 def track_path(dataset: str, category: str, home: Path | None = None) -> Path:
     return dataset_dir(dataset, home) / TRACKS_DIR / f"{category}.f32"
 
@@ -290,6 +306,7 @@ class Writer:
         self._buf_e: list[np.ndarray] = []
         self._buf_r: list[dict] = []
         self._buf_t: dict[str, list[np.ndarray]] = {}
+        self._track_specs: dict[str, dict] = {}
         self._ids: set[str] = set()
         self._cv = threading.Condition()
         self._stop = False
@@ -503,9 +520,10 @@ class Writer:
         with open(d / t["name"], "ab", buffering=1024 * 1024) as f:
             f.write(col.tobytes())
             f.flush()
-            os.fsync(f.fileno())
+            os.fsync(f.fileno())        # (a) column durable BEFORE the header names its rows
         t["rows"] = base + n
         t["bytes"] = t["rows"] * t["cols"] * 4
+        write_track_meta(self.dir, category, t, self._track_specs.get(category))
 
     def _commit(self) -> None:
         self.manifest["updated"] = _now()
@@ -519,6 +537,43 @@ class Writer:
 
 
 # ---------------------------------------------------------------- recovery
+
+
+def write_track_meta(datadir: Path, category: str, rec: dict, spec: dict | None = None) -> None:
+    """Publish `tracks/<category>.json` — the AUTHORITY b-daemon's reader consumes.
+
+    Byte counts here are authoritative (readers cap at `rows`, never stat the .f32), and
+    `spec_sha`/`model_sha` let a reader refuse a stale sidecar loudly, the same mechanism
+    as the model/manifest refusal. Written atomically so a search-while-scoring reader
+    sees a whole header or the previous one, never a torn one.
+    """
+    meta = {
+        "category": category,
+        "rows": rec["rows"],
+        "cols": rec.get("cols", 1),
+        "col_roles": rec.get("col_roles") or (["p"] if rec.get("cols", 1) == 1 else None),
+        "bytes": rec["bytes"],
+        "dtype": "float32",
+        "scorer": (spec or {}).get("scorer") or (spec or {}).get("model_id"),
+        "model_sha": (spec or {}).get("model_sha"),
+        "spec_sha": spec_sha(spec) if spec else None,
+        "updated": _now(),
+    }
+    d = datadir / TRACKS_DIR
+    d.mkdir(exist_ok=True)
+    tmp = d / f"{category}.json.tmp"
+    with open(tmp, "wb") as f:
+        f.write(json.dumps(meta, indent=1).encode())
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, d / f"{category}.json")   # (b) header swap is atomic
+
+
+def read_track_meta(dataset: str, category: str, home: Path | None = None) -> dict | None:
+    try:
+        return json.loads(track_meta_path(dataset, category, home).read_bytes())
+    except (OSError, ValueError):
+        return None
 
 
 def recover(d: Path, manifest: dict, log=None) -> list[str]:

@@ -149,6 +149,7 @@ def load_moderation_hook(spec=None, profile: dict | None = None, log=lambda m: N
                               for h in heads.values())
     detect.heads = heads
     detect.specs = {c: track_tier_spec(c, h) for c, h in heads.items()}
+    detect.scorer_meta = {c: track_scorer_meta(c, h) for c, h in heads.items()}
     return detect
 
 
@@ -189,6 +190,12 @@ def _call_head(head, embs, images, recs, name="head", warned=None, log=lambda m:
     from PIL import Image as _Image
 
     return head.score_images([_Image.fromarray(im) for im in images])
+
+
+def track_scorer_meta(category: str, head=None) -> dict:
+    """Provenance for a track's sidecar header: which model produced the scores."""
+    return {"scorer": getattr(head, "model_id", None) if head is not None else None,
+            "model_sha": getattr(head, "model_sha", None) if head is not None else None}
 
 
 def track_tier_spec(category: str, head=None) -> dict:
@@ -547,6 +554,9 @@ def index(
     summary: dict = {}
 
     with Writer(dataset, be, home=home, job_id=job_id) as w:
+        if hook is not None:
+            for c in getattr(hook, "specs", {}):
+                w._track_specs[c] = {**(hook.specs.get(c) or {}), **(getattr(hook, "scorer_meta", {}).get(c) or {})}
         job = Job(
             w.job_id,
             dataset,
@@ -791,6 +801,8 @@ def track_add(dataset: str, category: str, home: Path | None = None, profile: di
             f"no head for track {category!r} — available: "
             f"{sorted(getattr(heads, 'heads', {}) or [])}")
     head = heads.heads[category]
+    spec = {**(getattr(heads, "specs", {}).get(category) or {}),
+            **(getattr(heads, "scorer_meta", {}).get(category) or {})}
     n = snap.count
     job = Job(job_id or f"track-{category}", dataset, n, home=home, kind="track-add", track=category)
     job.start()
@@ -809,7 +821,7 @@ def track_add(dataset: str, category: str, home: Path | None = None, profile: di
                     if f.get("category") == category:
                         scores[i + j] = float(f.get("p", float("nan")))
             job.update(min(i + batch, n))
-        _write_track_column(dataset, category, scores, home)
+        _write_track_column(dataset, category, scores, home, spec)
         job.finish(indexed=n, seconds=round(time.time() - t0, 2))
     except BaseException as e:
         job.fail(f"{type(e).__name__}: {e}")
@@ -822,7 +834,7 @@ class ModerationTrackUnavailable(RuntimeError):
     """No head can score the requested track on this machine (CLI exit 7)."""
 
 
-def _write_track_column(dataset: str, category: str, scores: np.ndarray, home=None) -> None:
+def _write_track_column(dataset: str, category: str, scores: np.ndarray, home=None, spec=None) -> None:
     """Swap in a whole track column atomically, under the dataset's writer lock.
 
     Backfill replaces one column and nothing else — no shard is touched, no embedding is

@@ -247,3 +247,25 @@ def test_crash_mid_flush_kill9(tmp_path):
     assert snap.count == man["count"] == len(snap.ids)
     assert snap.emb.shape == (man["count"], 8)
     np.testing.assert_allclose(np.linalg.norm(np.asarray(snap.emb), axis=1), 1.0, atol=1e-4)
+
+
+def test_track_sidecar_header_is_the_read_authority(tmp_path):
+    """b-daemon's derivation layer reads tracks/<cat>.json, not the .f32 stat — byte
+    counts there are authoritative, and spec_sha/model_sha let it refuse a stale sidecar."""
+    class M:
+        model_id = "fake-8"
+        model_sha = "0" * 64
+        dim = 8
+
+    with store.Writer("ds", M(), home=tmp_path) as w:
+        w._track_specs["nudity"] = {"tau_violation": 0.5, "tau_review": 0.2,
+                                    "scorer": "marqo-384", "model_sha": "a" * 64}
+        e, r = _rows(4)
+        w.append(e, r, tracks={"nudity": np.array([0.1, 0.9, 0.3, 0.6], np.float32)})
+    meta = store.read_track_meta("ds", "nudity", tmp_path)
+    assert meta["rows"] == 4 and meta["cols"] == 1 and meta["dtype"] == "float32"
+    assert meta["col_roles"] == ["p"] and meta["scorer"] == "marqo-384"
+    assert meta["bytes"] == (tmp_path / "datasets/ds/tracks/nudity.f32").stat().st_size
+    # spec_sha is order-independent so both writer and reader hash identically
+    assert meta["spec_sha"] == store.spec_sha({"tau_review": 0.2, "scorer": "marqo-384",
+                                               "tau_violation": 0.5, "model_sha": "a" * 64})
