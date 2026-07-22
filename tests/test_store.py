@@ -51,7 +51,7 @@ def test_append_flush_and_snapshot(tmp_path):
 def test_reap_stale_uses_the_flock_not_the_status_file(tmp_path):
     """ADR-6: a job frozen at 'running' by a killed process is a corpse the moment its
     writer lock is free — liveness is the kernel's answer, never the status file."""
-    from imgtag.core.progress import Job, is_corpse, reap_stale
+    from imgtag.core.progress import Job, reap_stale
 
     Job("ghost1", "ds", 0, home=tmp_path, state="running").start()          # never held a lock
     Job("ghost2", "ds", 0, home=tmp_path, state="queued", pid=2 ** 31 - 1)  # dead pid

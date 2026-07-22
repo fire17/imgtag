@@ -1,7 +1,5 @@
 """Indexer + progress: both geometries, provenance, incremental gate, hostile files."""
 
-import json
-import shutil
 from pathlib import Path
 
 import numpy as np
@@ -86,8 +84,6 @@ def test_search_while_indexing_sees_a_consistent_prefix(tmp_path):
     d.mkdir()
     for i in range(40):
         Image.new("RGB", (64, 64), (i * 6 % 255, 10, 10)).save(d / f"{i}.jpg")
-    seen = []
-
     def watcher(_):
         pass
 
