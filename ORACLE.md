@@ -534,6 +534,26 @@ label, or to compare a dev-machine number against a target-profile (🐧) budget
   only inside DECLARED QUIET WINDOWS (conductor pauses CPU-heavy lanes; loadavg gate
   refuses > cores×0.6, recorded per row). The bench-noise risk row predicted this on day
   one; the system worked — a false B1 projection never reached BUDGETS.
+- 2026-07-22 12:05Z · b-engine, three graph-level traps the design docs could not know.
+  (1) **HF ONNX exports put `last_hidden_state` FIRST** — `run(None, …)[0]` on SigLIP2's
+  vision graph returns the [n,196,768] token grid, not the [n,768] pooled embedding, and
+  nothing errors: it just indexes garbage. models.py now selects the output BY NAME
+  (image_embeds/text_embeds/pooler_output) and REFUSES loudly when the best output is not
+  rank-2 (siglip-base's quantized vision export exposes only last_hidden_state).
+  (2) **PE-Core-B16-224's embed dim is 1024, not 512** (measured from the graph:
+  `image_embeds [2,1024]`); the graph now overrides the config for `dim`.
+  (3) Several fp32 artifacts fetched into `models/{openclip-vitb32,siglip-base}` are
+  INVALID_PROTOBUF and their sizes disagree with the lane's own SHA256SUMS (e.g.
+  openclip text_model.onnx: 120,320,255 on disk vs 117,403,648 recorded) — the
+  *_quantized ones load fine. Re-fetch needed; flagged to l-logistics, not repaired here.
+- 2026-07-22 12:05Z · b-engine, ADR-11 geometry measured rather than assumed: on quick500
+  (500 COCO imgs, M3 Max PROXY, loadavg ~24, PE-Core-S16-384 int8, POLITE 4 workers) the
+  per-worker-session geometry ran **11.31 img/s** vs **8.72 img/s** for the central-session
+  geometry (1.30×; research predicted 1.7× on a quiet box). Both geometries are implemented
+  behind one policy and `imgtag doctor` picks between them from its own sweep, projecting
+  the worker geometry from the measured intra_op=1 row × the memory-derived worker count.
+  Memory arithmetic is what gates it: a session per worker costs ~188MB (int8) so POLITE
+  caps at 4 workers inside B8's 1.0GB.
 - 2026-07-22 11:25Z · l-logistics spawned as haiku reported MODEL: claude-opus-4-8 —
   model-line tripwire caught a spawn-vs-actual mismatch (non-Fable either way; rule 4
   intact). All 4 model repos fetched + validated (rclip 2.1.6; uform ONNX lives in the
