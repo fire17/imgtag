@@ -417,7 +417,7 @@ class Searcher:
                 "p": {t: prob[t] for t in tiers},
                 "is": {t: fires & (pick == i) for i, t in enumerate(tiers)},
                 # a category whose tiers are all CONTENT labels is not moderation at all
-                "moderation": not set(tiers) <= CONTENT_TIERS,
+                "moderation": not cfg.get("content_track") and not set(tiers) <= CONTENT_TIERS,
                 "calibration": cfg.get("calibration", "unfitted") if trusted else "unfitted",
                 "spec_calibration": cfg.get("calibration", "unfitted"),
                 "enforcement_ready": bool(cfg.get("enforcement_ready", False)) and trusted,
@@ -510,14 +510,14 @@ class Searcher:
         for rec in snap.ids:
             for f in rec.get("flags") or []:
                 cat, tier = f.get("category"), f.get("tier")
-                if not cat or tier not in ("violation", "review"):
+                if not cat or tier not in TIER_ORDER:  # alert|violation|review|match, never "none"
                     continue
                 counts.setdefault(cat, {"violation": 0, "review": 0})[tier] += 1
                 if limit:
                     flagged.append({**f, "image_id": rec["image_id"], "path": rec["path"],
                                     "dataset": rec.get("dataset") or dataset,
                                     "dataset_slug": rec.get("dataset") or dataset})
-        flagged.sort(key=lambda f: (f["category"], f["tier"] != "violation",
+        flagged.sort(key=lambda f: (tier_rank(f["tier"]), f["category"],
                                     -float(f.get("p") or 0), f["image_id"]))
         out = {"dataset": dataset, "indexed": len(snap.ids), "counts": counts,
                "source": "stored", "labels": {}, "threshold": None,
@@ -924,8 +924,9 @@ class Searcher:
             "calibration": calibration,
             "coverage": {"indexed": indexed, "total": total_expected(names, indexed, self.home)},
             # duplicate index rows for one content-addressed id: collapsed here, COUNTED so
-            # the indexer bug behind them stays visible (never silently swallowed)
-            **({"collapsed_duplicates": collapsed} if collapsed else {}),
+            # the indexer bug behind them stays visible. ALWAYS emitted (0 when none) so the
+            # field is identical on every path/transport (B20) — b-app renders 0 as nothing.
+            "collapsed_duplicates": collapsed,
             "datasets": names,
             # parsed multi-term query (quoted spans stay ONE element); absent when n < 2
             **({"terms": terms} if terms else {}),

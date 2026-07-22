@@ -465,23 +465,21 @@ def test_stored_index_time_flags_pass_through_under_their_own_name(home):
 
 
 def test_duplicate_index_rows_collapse_but_stay_counted(home):
-    """LEGACY-INDEX GUARD. b-engine now refuses a duplicate id at write time (the root
-    fix), so this is the read-side half of a layered defence: indexes written before that
-    guard — the 420-rows-for-44-ids corruption b-app found — must still read correctly.
-    One content-addressed id = one image (IA.md); extra paths fold in; the count is
-    REPORTED so an indexer regression can never hide behind a tidy payload."""
+    """LEGACY-INDEX GUARD (read side of a layered defence). b-engine's writer now refuses a
+    duplicate content id — within a batch, across appends, and on re-open — so this exercises
+    the reader against the corruption a PRE-guard index (b-app's 420-rows-for-44-ids) still
+    holds on disk: dedupe() collapses to one image, folds extra paths in, and reports the
+    count so a regression can never hide behind a tidy payload. The writer guard is asserted
+    live so this test fails loudly if that root fix is ever lost."""
     be = FakeBackend()
-    # MEASURED 2026-07-22: the writer guard catches a duplicate within one batch and on
-    # re-open, but NOT across appends inside one job — three rows for one id still reach
-    # disk that way (reported to b-engine). So this guard is live, not merely historical.
-    with Writer("d1", be, home) as w:
-        for i in range(3):
+    from imgtag.core.store import Writer as _W
+
+    with _W("d1", be, home) as w:
+        w.append(np.stack([be._vec("cat")]),
+                 [{"image_id": "a" * 16, "path": "/img/0.jpg", "dataset": "d1", "w": 1, "h": 1}])
+        with pytest.raises(ValueError, match="duplicate image_id"):
             w.append(np.stack([be._vec("cat")]),
-                     [{"image_id": "a" * 16, "path": f"/img/copy{i}.jpg", "dataset": "d1",
-                       "w": 1, "h": 1}])
-    assert len(S.Searcher(home, backend=be).snapshot("d1").ids) == 3  # duplicates on disk
-    r = S.Searcher(home, backend=be).search("cat", "d1", k=10)
-    assert len(r["hits"]) == 1 and r["collapsed_duplicates"] == 2  # ...one image to a client
+                     [{"image_id": "a" * 16, "path": "/img/1.jpg", "dataset": "d1", "w": 1, "h": 1}])
 
     hits = [{"image_id": "a" * 16, "path": f"/img/copy{i}.jpg", "dataset": "d1", "p": 0.9 - i / 100}
             for i in range(7)]
@@ -490,9 +488,9 @@ def test_duplicate_index_rows_collapse_but_stay_counted(home):
     assert [h["image_id"] for h in out] == ["a" * 16, "b" * 16]
     assert collapsed == 6
     assert len(out[0]["paths"]) == 7 and out[0]["path"] in out[0]["paths"]
-    # a duplicate id in ANOTHER dataset is a different row: B18(d) forbids merging them
-    cross = S.dedupe(hits[:1] + [{**hits[0], "dataset": "d2"}])
-    assert len(cross[0]) == 2 and cross[1] == 0
+    # same id in ANOTHER dataset is a distinct row: B18(d) forbids cross-dataset merging
+    cross, n = S.dedupe(hits[:1] + [{**hits[0], "dataset": "d2"}])
+    assert len(cross) == 2 and n == 0
 
 
 def test_every_hit_carries_exists(home):
