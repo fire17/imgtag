@@ -182,6 +182,7 @@ def index(
     home: Path | None = None,
     full_speed: bool = False,
     workers: int | None = None,
+    job_id: str | None = None,
     recursive: bool = True,
     log=lambda m: None,
     on_progress=None,
@@ -225,7 +226,7 @@ def index(
     t_decode = t_infer = t_queue = 0.0
     summary: dict = {}
 
-    with Writer(dataset, be, home=home) as w:
+    with Writer(dataset, be, home=home, job_id=job_id) as w:
         job = Job(
             w.job_id,
             dataset,
@@ -290,7 +291,7 @@ def index(
                 except _q.Empty:
                     t_queue += time.perf_counter() - t
                     flush_batch()  # never let a partial batch sit while the queue starves
-                    job.update(w.count, in_flight=received - w.count)
+                    job.update(w.count, inflight=received - w.count)
                     if not any(pr.is_alive() for pr in procs) and ready_q.empty():
                         log("all decode workers exited early")
                         break
@@ -319,7 +320,7 @@ def index(
                     )
                     if len(pend_recs) >= batch:
                         flush_batch()
-                job.update(w.count, in_flight=received - w.count)
+                job.update(w.count, inflight=received - w.count)
             flush_batch()
             w._flush_pending()  # make the tail durable before we report done
             wall = time.time() - t_start

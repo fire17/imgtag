@@ -48,6 +48,33 @@ def cmd_index(args) -> int:
     from .core.indexer import index
 
     t = time.time()
+    ds = args.dataset_flag or args.dataset or Path(args.path).expanduser().resolve().name
+    if not args.wait:
+        # B20: `index` returns a job id in <=500ms and does not block. The real work
+        # runs in a detached child that holds the dataset lock (ADR-6).
+        import subprocess
+        import uuid
+
+        from .core.progress import Job
+
+        job_id = uuid.uuid4().hex[:8]
+        Job(job_id, ds, 0, root=str(Path(args.path).expanduser()), state="queued")
+        argv = [sys.executable, "-m", "imgtag.cli", "index", str(args.path), "--dataset", ds,
+                "--wait", "--job-id", job_id]
+        for flag, v in (("--model", args.model), ("--geometry", args.geometry), ("--workers", args.workers),
+                        ("--batch", args.batch), ("--intra-op", args.intra_op), ("--precision", args.precision)):
+            if v:
+                argv += [flag, str(v)]
+        if args.full_speed:
+            argv.append("--full-speed")
+        if args.no_recursive:
+            argv.append("--no-recursive")
+        subprocess.Popen(argv, start_new_session=True, stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        obj = {"job_id": job_id, "dataset": ds, "state": "queued",
+               "tookMs": round((time.time() - t) * 1000, 1)}
+        _out(args, obj, f"job {job_id} queued for {ds} — poll: imgtag info --job {job_id}")
+        return 0
     prof = load_profile()
     for k, v in (("geometry", args.geometry), ("workers", args.workers), ("batch", args.batch),
                  ("intra_op", args.intra_op), ("precision", args.precision)):
@@ -55,10 +82,11 @@ def cmd_index(args) -> int:
             prof[k] = v
     s = index(
         args.path,
-        args.dataset,
+        ds,
         backend=args.model,
         profile=prof,
         workers=args.workers,
+        job_id=args.job_id,
         full_speed=args.full_speed,
         recursive=not args.no_recursive,
         log=_err if not args.json else (lambda m: None),
@@ -74,11 +102,35 @@ def cmd_index(args) -> int:
     return 0
 
 
+def _daemon_state() -> dict:
+    """Endpoint record published by the daemon (ADR-13); b-daemon owns writing it."""
+    p = store.imgtag_home() / "daemon.json"
+    try:
+        d = json.loads(p.read_bytes())
+        return {"running": True, **d}
+    except (OSError, ValueError):
+        return {"running": False, "socket": str(store.imgtag_home() / "daemon.sock")}
+
+
 def cmd_info(args) -> int:
+    t0 = time.perf_counter()
+    if getattr(args, "job", None):
+        job = read_job(args.job)
+        if job is None:
+            _err(f"no such job {args.job}")
+            if args.json:
+                json.dump({"error": "UnknownJob", "job_id": args.job, "exit": 4}, sys.stdout)
+                sys.stdout.write("\n")
+            return 4
+        job["tookMs"] = round((time.perf_counter() - t0) * 1000, 2)
+        _out(args, job, json.dumps(job, indent=1))
+        return 0
     if args.dataset:
         man = store.read_manifest(args.dataset)
         jobs = [j for j in list_jobs() if j.get("dataset") == args.dataset][:5]
-        obj = {"dataset": args.dataset, "manifest": man, "jobs": jobs}
+        obj = {"dataset": args.dataset, "manifest": man, "jobs": jobs, "daemon": _daemon_state(),
+               "datasets": [{"dataset": args.dataset, "count": man["count"], "model_id": man["model_id"]}],
+               "tookMs": round((time.perf_counter() - t0) * 1000, 2)}
         _out(args, obj, f"{args.dataset}: {man['count']} images, model {man['model_id']} "
                         f"({man['model_sha'][:12]}), dim {man['dim']}, {len(man['shards'])} shard(s)")
         return 0
@@ -88,7 +140,8 @@ def cmd_info(args) -> int:
         ds.append({"dataset": name, "count": m["count"], "model_id": m["model_id"], "dim": m["dim"],
                    "updated": m.get("updated"), "bytes": sum(s["emb_bytes"] + s["ids_bytes"] for s in m["shards"])})
     obj = {"datasets": ds, "jobs": list_jobs(limit=10), "home": str(store.imgtag_home()),
-           "profile": load_profile(), "backends": sorted(models.registry())}
+           "daemon": _daemon_state(), "profile": load_profile(), "backends": sorted(models.registry()),
+           "tookMs": round((time.perf_counter() - t0) * 1000, 2)}
     _out(args, obj, "\n".join(f"{d['dataset']:24s} {d['count']:>7} imgs  {d['model_id']}" for d in ds) or "no datasets")
     return 0
 
@@ -140,8 +193,11 @@ def cmd_search(args) -> int:
 
     t0 = time.perf_counter()
     names = [args.dataset] if args.dataset else store.list_datasets()
-    if not names:
-        raise store.UnknownDatasetError("no datasets indexed")
+    if not names:  # nothing indexed yet is an honest empty answer, not an error
+        _out(args, {"query": args.query, "tookMs": round((time.perf_counter() - t0) * 1000, 2),
+                    "coverage": {"indexed": 0, "total": 0}, "hits": [], "no_match": True,
+                    "calibrated": False}, "no datasets indexed")
+        return 0
     snaps = [store.open_snapshot(n) for n in names]
     # the manifest decides the model AND its precision — the query must live in the same
     # embedding space as the index (int8 vs fp32 vision differ at cos ~0.94)
@@ -217,13 +273,18 @@ def cmd_job(args) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser("imgtag", description="CPU-only semantic image search")
-    p.add_argument("--json", action="store_true", help="machine output on stdout (B20)")
+    # --json is accepted before OR after the verb (agents write it either way)
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("--json", action="store_true", help="machine output on stdout (B20)")
+    p = argparse.ArgumentParser("imgtag", description="CPU-only semantic image search", parents=[common])
     sub = p.add_subparsers(dest="verb", required=True)
 
-    i = sub.add_parser("index", help="index a folder into a dataset")
+    i = sub.add_parser("index", help="index a folder into a dataset", parents=[common])
     i.add_argument("path")
-    i.add_argument("dataset")
+    i.add_argument("dataset", nargs="?", help="dataset slug (defaults to the folder name)")
+    i.add_argument("--dataset", dest="dataset_flag")
+    i.add_argument("--wait", action="store_true", help="run in the foreground instead of returning a job id")
+    i.add_argument("--job-id", dest="job_id", help=argparse.SUPPRESS)
     i.add_argument("--model")
     i.add_argument("--full-speed", action="store_true")
     i.add_argument("--no-recursive", action="store_true")
@@ -234,32 +295,34 @@ def build_parser() -> argparse.ArgumentParser:
     i.add_argument("--precision", choices=["fp32", "fp16", "int8"])
     i.set_defaults(fn=cmd_index)
 
-    n = sub.add_parser("info", help="datasets, jobs, profile")
+    n = sub.add_parser("info", help="datasets, jobs, profile", parents=[common])
     n.add_argument("dataset", nargs="?")
+    n.add_argument("--job", help="report one job's live status")
     n.set_defaults(fn=cmd_info)
 
-    m = sub.add_parser("manage", help="create/rename/reindex/delete a dataset")
+    m = sub.add_parser("manage", help="create/rename/reindex/delete a dataset", parents=[common])
     m.add_argument("action", choices=["create", "rename", "reindex", "delete"])
     m.add_argument("dataset")
     m.add_argument("--to")
     m.add_argument("--path")
     m.add_argument("--model")
+    m.add_argument("--yes", "-y", action="store_true", help="no-op: imgtag never prompts (B20)")
     m.set_defaults(fn=cmd_manage)
 
-    s = sub.add_parser("search", help="semantic search")
+    s = sub.add_parser("search", help="semantic search", parents=[common])
     s.add_argument("query")
     s.add_argument("--dataset")
     s.add_argument("-k", type=int, default=50)
     s.add_argument("--model")
     s.set_defaults(fn=cmd_search)
 
-    d = sub.add_parser("doctor", help="autotune this machine (~30s)")
+    d = sub.add_parser("doctor", help="autotune this machine (~30s)", parents=[common])
     d.add_argument("--show", action="store_true", help="print the stored profile, do not re-tune")
     d.add_argument("--model")
     d.add_argument("--fetch", metavar="BACKEND", help="download a backend's artifacts")
     d.set_defaults(fn=cmd_doctor)
 
-    j = sub.add_parser("job", help="job status")
+    j = sub.add_parser("job", help="job status", parents=[common])
     j.add_argument("job_id", nargs="?")
     j.set_defaults(fn=cmd_job)
     return p

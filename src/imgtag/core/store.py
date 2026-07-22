@@ -180,11 +180,11 @@ class Writer:
     """Exclusive, durable appender. Context manager; the flock holder is the SOLE
     manifest writer (decode/embed workers never touch manifest.json)."""
 
-    def __init__(self, dataset: str, model, home: Path | None = None):
+    def __init__(self, dataset: str, model, home: Path | None = None, job_id: str | None = None):
         self.dataset = dataset
         self.model = model
         self.dir = dataset_dir(dataset, home)
-        self.job_id = uuid.uuid4().hex[:8]
+        self.job_id = job_id or uuid.uuid4().hex[:8]
         self.name = f"shard-{self.job_id}-0000.f32"
         self._buf_e: list[np.ndarray] = []
         self._buf_r: list[dict] = []

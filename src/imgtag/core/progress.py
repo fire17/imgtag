@@ -60,7 +60,7 @@ class Job:
             "state": "queued",
             "total": int(total),
             "done": 0,
-            "in_flight": 0,
+            "inflight": 0,
             "failed": 0,
             "failures": [],
             "img_s": 0.0,
@@ -79,11 +79,11 @@ class Job:
         self._write(force=True)
 
     def finish(self, **extra) -> None:
-        self.state.update(state="done", in_flight=0, eta_s=0.0, **extra)
+        self.state.update(state="done", inflight=0, eta_s=0.0, **extra)
         self._write(force=True)
 
     def fail(self, reason: str) -> None:
-        self.state.update(state="failed", error=str(reason)[:500], in_flight=0)
+        self.state.update(state="failed", error=str(reason)[:500], inflight=0)
         self._write(force=True)
 
     def add_failure(self, path: str, reason: str) -> None:
@@ -92,7 +92,7 @@ class Job:
             self.state["failures"].append({"path": str(path), "reason": str(reason)[:200]})
 
     # -- progress --------------------------------------------------
-    def update(self, done: int, in_flight: int = 0, stages_ms: dict | None = None, force: bool = False) -> None:
+    def update(self, done: int, inflight: int = 0, stages_ms: dict | None = None, force: bool = False) -> None:
         now = time.time()
         self._hist.append((now, done))
         while self._hist and now - self._hist[0][0] > RATE_WINDOW_S:
@@ -105,7 +105,7 @@ class Job:
         left = max(0, self.state["total"] - done - self.state["failed"])
         self.state.update(
             done=int(done),
-            in_flight=int(in_flight),
+            inflight=int(inflight),
             img_s=round(rate, 2),
             eta_s=round(left / rate, 1) if rate > 0 else None,
             elapsed_s=round(now - self.t0, 2),
@@ -119,6 +119,8 @@ class Job:
         if not force and now - self._last_write < HEARTBEAT_S:
             return
         self.state["updated"] = now
+        self.state["in_flight"] = self.state["inflight"]  # both spellings: b-skill's
+        # contract test reads `inflight`, b-daemon's SSE reads `in_flight`
         tmp = self.path.with_suffix(".tmp")
         with open(tmp, "w") as f:
             json.dump(self.state, f)
