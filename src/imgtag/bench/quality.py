@@ -182,9 +182,14 @@ def text_sets() -> dict:
     }
 
 
-def score_all(img: np.ndarray, txt: dict, ts: dict) -> dict:
-    """img: [N,D] corpus embeddings. txt: {'cat','sup','abs','cap'} text embeddings."""
-    a = X.corpus_a()
+def score_all(img: np.ndarray, txt: dict, ts: dict, gt: dict | None = None) -> dict:
+    """img: [N,D] corpus embeddings. txt: {'cat','sup','abs','cap'} text embeddings.
+
+    gt (aligned ground truth: pos/supers) defaults to corpus_a — pass the snapshot-aligned
+    version (corpus.align_to_ids) when scoring an already-indexed dataset whose row order is
+    the indexer's, not corpus_a's.
+    """
+    a = gt or X.corpus_a()
     out = {
         "b6_category_precision": category_precision(img, txt["cat"], ts["cat_names"],
                                                     a["pos"]),

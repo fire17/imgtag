@@ -63,6 +63,56 @@ def corpus_a() -> dict:
     }
 
 
+def _cocoid_from_path(path: str) -> int | None:
+    """COCO image id from a val2017 filename (000000000139.jpg → 139)."""
+    stem = path.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+    try:
+        return int(stem)
+    except ValueError:
+        return None
+
+
+def align_to_ids(ids: list[dict]) -> dict:
+    """Ground truth aligned to a SNAPSHOT's own row order (not corpus_a's order).
+
+    A pre-indexed dataset stores rows in indexer order, so corpus_a()'s positional `pos`
+    indices don't apply. This rebuilds pos/supers/captions against the row `i` of each id
+    record — the only correct way to score an already-indexed dataset.
+    """
+    inst = json.load(open(os.path.join(ANN, "instances_val2017.json")))
+    cats = {c["id"]: c for c in inst["categories"]}
+    per_img: dict[int, set[str]] = {}
+    for a in inst["annotations"]:
+        per_img.setdefault(a["image_id"], set()).add(cats[a["category_id"]]["name"])
+
+    row_of_cocoid: dict[int, int] = {}
+    for i, rec in enumerate(ids):
+        cid = _cocoid_from_path(rec.get("path", ""))
+        if cid is not None:
+            row_of_cocoid[cid] = i
+
+    pos = {c["name"]: [] for c in cats.values()}
+    for cid, row in row_of_cocoid.items():
+        for name in per_img.get(cid, ()):  # image annotated but maybe not in this dataset
+            pos[name].append(row)
+    pos = {k: sorted(v) for k, v in pos.items()}
+
+    supers: dict[str, list[str]] = {}
+    for c in cats.values():
+        supers.setdefault(c["supercategory"], []).append(c["name"])
+    for v in supers.values():
+        v.sort()
+
+    caps = json.load(open(os.path.join(ANN, "captions_val2017.json")))
+    captions = [(row_of_cocoid[a["image_id"]], a["caption"].strip())
+                for a in sorted(caps["annotations"], key=lambda a: a["id"])
+                if a["image_id"] in row_of_cocoid]
+
+    return {"pos": pos, "supers": {k: supers[k] for k in SUPERCATS if k in supers},
+            "captions": captions, "n": len(ids),
+            "coverage": len(row_of_cocoid)}
+
+
 @functools.lru_cache(maxsize=1)
 def absent_concepts(n: int = 25) -> list[str]:
     """B7 absent list, AUTO-DERIVED: LVIS categories with zero annotations on val2017.

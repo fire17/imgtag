@@ -204,3 +204,23 @@ def test_platt_no_longer_overflows_on_separable_data():
         ab = G.fit_platt(s, y)
         p = G.platt_apply(s, ab)
     assert p[:100].mean() > 0.9 and p[100:].mean() < 0.1
+
+
+# ── snapshot-aligned ground truth (phase-2 bench cli) ─────────────────────────
+def test_align_to_ids_maps_cocoids_to_row_order():
+    from imgtag.bench import corpus as X
+    # two fake rows in arbitrary order; row 0 = cocoid 139, row 1 = cocoid 285
+    ids = [{"path": "x/000000000285.jpg"}, {"path": "y/000000000139.jpg"}]
+    gt = X.align_to_ids(ids)
+    assert gt["n"] == 2 and gt["coverage"] == 2
+    # every category's positives must be valid row indices into the 2-row array
+    for rows in gt["pos"].values():
+        assert all(0 <= r < 2 for r in rows)
+    # a real val2017 image (285 = giraffe scene) must land on row 0, not corpus_a's index
+    assert any(0 in rows for rows in gt["pos"].values())
+
+
+def test_align_to_ids_ignores_non_coco_paths():
+    from imgtag.bench import corpus as X
+    gt = X.align_to_ids([{"path": "foo/not-a-number.jpg"}, {"path": "bar/000000000139.jpg"}])
+    assert gt["coverage"] == 1  # only the numeric filename resolves to a cocoid
