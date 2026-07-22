@@ -85,3 +85,13 @@ benchmark-cited, honestly labeled. Dispatched: track-weapons3 + track-nudity3 (o
 
 Also this hour (user, live feel-test): "im seeing duplicate results when searching" → fixed
 (cross-dataset collapse in dedupe(), also_in provenance, verified over HTTP).
+
+## 2026-07-22 ~14:16Z — per-track confidences in the image detail view (verbatim)
+
+> "Every image when i click on it in the gallery it must show the confidences for each one of
+> our tracks. Ranked and highlighted by confidence score."
+
+Derived (💭): detail overlay gains a tracks panel — ALL tracks, every image, ranked by p
+descending, highlighted by score/tier (alert > violation > review > match > none). Powered by
+ADR-15 sidecars / live matvec fallback. Routed: b-daemon (per-image all-tracks payload),
+b-app (ranked highlighted panel).
