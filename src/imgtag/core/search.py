@@ -139,6 +139,43 @@ def tier_rank(tier: str) -> int:
     return TIER_ORDER.index(tier) if tier in TIER_ORDER else len(TIER_ORDER)
 
 
+def derive_unfitted(margins: dict, corpus_stats: dict | None = None) -> dict:
+    """UNFITTED tier assignment from PER-TIER raw margins — the ONE shared derivation both
+    b-daemon's live reader and b-engine's store-side ``dataset_flags`` call, so their tiers
+    can never split-brain (the weaponprobe 160-nudity bug).
+
+    ``margins``: ``{tier: np.ndarray[N]}`` — each tier's raw margin (best tier concept minus
+    best negative), one column per tier. NOT a single banded margin: a single scalar cannot
+    express "high on the review bank, low on the alert bank", which is exactly what re-bands
+    a vape into violation. ``corpus_stats``: optional ``{tier: (mean, std)}`` to reuse
+    precomputed stats (a streaming/incremental path); ``None`` z-scores over the columns.
+
+    Each row is assigned to the tier it EXCEEDS most (argmax of the corpus z-score above the
+    zfloor), AND only if the picked tier's ABSOLUTE margin clears ``ABS_MARGIN_FLOOR`` — the
+    latter is what stops a homogeneous/OOD corpus firing its relative tail en masse. This is
+    TIER ASSIGNMENT only and never vetoes a search ranking (fail-open).
+    """
+    tiers = list(margins)
+    n = len(next(iter(margins.values()))) if tiers else 0
+    zfloor = float(_sigmoid(Z_A * K_STD + Z_B))
+    prob = {}
+    for t in tiers:
+        m = np.asarray(margins[t], np.float32)
+        if corpus_stats and t in corpus_stats:
+            mu, sd = corpus_stats[t]
+        else:
+            mu, sd = float(m.mean()), float(m.std())
+        prob[t] = _sigmoid(Z_A * ((m - mu) / max(sd, 1e-6)) + Z_B)
+    over = np.stack([prob[t] - zfloor for t in tiers]) if tiers else np.zeros((0, n))
+    fires = (over >= 0).any(0) if tiers else np.zeros(n, bool)
+    pick = over.argmax(0) if tiers else np.zeros(n, int)
+    if tiers:
+        picked_margin = np.stack([np.asarray(margins[t], np.float32) for t in tiers])[pick, np.arange(n)]
+        fires = fires & (picked_margin >= ABS_MARGIN_FLOOR)
+    return {"tiers": tiers, "prob": prob,
+            "is": {t: fires & (pick == i) for i, t in enumerate(tiers)}}
+
+
 def _order(h: dict) -> tuple:
     """Result order: coverage tier first (ALL > SOME > ANY), then the MEAN probability over
     the matched terms, then probability, then image id. Tiers therefore arrive contiguous
@@ -454,29 +491,23 @@ class Searcher:
                 else:  # dataset layer: this feature's own distribution over THIS corpus
                     thr[t] = zfloor
                     prob[t] = _sigmoid(za * ((m - m.mean()) / max(float(m.std()), 1e-6)) + zb)
-            # Assign each row to the tier it exceeds MOST — in margin space when fitted,
-            # by resemblance otherwise. Resemblance (not severity) is what keeps a bikini in
-            # `review`; a tau_review ABOVE tau would otherwise make review unreachable.
-            over = np.stack([(feat[t] if fitted else prob[t]) - thr[t] for t in tiers])
-            fires = (over >= 0).any(0)
-            pick = over.argmax(0)
-            # ABSOLUTE-MARGIN FLOOR (unfitted tracks only): the z-score is corpus-RELATIVE,
-            # so on a topically-homogeneous / OOD corpus the tail fires en masse even when
-            # the image is not absolutely close to the concept (weaponprobe -> 160 nudity in
-            # store-side derive). A fitted track already has an absolute floor (its margin
-            # tau). For an unfitted track, additionally require the PICKED tier's raw margin
-            # to clear an absolute floor — this also removes negative-margin noise (an image
-            # closer to the negatives than the concept) that the relative tail let through.
-            # MEASURED (unsplash-demo): removes only <0-margin weapons noise, touches no
-            # nudity/violence/drugs hit. FAIL-OPEN intact: this is TIER ASSIGNMENT, never a
-            # veto on search ranking.
-            if not fitted:
-                picked_margin = np.stack([feat[t] for t in tiers])[pick, np.arange(len(fires))]
-                fires = fires & (picked_margin >= ABS_MARGIN_FLOOR)
+            # Tier assignment. FITTED: gate in margin space on the fitted taus (margin-space
+            # exceedance). UNFITTED: the SHARED derive_unfitted() over the per-tier margins —
+            # the identical function b-engine's store-side dataset_flags calls, so the two
+            # can never split-brain (weaponprobe 160-nudity). It z-scores each tier's margin
+            # over the corpus, assigns by exceedance, and applies the absolute-margin floor
+            # (fail-open: tier assignment only, never a search-ranking veto).
+            if fitted:
+                over = np.stack([feat[t] - thr[t] for t in tiers])
+                fires = (over >= 0).any(0)
+                pick = over.argmax(0)
+                is_masks = {t: fires & (pick == i) for i, t in enumerate(tiers)}
+            else:
+                is_masks = derive_unfitted(feat)["is"]
             cats[name] = {
                 "tiers": tiers,
                 "p": {t: prob[t] for t in tiers},
-                "is": {t: fires & (pick == i) for i, t in enumerate(tiers)},
+                "is": is_masks,
                 # a category whose tiers are all CONTENT labels is not moderation at all
                 "moderation": not cfg.get("content_track") and not set(tiers) <= CONTENT_TIERS,
                 # `calibration` reflects the ACTUAL gating: "fitted" only when every tier

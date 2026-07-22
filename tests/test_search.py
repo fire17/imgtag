@@ -723,3 +723,24 @@ def test_absolute_margin_floor_blocks_ood_mass_fire(home, monkeypatch):
     c = t["categories"]["weapons"]
     # no cat image is absolutely weapon-like -> zero fires despite the relative tail
     assert int(c["is"]["violation"].sum()) == 0 and int(c["is"]["review"].sum()) == 0
+
+
+def test_derive_unfitted_shared_contract():
+    """The ONE shared derivation both the reader and store-side dataset_flags call.
+    Contract: per-tier margins -> tiers by exceedance + absolute-margin floor, fail-open."""
+    n = 100
+    # a genuine tail (the z-floor is 3 sigma): rows 0-1 strongly violation, 2-3 review, rest ~0
+    viol = np.zeros(n, np.float32); viol[:2] = 0.20; viol[2:4] = -0.05
+    rev = np.zeros(n, np.float32); rev[2:4] = 0.20; rev[:2] = -0.05
+    r = S.derive_unfitted({"violation": viol, "review": rev})
+    assert r["tiers"] == ["violation", "review"]
+    v, rv = r["is"]["violation"], r["is"]["review"]
+    assert v[:2].all() and not v[2:].any()             # rows 0-1 -> violation only
+    assert rv[2:4].all() and not rv[:2].any()          # rows 2-3 -> review only
+    assert not v[4:].any() and not rv[4:].any()        # the ~0 bulk fires NOTHING (abs floor)
+    # a negative-margin row never fires, whatever its corpus z-rank
+    r2 = S.derive_unfitted({"violation": np.full(30, -0.1, np.float32)})
+    assert not r2["is"]["violation"].any()
+    # corpus_stats override is honoured (reuse precomputed mean/std)
+    r3 = S.derive_unfitted({"violation": viol}, corpus_stats={"violation": (0.0, 0.05)})
+    assert r3["is"]["violation"][:2].all()
