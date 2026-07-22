@@ -64,6 +64,12 @@ TAU = 0.5  # probability floor for "this is a match"
 # sports car" (cos ~0.28) shows cars instead of a false no-match, since the free-text
 # logistic is only my measured default until a CAL-SET text fit lands (tags.json has none).
 GLOBAL_COS_FLOOR = 0.18
+# Absolute margin floor for UNFITTED moderation tiers: a tier fires only if the image's raw
+# margin (best tier concept - best negative) clears this, IN ADDITION to the corpus-relative
+# z-score. Without it, a homogeneous/OOD corpus mass-fires the relative tail (weaponprobe ->
+# 160 nudity). MEASURED on unsplash-demo: removes only negative-margin weapons noise, no
+# nudity/violence/drugs hit. A fitted track uses its own margin tau instead.
+ABS_MARGIN_FLOOR = 0.02
 THETA_SYN = 0.90  # near-tag rule: inherit a tag's calibration only at cos >= theta_syn
 K_STD = 3.0  # dataset-layer effective tau = max(tau_tag, mean + K_STD*std)
 # Counting a tag as PRESENT for the ALL-SOME-ANY spectrum is ranking, not gating, and gets
@@ -454,6 +460,19 @@ class Searcher:
             over = np.stack([(feat[t] if fitted else prob[t]) - thr[t] for t in tiers])
             fires = (over >= 0).any(0)
             pick = over.argmax(0)
+            # ABSOLUTE-MARGIN FLOOR (unfitted tracks only): the z-score is corpus-RELATIVE,
+            # so on a topically-homogeneous / OOD corpus the tail fires en masse even when
+            # the image is not absolutely close to the concept (weaponprobe -> 160 nudity in
+            # store-side derive). A fitted track already has an absolute floor (its margin
+            # tau). For an unfitted track, additionally require the PICKED tier's raw margin
+            # to clear an absolute floor — this also removes negative-margin noise (an image
+            # closer to the negatives than the concept) that the relative tail let through.
+            # MEASURED (unsplash-demo): removes only <0-margin weapons noise, touches no
+            # nudity/violence/drugs hit. FAIL-OPEN intact: this is TIER ASSIGNMENT, never a
+            # veto on search ranking.
+            if not fitted:
+                picked_margin = np.stack([feat[t] for t in tiers])[pick, np.arange(len(fires))]
+                fires = fires & (picked_margin >= ABS_MARGIN_FLOOR)
             cats[name] = {
                 "tiers": tiers,
                 "p": {t: prob[t] for t in tiers},

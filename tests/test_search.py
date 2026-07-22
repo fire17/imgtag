@@ -706,3 +706,20 @@ def test_fitted_head_sha_guard_rejects_wrong_model(home, monkeypatch, tmp_path):
     t = S.Searcher(home, backend=be).track_scores("d1")
     # the wrong-sha fitted file is IGNORED -> track stays unfitted, its bogus tau never gates
     assert t["categories"]["sports"]["calibration"] == "unfitted"
+
+
+def test_absolute_margin_floor_blocks_ood_mass_fire(home, monkeypatch):
+    """OOD guard: an unfitted tier must not mass-fire on a homogeneous/OOD corpus just
+    because the corpus-relative z-score tail is high. A row whose ABSOLUTE margin (best
+    tier concept - best negative) is below the floor never fires, whatever its z-rank."""
+    # corpus of 20 "cat" images (homogeneous). A "weapons" track whose concepts are all
+    # ORTHOGONAL to cats -> every image has a near-zero/negative absolute margin, so the
+    # z-score tail must NOT be allowed to fire the tier.
+    spec = {"version": 2, "categories": {"weapons": {
+        "label": "w", "violation": ["car"], "review": ["boat"], "negatives": ["dog"]}}}
+    monkeypatch.setattr(S, "tracks", lambda: spec)
+    be = build(home, "d1", ["cat"] * 20)  # nothing is a weapon
+    t = S.Searcher(home, backend=be).track_scores("d1")
+    c = t["categories"]["weapons"]
+    # no cat image is absolutely weapon-like -> zero fires despite the relative tail
+    assert int(c["is"]["violation"].sum()) == 0 and int(c["is"]["review"].sum()) == 0
