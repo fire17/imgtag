@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>imgtag</title>
+<link rel="stylesheet" href="./app.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' rx='3' fill='%23111'/><circle cx='6.5' cy='6.5' r='3.2' fill='none' stroke='%23f0a850' stroke-width='1.6'/><path d='M9 9l4 4' stroke='%23f0a850' stroke-width='1.8' stroke-linecap='round'/></svg>">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="bar" role="banner">
+  <div class="bar__brand" aria-hidden="true">imgtag</div>
+
+  <form class="q" role="search" id="searchForm" autocomplete="off">
+    <label class="q__label" for="q">Search all indexed images</label>
+    <input id="q" name="q" type="search" class="q__input" spellcheck="false"
+           placeholder="search everything — car, vehicle, someone laughing…"
+           aria-describedby="qHint">
+    <span class="q__kbd" id="qHint" aria-hidden="true">/</span>
+    <!-- coverage hairline: how much of the fleet this query could actually see -->
+    <div class="q__cov" id="qCov" hidden><i></i></div>
+  </form>
+
+  <nav class="nav" aria-label="Views">
+    <a href="#/" data-nav="fleet">Fleet</a>
+    <a href="#/jobs" data-nav="jobs">Jobs<span class="dot" id="jobsDot" hidden></span></a>
+  </nav>
+</header>
+
+<main id="main" tabindex="-1"></main>
+
+<footer class="status" role="status" aria-live="polite">
+  <span class="status__cell" id="stLatency">—</span>
+  <span class="status__cell" id="stHits"></span>
+  <span class="status__cell status__cell--grow" id="stCoverage"></span>
+  <span class="status__cell" id="stJobs"></span>
+  <span class="status__cell" id="stDaemon">connecting…</span>
+</footer>
+
+<dialog id="detail" class="detail" aria-label="Image detail"></dialog>
+
+<script src="./app.js"></script>
+</body>
+</html>
