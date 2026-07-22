@@ -21,6 +21,7 @@ from .store import imgtag_home
 
 PROFILE_VERSION = 1
 WORKER_RSS_MB = 130  # spawn start-method: each decode worker is a fresh interpreter + PIL
+WORKER_SESSION_RSS_MB = 210  # decode worker that ALSO owns a session (spike: 188MB int8 b1)
 SESSION_RSS_MB = 420  # central ORT vision session headroom (spike: 329MB fp32 @384 b1)
 INDEX_RSS_BUDGET_MB = 1024  # B8 hard: peak tree RSS while indexing
 
@@ -79,14 +80,21 @@ def mem_available_mb() -> int:
         return 4096
 
 
-def worker_count(cores: int | None = None, avail_mb: int | None = None, full_speed: bool = False) -> int:
-    """POLITE (default): clamp(usable-2, 2, 8), capped by the memory arithmetic (ADR-11)."""
+def worker_count(
+    cores: int | None = None, avail_mb: int | None = None, full_speed: bool = False, geometry: str = "central"
+) -> int:
+    """POLITE (default): clamp(usable-2, 2, 8), capped by the memory arithmetic (ADR-11).
+
+    geometry=worker puts one ORT session in every worker (measured 188MB for PE-Core-S
+    int8 b1, 329MB fp32) so the per-worker cost — and therefore the cap — is much higher.
+    """
     n = cores if cores is not None else usable_cores()[0]
-    if full_speed:
-        return max(1, n)
     avail = avail_mb if avail_mb is not None else mem_available_mb()
-    budget = min(INDEX_RSS_BUDGET_MB, max(256, avail // 2)) - SESSION_RSS_MB
-    by_mem = max(1, int(budget // WORKER_RSS_MB))
+    per_worker = WORKER_SESSION_RSS_MB if geometry == "worker" else WORKER_RSS_MB
+    budget = min(INDEX_RSS_BUDGET_MB, max(256, avail // 2)) - (0 if geometry == "worker" else SESSION_RSS_MB)
+    by_mem = max(1, int(budget // per_worker))
+    if full_speed:
+        return max(1, min(n, by_mem))
     return max(1, min(max(2, min(n - 2, 8)), by_mem, n))
 
 
@@ -179,16 +187,28 @@ def autotune(backend_name: str = None, timebox_s: float = 45.0, n_images: int = 
     fp32_best = max((r for r in rows if r["precision"] == "fp32"), key=lambda r: r["img_s"], default=None)
     if fp32_best and best["precision"] == "int8" and best["img_s"] < fp32_best["img_s"] * 1.05:
         best = fp32_best  # int8 must EARN it on this host (ADR-10e)
+    # geometry: central (one session at the best intra_op) vs worker (W sessions at
+    # intra_op=1). Projected from the measured intra=1 row of the winning precision —
+    # derived from measurement, not guessed; `bench index --geometry` settles it.
+    w_workers = worker_count(prof["cores"], prof["mem_available_mb"], geometry="worker")
+    solo = next((r["img_s"] for r in rows if r["precision"] == best["precision"] and r["intra_op"] == 1
+                 and r["batch"] == best["batch"]), None)
+    proj = round(solo * w_workers, 2) if solo else 0.0
+    geometry = "worker" if proj > best["img_s"] * 1.15 else "central"
     prof.update(
         measured=True,
         backend=name,
         precision=best["precision"],
         intra_op=best["intra_op"],
         batch=best["batch"],
+        geometry=geometry,
+        geometry_projection={"central_img_s": best["img_s"], "worker_img_s_projected": proj,
+                             "worker_processes": w_workers, "basis": "measured intra_op=1 row x workers"},
+        worker_intra_op=1,
         sweep=rows,
         tuned_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         tune_seconds=round(time.time() - t0, 1),
         loadavg=[round(x, 2) for x in os.getloadavg()],
     )
-    prof["workers"] = worker_count(prof["cores"], prof["mem_available_mb"])
+    prof["workers"] = worker_count(prof["cores"], prof["mem_available_mb"], geometry=geometry)
     return prof

@@ -167,6 +167,27 @@ def _session(path: Path, intra: int) -> ort.InferenceSession:
     return ort.InferenceSession(str(path), o, providers=["CPUExecutionProvider"])
 
 
+def preprocess_image(im: Image.Image, size: int, squash: bool = True, resample=Image.Resampling.BILINEAR) -> np.ndarray:
+    """PIL image -> uint8 [size,size,3]. ``draft()`` decodes JPEGs at 1/2..1/8 scale in
+    the DCT domain (measured 1.7–2.1×, runtime.md §4.2); EXIF orientation is applied
+    BEFORE the resize. Module-level so decode workers need no ORT session."""
+    try:
+        im.draft("RGB", (size, size))  # no-op for non-JPEG
+    except (AttributeError, ValueError):
+        pass
+    im = ImageOps.exif_transpose(im)
+    if im.mode != "RGB":
+        im = im.convert("RGB")
+    if squash:
+        return np.asarray(im.resize((size, size), resample), np.uint8)
+    w, h = im.size
+    s = size / min(w, h)
+    im = im.resize((max(size, round(w * s)), max(size, round(h * s))), resample)
+    w, h = im.size
+    l, t = (w - size) // 2, (h - size) // 2
+    return np.asarray(im.crop((l, t, l + size, t + size)), np.uint8)
+
+
 def _l2(a: np.ndarray) -> np.ndarray:
     a = np.asarray(a, np.float32)
     n = np.linalg.norm(a, axis=-1, keepdims=True)
@@ -176,7 +197,7 @@ def _l2(a: np.ndarray) -> np.ndarray:
 class ModelBackend:
     """One model, two towers. Vision session is eager, text session lazy + releasable."""
 
-    def __init__(self, name: str, spec: dict, profile: dict):
+    def __init__(self, name: str, spec: dict, profile: dict, vision: bool = True):
         self.name = name
         self.spec = spec
         self.profile = profile
@@ -199,35 +220,19 @@ class ModelBackend:
         self.vision_path = path
         self.model_sha = file_sha256(path)
         self.model_id = f"{name}-{self.precision}"
-        self._vs = _session(path, profile.get("intra_op", 2))
-        i = self._vs.get_inputs()[0]
-        self._vin = i.name
-        self._fixed_batch = i.shape[0] if isinstance(i.shape[0], int) else None
+        self._vs = self._vin = self._fixed_batch = None
+        if vision:  # geometry=worker: the coordinator wants the identity, not the session
+            self._vs = _session(path, profile.get("intra_op", 2))
+            i = self._vs.get_inputs()[0]
+            self._vin = i.name
+            self._fixed_batch = i.shape[0] if isinstance(i.shape[0], int) else None
         self._ts = None
         self._tok = None
 
     # -- preprocess ------------------------------------------------
     def preprocess(self, im: Image.Image) -> np.ndarray:
-        """PIL image -> uint8 [H,W,3]. draft() decodes JPEGs at 1/2..1/8 scale in the
-        DCT domain (measured 1.7–2.1×); EXIF orientation applied before resize."""
-        S = self.size
-        try:
-            im.draft("RGB", (S, S))  # no-op for non-JPEG
-        except (AttributeError, ValueError):
-            pass
-        im = ImageOps.exif_transpose(im)
-        if im.mode != "RGB":
-            im = im.convert("RGB")
-        if self.squash:
-            im = im.resize((S, S), self.resample)
-        else:
-            w, h = im.size
-            s = S / min(w, h)
-            im = im.resize((max(S, round(w * s)), max(S, round(h * s))), self.resample)
-            w, h = im.size
-            l, t = (w - S) // 2, (h - S) // 2
-            im = im.crop((l, t, l + S, t + S))
-        return np.asarray(im, np.uint8)
+        """PIL image -> uint8 [H,W,3] per this model's own config."""
+        return preprocess_image(im, self.size, self.squash, self.resample)
 
     # -- towers ----------------------------------------------------
     def embed_images(self, batch: np.ndarray) -> np.ndarray:
@@ -274,7 +279,7 @@ class ModelBackend:
         return f"<ModelBackend {self.model_id} dim={self.dim} sha={self.model_sha[:12]}>"
 
 
-def load_backend(name: str, profile: dict | None = None) -> ModelBackend:
+def load_backend(name: str, profile: dict | None = None, vision: bool = True) -> ModelBackend:
     reg = registry()
     if name not in reg:
         raise ModelUnavailableError(f"unknown backend {name!r}; known: {', '.join(reg)}")
@@ -282,7 +287,7 @@ def load_backend(name: str, profile: dict | None = None) -> ModelBackend:
         from .doctor import load_profile
 
         profile = load_profile()
-    return ModelBackend(name, reg[name], profile)
+    return ModelBackend(name, reg[name], profile, vision)
 
 
 DEFAULT_BACKEND = "pecore-s16-384"
