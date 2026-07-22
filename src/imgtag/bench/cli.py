@@ -226,6 +226,78 @@ def cmd_headtohead(args) -> dict:
                     "needs the engine indexer (phase-2 --index path, conductor-coordinated)"}
 
 
+# ── B16 parity: localize the engine-vs-harness gap (draft / resample / tokenizer) ─
+def cmd_parity(args) -> dict:
+    """Isolate which stage moves embeddings: draft-decode, resample, or tokenizer.
+
+    Same vision/text ONNX in every arm (pecore-s16-384), so any cos<1 is a PIPELINE diff,
+    not a model diff. draft() is the prime suspect (track-nudity: draft@wrong-res perturbed
+    embeddings up to 83/255).
+    """
+    import glob
+
+    from PIL import Image, ImageOps
+
+    from ..core import doctor, models
+    from ..core.models import preprocess_image
+    from . import quant as Q
+
+    mid = "pecore-s16-384"
+    spec = models.registry()[mid]
+    be = models.ModelBackend(mid, spec, doctor.load_profile(), vision=True)
+    size, resample = be.size, be.resample
+    paths = sorted(glob.glob(f"{C.DATA}/quick500/images/*.jpg"))[:args.n]
+
+    def uint8_full(p):  # full decode (harness reference), NO draft
+        im = ImageOps.exif_transpose(Image.open(p)).convert("RGB")
+        return np.asarray(im.resize((size, size), resample), np.uint8)
+
+    def uint8_draft(p):  # engine path — draft() active
+        return preprocess_image(Image.open(p), size, be.squash, resample)
+
+    full = be.embed_images(np.stack([uint8_full(p) for p in paths]))
+    draft = be.embed_images(np.stack([uint8_draft(p) for p in paths]))
+    img_fid = Q.fidelity(full, draft)  # cos(full-decode, draft-decode) — the DRAFT effect
+
+    from . import textsets as T
+    queries = list(dict.fromkeys(_query_pool(min(300, args.n))))
+    ctx = spec.get("ctx", 32)
+    ids_oc = T.tokenize(queries, "clip", ctx)
+    tok = models._tokenizer(spec)
+    ids_eng = tok.encode(queries)
+    # AXIS 1 tokenizer: exact id match (same tower → any diff is the tokenizer's).
+    tok_mismatch = int(sum(1 for a, b in zip(ids_eng, ids_oc)
+                           if [x for x in a if x] != [x for x in b if x]))
+    # AXIS 2 text precision: fp32 vs int8 text tower, SAME open_clip tokens.
+    tp = spec.get("text", {})
+    fp32_txt = str(models.find_artifact(spec, tp["fp32"])) if tp.get("fp32") else None
+    int8_txt = str(models.find_artifact(spec, tp["int8"])) if tp.get("int8") else None
+    prec_fid = None
+    if fp32_txt and int8_txt:
+        ef = C.embed_texts(C.session(fp32_txt, 2), ids_oc, 0)
+        ei = C.embed_texts(C.session(int8_txt, 2), ids_oc, 0)
+        prec_fid = Q.fidelity(ef, ei)
+
+    verdict = []
+    verdict.append(f"DRAFT-DECODE: {'CLEAN' if img_fid['mean_cos'] >= 0.999 else 'MOVES'} "
+                   f"(cos {img_fid['mean_cos']:.4f})")
+    verdict.append(f"TOKENIZER: {'CLEAN' if tok_mismatch == 0 else str(tok_mismatch)+' mismatches'} "
+                   f"(ClipBPE vs open_clip over {len(queries)} queries)")
+    if prec_fid:
+        verdict.append(f"TEXT-PRECISION int8 vs fp32: cos {prec_fid['mean_cos']:.4f} "
+                       f"nn_agree {prec_fid['nn_agree']:.3f} — "
+                       f"{'the gap source' if prec_fid['nn_agree'] < 0.95 else 'minor'}")
+    return {**_header(), "budget": "B16-parity", "n_images": len(paths),
+            "n_queries": len(queries),
+            "draft_vs_fulldecode": img_fid,
+            "tokenizer_id_mismatches": tok_mismatch,
+            "text_precision_int8_vs_fp32": prec_fid,
+            "verdict": verdict,
+            "note": "same ONNX in every arm → any cos<1 is a PIPELINE diff. Engine ships "
+                    "int8 text (ADR-5 8GB budget); the harness reference used fp32 text — "
+                    "text int8 nn_agree<1 is the measured engine-vs-harness quality gap."}
+
+
 # ── phase-1 passthroughs ─────────────────────────────────────────────────────
 def cmd_candidates(args) -> int:
     from . import matrix
@@ -297,6 +369,10 @@ def main(argv=None) -> int:
     ix.add_argument("--full-speed", action="store_true")
     ix.add_argument("--json", action="store_true")
 
+    pa = sub.add_parser("parity", help="B16 localize engine-vs-harness gap")
+    pa.add_argument("--n", type=int, default=200)
+    pa.add_argument("--json", action="store_true")
+
     c = sub.add_parser("candidates", help="phase-1 candidate matrix")
     c.add_argument("--all", action="store_true")
     c.add_argument("--candidates", default="")
@@ -307,7 +383,7 @@ def main(argv=None) -> int:
         return cmd_candidates(a)
 
     fn = {"search": cmd_search, "resources": cmd_resources, "quality": cmd_quality,
-          "headtohead": cmd_headtohead, "index": cmd_index}[a.bench_cmd]
+          "headtohead": cmd_headtohead, "index": cmd_index, "parity": cmd_parity}[a.bench_cmd]
     out = fn(a)
     print(json.dumps(out, indent=None if getattr(a, "json", False) else 1))
     return out.get("exit", 0) if isinstance(out, dict) else 0

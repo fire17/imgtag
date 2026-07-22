@@ -4,7 +4,12 @@
 > Everything lands under `data/` (gitignored — verified: `git check-ignore data/…` hits).
 > **Unsplash images are LOCAL RESEARCH ONLY — never redistributed, never committed.**
 
-## CORPUS-E karpathy-test — 5,000 val2014 (Karpathy TEST split, B17) — 🟡 fetching (added 17:51)
+## CORPUS-E karpathy-test — 5,000 val2014 (Karpathy TEST split, B17) — ✅ DONE 5000/5000 (18:50)
+
+> 18:50 checkpoint: **5,000/5,000** fetched (798MB), gap of 5 closed by idempotent re-run.
+> Verify sweep n=200 ok=0 bad, width median 640, mean 0.16MB. **NOT committed — publish freeze
+> active**; this update + the entry below are held in the working tree, to be committed once the
+> team-lead lifts the freeze.
 
 Location `data/karpathy-test/`. b-bench needs the canonical Karpathy test split for B17's
 "within-2pts-of-card" retrieval clause — our CORPUS-A (val2017) overlaps it only 593/5000, so

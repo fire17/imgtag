@@ -330,3 +330,21 @@ curl: (6) Could not resolve host: images.unsplash.com_TheBeach.jpg
 [2026-07-22T17:51:04] CORPUS-E done: 20/5000 images, 3.2M
 [2026-07-22T17:51:13] CORPUS-E start: 5000 urls (N=0) out=/Users/magic/Creations/ImgTag/data/karpathy-test par=8
 [2026-07-22T17:51:13] CORPUS-E start: 5000 urls (N=0) out=/Users/magic/Creations/ImgTag/data/karpathy-test par=8
+curl: (6) Could not resolve host: images.cocodataset.org
+curl: (56) Recv failure: Connection reset by peer
+curl: (56) Recv failure: Connection reset by peer
+curl: (56) Recv failure: Connection reset by peer
+curl: (28) Operation timed out after 180001 milliseconds with 0 bytes received
+curl: (56) Recv failure: Can't assign requested address
+curl: (28) Operation timed out after 180002 milliseconds with 0 bytes received
+curl: (28) Operation timed out after 180005 milliseconds with 0 bytes received
+curl: (28) Operation timed out after 180006 milliseconds with 0 bytes received
+curl: (28) Operation timed out after 180003 milliseconds with 0 bytes received
+curl: (28) Operation timed out after 180006 milliseconds with 0 bytes received
+curl: (28) Operation timed out after 180004 milliseconds with 0 bytes received
+curl: (28) Operation timed out after 180006 milliseconds with 0 bytes received
+curl: (56) Recv failure: Connection reset by peer
+[2026-07-22T18:17:25] CORPUS-E done: 4995/5000 images, 798M
+[2026-07-22T18:17:25] CORPUS-E done: 4995/5000 images, 798M
+[2026-07-22T18:50:54] CORPUS-E start: 5000 urls (N=0) out=/Users/magic/Creations/ImgTag/data/karpathy-test par=8
+[2026-07-22T18:50:56] CORPUS-E done: 5000/5000 images, 798M
