@@ -405,16 +405,21 @@ Artifacts: `vision_fp32_mb` 351.8MB · `vision_int8_mb` 96.0MB · `text_fp32_mb`
 
 **Default backend: `pecore-s16-384`, fp32 vision + int8 text.**
 
-It is the *only* candidate that is **both** B8-eligible on the 8GB target **and** clears the
-B17 +12pt-vs-control gate:
+It is the *only* candidate that is **both** B8-eligible on the 8GB target **and** near the
+B17 +12pt-vs-control gate. ⚠️ **The R@10 column below is measured with fp32 TEXT (the
+reference-quality ceiling). The shipped 8GB config uses int8 TEXT** (fp32 text is ~850MB
+resident, blows B8) — `bench parity` measured int8 text at **−3.1 pts R@10** (nn_agree 0.72,
+a 28% query-rank shift that mean-cos 0.98 hides). So the winner's SHIPPED number is R@10
+**74.2 = +9.0pt** over control, not 77.2/+12. Escalated: the +12 gate was set on a text
+tower that doesn't fit the target (ruling pending — likely relax to +9).
 
-| candidate | B8 (per-worker RSS) | B17 R@10 (gate 77.2) | verdict |
-|---|---|---|---|
-| **pecore-s16-384** | ✅ 425MB | **77.2** (=gate) | **DEFAULT** |
-| pecore-t16-384 | ✅ 230MB | 70.9 (−6.3) | edge/speed fallback — misses quality gate |
-| siglip-base-224 | 🔴 688MB | 80.5 (best) | B8-INELIGIBLE (fat vision + 785MB text) |
-| siglip2-base-224 | 🔴 645MB | 77.5 | B8-INELIGIBLE (787MB int8 text tower) |
-| openclip-vitb32 | 🔴 626MB | 65.2 | B17 CONTROL only |
+| candidate | B8 (per-worker RSS) | R@10 fp32-text (ceiling) | R@10 int8-text (shipped) | verdict |
+|---|---|---|---|---|
+| **pecore-s16-384** | ✅ 425MB | **77.2** | **74.2** (+9.0) | **DEFAULT** |
+| pecore-t16-384 | ✅ 230MB | 70.9 | ~67.8 | edge/speed fallback |
+| siglip-base-224 | 🔴 688MB | 80.5 (best) | — | B8-INELIGIBLE (fat vision + 785MB text) |
+| siglip2-base-224 | 🔴 645MB | 77.5 | — | B8-INELIGIBLE (787MB int8 text tower) |
+| openclip-vitb32 | 🔴 626MB | 65.2 | — | B17 CONTROL only |
 
 ### The decisive findings (all measured, not projected)
 
