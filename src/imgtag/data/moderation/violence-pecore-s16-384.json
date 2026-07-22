@@ -1,0 +1,15 @@
+{
+ "category": "violence",
+ "model_id": "pecore-s16-384",
+ "scorer": "margin",
+ "platt": [
+  54.0,
+  -2.54
+ ],
+ "tau_alert": 0.95,
+ "tau_violation": 0.85,
+ "tau_review": 0.46,
+ "calibration": "fp-budget",
+ "enforcement_ready": false,
+ "note": "p-space ascending FP-budget taus; fixes the 2026-07-22 nudityprobe margin-space unit bug on pre-fix indexes without re-embedding (ADR-15 T1/T3 refit-is-free)."
+}

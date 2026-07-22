@@ -27,12 +27,15 @@ Violence rides the embeddings the index already computed — a prompt-ensemble b
 margin, one `[N,D]·[D,P]` matmul, **zero new FLOPs** — because the B25 dedicated-model
 budget is already ~25% spent by nudity and the model survey found **no permissively-licensed
 still-image violence/gore model with published metrics worth a second forward pass**
-(§6). Four banks and their arbitration are the whole design: a `SEVERE` gore bank (→
-`alert`), a `VIOLENT` bank of eight assault/abuse subcategories (→ `violation`), a
-`CONTEXT` bank of staged & clinical twins — halloween SFX, film gore, surgery, butchery —
-that is **never subtracted, only arbitrated** (→ `review`), and a subtracted `BACKGROUND`
-bank whose headline members are **contact sports** (boxing / martial arts / wrestling /
-rugby), lifted verbatim from `sports.py` so the two tracks share a concept space. Measured
+(§6). Four banks feed ONE stored score `p`: a `SEVERE` gore bank + a `VIOLENT` bank of eight
+assault/abuse subcategories set `p = PLATT(max-margin)`; a `CONTEXT` bank of staged & clinical
+twins — halloween SFX, film gore, surgery, butchery — that is **never subtracted** (it is the
+`review` prompt set the reader competes against); and a subtracted `BACKGROUND` bank whose
+headline members are **contact sports** (boxing / martial arts / wrestling / rugby), lifted
+verbatim from `sports.py` so the two tracks share a concept space. Tiers are ASCENDING
+`p`-space bands (`store.derive_tiers`), **not** a per-image arbiter — the arbiter the first
+design carried was bypassed by both shipping paths and caused the nudityprobe incident (§4).
+Measured
 on 5,000 COCO images and 3,058 Unsplash confusables, **under the path that ships (b-daemon's
 reader, §3.0): contact sports flag 0.00% alert / 0.38% violation, boxing-and-martial-arts
 specifically flag 0% violation** (§3) — the classic false-positive class does not fire,
@@ -49,7 +52,7 @@ recall-first REVIEW QUEUE.**
 | # | Approach | Verdict | Evidence |
 |---|---|---|---|
 | 1 | **Prompt-ensemble background margin** over the existing embeddings — `max(bank) − max(BACKGROUND)`, 3 templates/concept | **SHIPPED** | one matmul, zero new models, zero new deps (ADR-7 clean), runs on the 8GB target unchanged (ADR-10); contact-sport violation FP 0.38%, COCO 0.44% (§3) |
-| 2 | Four banks with **tier arbitration** (severe/violent must beat CONTEXT by TIER_MARGIN or demote to review) | **SHIPPED — the anti-defect** | halloween-SFX alert flags demote 3→0, COCO alert 6→2, violation 25→22 (§4). Reuses the drugs-lane arbiter that killed the vape-exhale-as-violation bug |
+| 2 | **Tiers as ascending `p`-space bands** (`store.derive_tiers`, one score `p`) | **SHIPPED** | the multi-margin CONTEXT arbiter (v1) was bypassed by both shipping paths and, applied as margin-space taus to a `p`-space score, produced 16 false alerts on swimwear — replaced by `p`-space bands, verified `imgtag track recount nudityprobe` → 0 alert / 0 violation (§4) |
 | 3 | **CONTEXT twins subtracted** (halloween/surgery in the BACKGROUND bank) | **DEAD END — the drugs-lane lesson, applied forward** | subtracting a concept visually identical to the positive subtracts the signal (drugs measured AP 0.58→0.04 on clinical syringes). Fake blood *is* blood; it must arbitrate, not subtract |
 | 4 | A dedicated per-image violence model (nudity's path) | **Rejected for v1** | B25 budget ~25% spent; and the survey found no permissive still-image model with published metrics (§6). Logged as the distillation-teacher darwin item, not a v1 dependency |
 | 5 | A trained logistic head on labelled positives (the weapons-lane path) | **Not possible here** | zero labelled violence positives may be fetched (EVAL DATA LAW). A head cannot be fitted or validated on this machine |
@@ -62,7 +65,7 @@ recall-first REVIEW QUEUE.**
 | Does it over-fire on other confusables (protest, red liquids, costume gore, military)? | **MEASURED** (2,796 Unsplash imgs) | violation ≤0.4% every slice; peaceful protest & team sport **0% violation** (§3) |
 | How often does it cry wolf on ordinary photos? | **MEASURED** (5,000 COCO val2017) | **0.04% alert · 0.44% violation · 5.24% review** at the shipped τ (§3) |
 | Does the score distribution saturate (b-daemon's rolled-back defect)? | **MEASURED** | **NO** — only 0.10% of COCO maps above p=0.9; p50 0.05, p95 0.46, p99 0.73 (§5) |
-| Does the CONTEXT arbiter earn its keep? | **MEASURED** (ablation) | halloween alert 3→0, misc-hard alert 10→4 / violation 9→7, COCO alert 6→2 (§4) |
+| Did the nudityprobe false-alert incident get fixed? | **MEASURED** (real `track recount`) | swimwear 16 alert / 79 violation → **0 / 0** after the `p`-space band fix (§4) |
 | Does it find depicted violence (assault, gore, abuse)? | **NOT MEASURED — no labelled violence image may be fetched here** | weak proxy only: it ranks COCO's most-violent *caption* image #1 of 5,000 (§3b) |
 | Published true-positive metrics for the category? | **CITED, not reproduced** | see §6 + `research/violence-models.md` |
 
@@ -96,15 +99,18 @@ This track has two scoring surfaces, and it matters which produces the live tier
   **only** when `calibration == "fitted"` — this track is deliberately `fp-budget` (not
   fitted; no labelled positives may be fetched), so the reader treats it as UNFITTED and its
   own strict floor governs. **These are the numbers a deployed site sees.**
-- **The seam is `violence.py::ViolenceHead`** (the `load_heads` contract), which adds the
-  fitted-spread PLATT map, the explicit τ (§5) and the CONTEXT-bank arbitration (§4). It is
-  the raw-score writer / offline-analysis instrument, and its numbers are the FITTED-τ
-  reference. It is NOT the daemon's tier authority.
+- **The stored-count path is `store.derive_tiers`** over the sidecar `p` that
+  `violence.py::ViolenceHead` writes — this is what `imgtag index --moderation` /
+  `track recount` and every stored batch summary use. It bands `p` by the ASCENDING
+  `p`-space taus of §5 (shipped as `data/moderation/violence-<model>.json`). The head's own
+  `tier` is byte-identical to it (`test_head_tier_matches_derive_tiers`, B25d). This is the
+  path that produced — and, after the §4 fix, resolved — the nudityprobe false-alert incident.
 
-**Both scorers agree on every qualitative invariant that matters** — boxing/martial-arts do
+**Both paths agree on every qualitative invariant that matters** — boxing/martial-arts do
 not over-fire, peaceful protest is silent, team sport flags 0% violation, gore can reach
-alert, and halloween SFX lands at review not alert. The reader is simply sparser (it fires
-only the >3σ tail). Both tables are given below, each labelled with its scorer.
+alert, swimwear never reaches alert. The reader (z-score) is sparser and corpus-relative;
+the `derive_tiers` path (absolute `p`-space taus) is stable across OOD corpora, which is why
+the fix lives there. Both tables below are labelled with their path.
 
 **A. SHIPPED — b-daemon's reader (z-score + exceedance, unfitted):**
 
@@ -124,20 +130,25 @@ halloween alert 0.9%/viol 0%/review 3.4%, protest 0%** — the headline holds un
 that ships. (Verified two ways: `Searcher.track_scores("cocoval2017")` live, and the same
 Z_A/Z_B/K_STD/exceedance math replayed on the cached slice embeddings.)
 
-**B. SEAM reference — `ViolenceHead` fitted τ + arbitration** (alert τ=0.055 severe-margin ·
-violation τ=0.071 · review τ=0.044); the wider recall net the fitted operating point buys:
+**B. STORED-COUNT path — `store.derive_tiers` over the sidecar `p`, `p`-space taus
+(review 0.46 · violation 0.85 · alert 0.95, §5)** — the batch-summary / `recount` numbers,
+byte-identical to the head's own `tier`:
 
-| slice | n | mean margin | max margin | alert % | violation % | review % |
-|---|---|---|---|---|---|---|
-| **COCO val2017** | 5000 | −0.0075 | 0.1140 | **0.04** | **0.44** | **5.24** |
-| **contact-sport** | 262 | −0.0108 | 0.0918 | **0.00** | **0.38** | 4.58 |
-| team-sport | 214 | −0.0178 | 0.0555 | 0.00 | **0.00** | 4.21 |
-| protest | 110 | −0.0200 | 0.0601 | 0.00 | **0.00** | 7.27 |
-| red-liquid | 1024 | −0.0131 | 0.0780 | 0.00 | 0.10 | 2.54 |
-| medical | 247 | −0.0095 | 0.0918 | 0.40 | 0.40 | 5.67 |
-| military | 392 | −0.0086 | 0.0918 | 0.26 | 0.26 | 5.87 |
-| costume-horror | 292 | −0.0047 | 0.0918 | **0.00** | 0.34 | 9.25 |
-| misc-hard | 1735 | −0.0066 | 0.0918 | 0.23 | 0.40 | 6.46 |
+| slice | n | alert % | violation % | review % |
+|---|---|---|---|---|
+| **COCO val2017** | 5000 | **0.02** | **0.28** | **4.72** |
+| **contact-sport** | 262 | **0.00** | **0.38** | 2.67 |
+| team-sport | 214 | 0.00 | **0.00** | 2.34 |
+| protest | 110 | 0.00 | **0.00** | 5.45 |
+| red-liquid | 1024 | 0.00 | **0.00** | 1.76 |
+| medical | 247 | 0.00 | 0.81 | 3.64 |
+| military | 392 | 0.00 | 0.26 | 4.85 |
+| costume-horror | 292 | **0.00** | 0.34 | 5.14 |
+| misc-hard | 1735 | 0.00 | 0.29 | 5.53 |
+| **nudityprobe** (OOD swimwear) | 202 | **0.00** | **0.00** | 4.95 |
+
+**Every confusable slice flags 0.00% `alert`** under the fixed `p`-space bands, and the OOD
+swimwear probe that triggered the incident is 0 alert / 0 violation (was 16 / 79).
 
 ### 3a. Contact sports — the required negative, per keyword (the brief's headline)
 
@@ -201,50 +212,68 @@ Top slice scorers, named from their Unsplash `ai_description` (no image inspecti
 **The FP class is intimate/embracing poses and horror makeup.** Two couples embracing top the
 violation tier ("throat grab" and intimate poses are near-neighbours in CLIP space) — the
 honest residual, the class most worth re-checking if the operator ever supplies labels.
-Horror makeup (Joker, skull, face paint) is caught by the CONTEXT arbiter and correctly
-lands at **review, not violation** — the arbitration working. It is the reason the review
-queue must show a human the image and never auto-act.
+(The `tier` column above is the OLD margin-space labelling; under the shipped `p`-space bands
+of §5 **none of these reach `alert`** — "bare feet dip into flowing water" is `violation`,
+not the `alert` it was pre-fix, and the horror-makeup rows stay at `review`. That every one
+of them tops out below `alert` is the point.) These are the reason the review queue must show
+a human the image and never auto-act.
 
-## 4. Measured — the arbitration ablation (does the CONTEXT bank earn its keep?)
+## 4. The nudityprobe incident and the tier-derivation fix (2026-07-22)
 
-Flags **before → after** the CONTEXT demotion (a severe/violent hit that a staged/clinical
-concept explains as well or better, within TIER_MARGIN, demotes to `review`):
+The first design gated `alert`/`violation` on SEPARATE margins (severe vs violent) with a
+CONTEXT arbiter, all in MARGIN space. That logic was **silently bypassed by both shipping
+paths** — b-daemon's reader re-scores from the prompt banks with a corpus-relative z-score,
+and the ADR-15 sidecar stores only ONE scalar `p` which `store.derive_tiers` bands. Worse,
+the margin-space taus (~0.05) were then applied by `derive_tiers` to the `p`-space stored
+score, and with `tau_alert`(0.055) < `tau_violation`(0.071) the severity order inverted.
 
-| slice | alert before→after | violation before→after |
-|---|---|---|
-| COCO val2017 | 6 → **2** | 25 → **22** |
-| costume-horror | 3 → **0** | 1 → 1 |
-| misc-hard | 10 → **4** | 9 → **7** |
-| medical | 1 → 1 | 2 → **1** |
-| red-liquid | 1 → **0** | 1 → 1 |
+**Symptom (b-engine `track recount nudityprobe`):** 202 swimwear/lingerie images (no violence
+content) → **16 false `alert` + 79 `violation`**. `alert` is the UI's loudest tier; 16 false
+alerts on swimwear is exactly the weak-alert failure the withhold-law exists to prevent.
 
-The arbiter removes two-thirds of costume-horror alert flags and a third of misc-hard alerts —
-exactly the halloween-SFX / fake-blood class it exists to catch — **without dropping the
-image** (a demoted flag lands at review, where ADR-14 says a human decides). Nothing leaves
-the queue; a permanent test asserts it (`test_nothing_that_fires_leaves_the_queue`).
+**Root cause:** a UNIT bug — margin-space thresholds banding a `p`-space score — compounded
+by an inverted alert/violation order. The corpus-relative reader path has a *separate* OOD
+amplification (any homogeneous OOD corpus fires its own z-tail); that one is b-daemon's reader
+and is reported to that lane. The `recount` failure was the unit bug, and it is this lane's.
+
+**Fix (recount-free, TRACKS T1/T3 "a τ refit is free"):** move to `p`-space ASCENDING bands
+(review < violation < alert) and ship them as a per-model FP-budget file,
+`data/moderation/violence-pecore-s16-384.json`, which `resolve_track_cfg` wins with over the
+stale spec baked into old manifests — so every pre-fix dataset re-derives correctly on the
+next `recount`, **with no re-embedding**. The per-image `tier` and `store.derive_tiers` are
+now byte-identical (`test_head_tier_matches_derive_tiers`), and the arbiter — dead code in
+both shipping paths — was removed.
+
+**Verified by the real command:** `imgtag track recount nudityprobe` → violence **0 alert ·
+0 violation · 10 review** (was 16 / 79 / 9). Staged/clinical demotion now rides the
+conservative violation/alert taus (halloween measured mostly `review`), not a per-image
+arbiter a single stored scalar cannot carry.
 
 ## 5. Thresholds and the rationale
 
-All three τ are quantiles of the **safe-corpus margin distribution** (COCO val2017, n=5000) —
-a false-positive budget, never a recall fit, because no labelled positives may be fetched here.
+All three τ are quantiles of the safe-corpus **`p` distribution** (COCO val2017, n=5000),
+in the SAME `[0,1]` space as the stored score — a false-positive budget, never a recall fit,
+because no labelled positives may be fetched here. ASCENDING, so `derive_tiers` bands by
+severity (highest-tau-first).
 
-| tier | τ (margin space) | measured FP on COCO | why this number |
+| tier | τ (`p`-space) | measured FP on COCO | why this number |
 |---|---|---|---|
-| `alert` | **0.055** (severe-bank margin) | 0.04% (2 / 5000) | severe-bank p99.9; the rarest tier — reserved for graphic gore imagery itself (track-safety boundary, §7) |
-| `violation` | **0.071** | 0.44% (22 / 5000) | COCO p99.5 — the confident band; matches the sibling tracks' violation FP profile (nudity 0.22%, drugs 0.9%) |
-| `review` | **0.044** | 5.24% (262 / 5000) | COCO p95 — the wide recall-first net, sited just above the safe-corpus bulk |
+| `alert` | **0.95** | 0.02% (1 / 5000) | COCO p99.98 — reserved for the genuinely extreme; the one COCO hit is the real "man badly beating unconscious" image (§3b). nudityprobe (max p 0.82) → **0** |
+| `violation` | **0.85** | 0.28% (14 / 5000) | COCO ~p99.7 — the confident band; matches sibling violation FP (nudity 0.22%, drugs 0.9%). nudityprobe → **0** (max 0.82 < 0.85) |
+| `review` | **0.46** | 4.72% (236 / 5000) | COCO p95 — the wide recall-first net just above the safe-corpus bulk; nudityprobe → ~5% (10 imgs), the swimwear intimate-pose residual, surfaced not auto-acted |
 
-**The margin→p map is fitted to the SPREAD, not to labels** (`PLATT_A=54.0, PLATT_B=−2.54`):
-it sends the safe-corpus median margin (−0.0075) to p≈0.05 and the p99.9 margin (0.0874) to
-p≈0.90. **Measured result: only 0.10% of COCO maps above p=0.9** (p50 0.05 · p95 0.46 · p99
-0.73 · p99.9 0.90) — the distribution does **not** saturate. This is the deliberate avoidance
+**The margin→`p` map** (`PLATT_A=54.0, PLATT_B=−2.54`) sends the safe-corpus median margin
+(−0.0075) to p≈0.05 and the p99.9 margin (0.0874) to p≈0.90. **Measured: only 0.10% of COCO
+maps above p=0.9** (p50 0.05 · p95 0.46 · p99 0.73 · p99.9 0.90) — the distribution does
+**not** saturate. This is the deliberate avoidance
 of b-daemon's rolled-back defect (the drugs proxy logistic pinned 218 benign images at
 p=0.99). `p` is a monotone triage score and is never called a probability.
 
-Every τ and the tier margin are overridable per install without a code change via
-`moderation.json` → `categories.violence.tau_{alert,violation,review}` / `tier_margin`
-(a ruling is an edit, never a retrain; a typo falls back to the default rather than taking
-moderation offline — `test_thresholds_are_config_driven`).
+Every τ is overridable per install without a code change — either the base
+`moderation.json` → `categories.violence.tau_{alert,violation,review}`, or (winning over a
+stale baked spec) the per-model `data/moderation/violence-<model_id>.json` file. A ruling is
+an edit, never a retrain; a typo falls back to the default rather than taking moderation
+offline (`test_thresholds_are_config_driven`).
 
 ### Published true-positive metrics (cited, NOT reproduced here)
 
@@ -341,8 +370,9 @@ negatives (option a) work, with no sports→violence coupling, exactly as TRACKS
 - ✅ **Contact-sport required negative** — measured under BOTH scorers (shipped reader + seam): 0% alert, 0.38% violation on 262 imgs; boxing/martial-arts 0% violation (§3a). Mechanism = this track's own negatives subtraction, not sports composition (§7).
 - ✅ **Shipped-path consistency** — b-daemon's live `Searcher.track_scores` reader agrees with the seam on every qualitative invariant (boxing silent, protest silent, gore→alert, halloween→review); the reader is sparser (fires the >3σ tail). Verified two ways (§3.0).
 - ✅ Score distribution does **not** saturate — measured: 0.10% of COCO above p=0.9 (§5).
-- ✅ CONTEXT arbiter earns its keep — measured ablation (§4).
-- ✅ 15 tests green (`tests/test_violence.py`), incl. the alert-boundary, the arbitration-demotes-never-drops invariant, the config-driven-policy law, and the moderation.json non-drift check.
+- ✅ **nudityprobe false-alert incident FIXED** — measured via the real `imgtag track recount nudityprobe`: 16 alert / 79 violation → **0 / 0** after moving to `p`-space ascending bands (§4). Root cause was a margin-vs-`p` unit bug + inverted alert/violation order; fix is recount-free (per-model FP-budget file wins over the stale baked spec).
+- ✅ **head tier == `store.derive_tiers`** on random and real embeddings (B25d one-mapping law) — `test_head_tier_matches_derive_tiers`.
+- ✅ 16 tests green (`tests/test_violence.py`), incl. the `p`-space-ascending-taus law, the elevated-`p`-never-alerts incident regression, head==derive_tiers, the config-driven-policy law, and the moderation.json non-drift check. ruff clean.
 - ✅ Composition with sports/safety specified and boundary-tested (§7).
 - ❌ **True-positive recall — NOT verified here.** Weak caption-proxy only (§3b); published metrics cited, not reproduced (§5).
 - ❌ **τ not fitted on labelled ground truth** — `calibrated: false`, `enforcement_ready: false`. It is an FP budget.

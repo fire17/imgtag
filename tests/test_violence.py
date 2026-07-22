@@ -126,48 +126,59 @@ def test_p_mapping_spreads_over_the_designed_margin_range():
     assert np.all(np.diff(p) > 0), "p must be monotone in margin"
 
 
-# ── the alert boundary (coordinated with track-safety) ────────────────────────
-def test_alert_needs_the_severe_bank(scorer):
-    """A bloodless fight reaches violation at most, NEVER alert. Alert = graphic imagery
-    itself (the SEVERE bank), which is track-safety's agreed boundary."""
-    cfg = {"tau_alert": 0.0, "tau_violation": 0.0, "tau_review": 0.0, "tier_margin": 0.0}
-    sc = V.ViolenceScorer.build(FakeBackend(), config=cfg)
-    fight = sc.score(_unit(sc.violent[0][None]))   # a 'fighting' concept, no gore
-    assert fight["tier"][0] == "violation", "a pure fight must land at violation"
-    gore = sc.score(_unit(sc.severe[0][None]))
-    assert gore["tier"][0] == "alert", "the severe bank must be able to reach alert"
+# ── tiers are p-space ASCENDING bands (the nudityprobe unit-bug fix) ──────────
+def test_taus_are_p_space_ascending():
+    """LAW after the 2026-07-22 incident: taus live in the SAME [0,1] space as the stored
+    score `p`, ASCENDING (review < violation < alert). Margin-space values (~0.05) applied
+    to `p` by derive_tiers is exactly what flagged 16 false alerts on swimwear."""
+    assert 0.0 < V.TAU_REVIEW < V.TAU_VIOLATION < V.TAU_ALERT <= 1.0
+    assert V.TAU_REVIEW >= 0.2, "a p-space review band must be well above margin-space ~0.05"
+
+
+def test_tier_of_bands_p_by_severity():
+    """alert = the TOP p band; a mid p is violation; a low-but-nonzero p is review."""
+    pol = V.DEFAULTS
+    assert V.tier_of(0.99, pol) == "alert"
+    assert V.tier_of(0.90, pol) == "violation"   # in [violation, alert)
+    assert V.tier_of(0.50, pol) == "review"       # in [review, violation)
+    assert V.tier_of(0.10, pol) == "none"
+    arr = V.tier_of(np.array([0.99, 0.90, 0.50, 0.10]), pol)
+    assert list(arr) == ["alert", "violation", "review", "none"]
+
+
+def test_head_tier_matches_derive_tiers(scorer):
+    """B25d: the head's tier and store.derive_tiers must be byte-identical on the same `p`
+    — one mapping, so head / daemon recount / CLI cannot disagree."""
+    from imgtag.core.store import derive_tiers
+    emb = _unit(np.random.default_rng(7).normal(size=(64, FakeBackend.dim)))
+    out = scorer.score(emb)
+    spec = V.track_spec()
+    assert list(out["tier"]) == derive_tiers(out["p"], spec), "head tier != derive_tiers"
 
 
 def test_alert_sorts_above_violation():
     assert V.TIERS.index("alert") < V.TIERS.index("violation") < V.TIERS.index("review")
 
 
-# ── arbitration: the anti-defect (staged/clinical twins demote, never subtract) ──
-def test_context_lookalike_demotes_to_review():
-    """A halloween-SFX / fake-blood image resembles the CONTEXT bank as much as the
-    positive banks, so it must DEMOTE to review — surfaced for a human, never auto-acted,
-    never dropped (nothing leaves the queue)."""
-    sc = V.ViolenceScorer.build(FakeBackend(),
-                                config={"tau_alert": 0.0, "tau_violation": 0.0, "tau_review": 0.0})
-    ctx_like = _unit(sc.context[0][None])   # 'a horror movie still with fake blood'
-    out = sc.score(ctx_like)
-    assert out["tier"][0] == "review", "a staged-gore twin must not reach alert/violation"
-
-
-def test_nothing_that_fires_leaves_the_queue():
-    """Losing arbitration DEMOTES to review, never to none — the drugs-lane invariant."""
-    sc = V.ViolenceScorer.build(FakeBackend(),
-                                config={"tau_alert": 0.0, "tau_violation": 0.0, "tau_review": 1.0})
-    emb = _unit(np.stack([sc.severe[0], sc.violent[0], sc.context[0]]))
-    assert "none" not in set(sc.score(emb)["tier"]), "a fired image was dropped"
+# ── the nudityprobe incident regression: elevated-but-not-extreme p never alerts ──
+def test_elevated_p_never_reaches_alert():
+    """The 2026-07-22 failure: 202 swimwear images (max stored p=0.82) produced 16 false
+    `alert`. With ascending p-space bands, nothing below tau_alert=0.95 can reach alert —
+    a swimwear intimate-pose p in the 0.5–0.85 band lands at review/violation, never the
+    UI's loudest tier. Asserts the band math directly on the incident's score range."""
+    pol = V.DEFAULTS
+    swimwear_like = np.linspace(0.40, 0.82, 40)   # the measured nudityprobe p range
+    tiers = set(V.tier_of(swimwear_like, pol).tolist())
+    assert "alert" not in tiers, "an elevated non-extreme p must never reach alert"
+    assert tiers <= {"none", "review", "violation"}
 
 
 # ── config-driven policy (a ruling is an edit, never a retrain) ───────────────
 def test_thresholds_are_config_driven():
     assert V.policy({})["tau_violation"] == V.TAU_VIOLATION
-    assert V.policy({"tau_violation": 0.2})["tau_violation"] == 0.2
+    assert V.policy({"tau_violation": 0.9})["tau_violation"] == 0.9
     assert V.policy({"tau_alert": "oops"})["tau_alert"] == V.TAU_ALERT     # typo != outage
-    assert V.policy({"tier_margin": 0.01})["tier_margin"] == 0.01
+    assert "tier_margin" not in V.policy({}), "tier_margin retired with the arbiter"
 
 
 # ── the shared daemon surface must not silently drift from this module ────────

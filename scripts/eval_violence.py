@@ -262,40 +262,26 @@ def main() -> None:
             for j in order
         ]
 
-    # -- C. the arbitration ablation: does the CONTEXT bank earn its keep? ------------
-    raw_alert = (s["margin_severe"] >= violence.TAU_ALERT)
-    raw_viol = (s["margin_violent"] >= violence.TAU_VIOLATION)
-    out["arbitration"] = {}
-    for name, paths in sorted(slices.items()):
-        i = np.array([pos[p] for p in paths])
-        out["arbitration"][name] = {
-            "alert_before": int(raw_alert[i].sum()), "alert_after": int((s["tier"][i] == "alert").sum()),
-            "violation_before": int(raw_viol[i].sum()),
-            "violation_after": int((s["tier"][i] == "violation").sum()), "n": int(len(i)),
-        }
-    ci = np.arange(len(coco_emb))
-    ca = (c["margin_severe"] >= violence.TAU_ALERT)
-    cv = (c["margin_violent"] >= violence.TAU_VIOLATION)
-    out["arbitration"]["coco"] = {
-        "alert_before": int(ca.sum()), "alert_after": int((c["tier"][ci] == "alert").sum()),
-        "violation_before": int(cv.sum()),
-        "violation_after": int((c["tier"][ci] == "violation").sum()), "n": int(len(ci))}
-    print("\narbitration (flags BEFORE -> AFTER the CONTEXT demotion):")
-    for k, v in out["arbitration"].items():
-        print(f"  {k:16s} alert {v['alert_before']:4d} -> {v['alert_after']:4d} | "
-              f"violation {v['violation_before']:5d} -> {v['violation_after']:5d}  (n={v['n']})")
+    # -- C. tier assignment is p-space bands (post-2026-07-22-incident) --------------
+    # The head no longer arbitrates on separate margins; ADR-15 stores ONE score `p` and
+    # tiers are ascending p-space bands (== store.derive_tiers, B25d). Confirm the head's
+    # tier matches derive_tiers on this corpus — the invariant the nudityprobe fix rests on.
+    from imgtag.core.store import derive_tiers
+    spec = violence.track_spec()
+    out["derive_tiers_consistent"] = bool(list(c["tier"]) == derive_tiers(c["p"], spec))
+    print(f"\nhead tier == store.derive_tiers on COCO: {out['derive_tiers_consistent']}")
 
-    # -- D. threshold sweep, on the FP side only -------------------------------------
-    out["sweep"] = {}
-    print(f"\nflag-rate vs tau (FP budget, {'%'} of corpus at or above tau in margin space)")
+    # -- D. threshold sweep in `p`-space (the space tiers are actually banded in) -----
+    out["p_sweep"] = {}
+    print("\nflag-rate vs p-tau (FP budget, % of corpus at/above tau in p-space)")
     hdr = ["tau", "coco"] + sorted(slices)
     print("  " + " ".join(f"{h[:12]:>12s}" for h in hdr))
-    for tau in (0.0, 0.005, 0.01, 0.02, 0.03, 0.05, 0.075, 0.10):
-        row = {"coco": round(float((m_all >= tau).mean()) * 100, 2)}
+    for tau in (0.30, 0.40, 0.46, 0.55, 0.65, 0.75, 0.85, 0.90, 0.95):
+        row = {"coco": round(float((c["p"] >= tau).mean()) * 100, 2)}
         for name, paths in sorted(slices.items()):
             i = np.array([pos[p] for p in paths])
-            row[name] = round(float((s["margin"][i] >= tau).mean()) * 100, 2)
-        out["sweep"][f"{tau:g}"] = row
+            row[name] = round(float((s["p"][i] >= tau).mean()) * 100, 2)
+        out["p_sweep"][f"{tau:g}"] = row
         print("  " + f"{tau:>12g}" + " ".join(f"{row[h]:12.2f}" for h in hdr[1:]))
 
     Path(a.json).write_text(json.dumps(out, indent=1))

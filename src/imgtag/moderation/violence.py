@@ -33,33 +33,40 @@ Each concept is a prompt ENSEMBLE: mean of its templated text embeddings, L2-nor
 FOUR banks, and keeping them apart is the whole design:
 
     SEVERE     graphic gore / heavy blood / mutilation          → ALERT tier
-    VIOLENT    depicted interpersonal violence, assault, abuse  → VIOLATION tier
+    VIOLENT    depicted interpersonal violence, assault, abuse  → the score `p`
     CONTEXT    staged & clinical near-twins (halloween SFX, film
-               gore, surgery, butchery, property damage)        → REVIEW tier + ARBITER
+               gore, surgery, butchery, property damage)        → REVIEW prompts (reader)
     BACKGROUND visually DISTINCT confusables (contact sports,
                peaceful protest, red food/paint, parades)       → SUBTRACTED
 
-    margin_T = max_cos(image, bank T) - max_cos(image, BACKGROUND)
+    margin = max_cos(image, SEVERE∪VIOLENT) - max_cos(image, BACKGROUND)
+    p      = sigmoid(PLATT_A·margin + PLATT_B)      # the ONE score ADR-15 stores
 
 The subtraction is what makes the number comparable across images (absolute CLIP cosines
 are dominated by per-image norm/entropy effects, not content). The split between
-BACKGROUND (subtracted) and CONTEXT (never subtracted, only arbitrated) is the drugs
-lane's most expensive lesson applied forward: subtracting concepts that are *visually
-identical* to the positives subtracts the signal itself (their AP collapsed 0.58 → 0.04
-when clinical syringes were subtracted from drug syringes). Halloween gore and surgical
-blood are exactly that kind of twin, so they arbitrate instead.
+BACKGROUND (subtracted) and CONTEXT (never subtracted) is the drugs lane's most expensive
+lesson applied forward: subtracting concepts that are *visually identical* to the positives
+subtracts the signal itself (their AP collapsed 0.58 → 0.04 when clinical syringes were
+subtracted from drug syringes). Halloween gore and surgical blood are exactly that kind of
+twin, so they live in the CONTEXT/`review` prompt set, never in BACKGROUND.
 
-TIER ARBITRATION — the anti-defect that matters most here.
-A severe/violent flag must beat the CONTEXT bank by TIER_MARGIN. Otherwise it demotes to
-`review`, where ADR-14 says a human decides. Nothing ever leaves the queue; a halloween
-zombie lands at review rather than alert. This is the same mechanism that fixed the drugs
-lane's vape-exhale-as-violation defect, reused rather than reinvented.
+TIERS ARE `p`-SPACE BANDS, NOT A SEPARATE ARBITER (the 2026-07-22 nudityprobe lesson).
+ADR-15 stores ONE scalar (`p`) per image; ``store.derive_tiers`` bands it (B25d: one
+mapping so head, daemon reader and CLI recount cannot disagree). An earlier design gated
+`alert`/`violation` on SEPARATE margins in MARGIN space with a CONTEXT arbiter — that logic
+was silently bypassed by both shipping paths, and worse, its margin-space taus (~0.05) were
+then applied by derive_tiers to the `p`-space stored score, flagging 16 false `alert` + 79
+`violation` on a 202-image swimwear probe. Fixed: `p`-space ASCENDING taus (review <
+violation < alert), so a swimwear photo whose intimate-pose `p` reaches ~0.5 lands at
+`review`, never `alert`. Staged/clinical demotion now rides the conservative violation/alert
+taus (measured: halloween → review) plus the reader's own exceedance competition, not a
+per-image arbiter a single stored scalar cannot carry.
 
-BOUNDARY WITH track-safety (agreed with that lane, ORACLE ADR-14 `alert` semantics):
-safety owns person-DOWN ∧ danger-context (the victim's state); this track owns depicted
-interpersonal violence, and its `alert` is reserved for graphic imagery itself. A fistfight
-with no blood can reach `violation` at most — never `alert`. Both tracks score every image
-independently (ADR-15); tier counts are reported per category, so no double-count arises.
+BOUNDARY WITH track-safety (agreed, ORACLE ADR-14 `alert` semantics): safety owns
+person-DOWN ∧ danger-context (the victim's state); this track owns depicted interpersonal
+violence, and `alert` (the top `p` band, τ=0.95) is reserved for the genuinely extreme.
+Both tracks score every image independently (ADR-15); tier counts are per category, so no
+double-count arises (b-daemon's `alert_images` dedupes any cross-category fleet total).
 """
 
 from __future__ import annotations
@@ -212,26 +219,30 @@ BACKGROUND: list[str] = [
     "an abstract pattern",
 ]
 
-#: The arbitration gap, in MARGIN space. A severe/violent hit must explain the image
-#: better than the CONTEXT bank by this much or it demotes to `review`. Chosen equal to
-#: the drugs lane's shipped TIER_MARGIN so two tracks do not carry two unexplained
-#: constants; re-fit it the day labelled positives exist. NOT a measured optimum.
-TIER_MARGIN = 0.005
-
-#: Presentation mapping margin -> p. Fitted to the SPREAD of the safe corpus (COCO
+#: Mapping margin -> the stored score `p`. Fitted to the SPREAD of the safe corpus (COCO
 #: val2017, n=5000, `pecore-s16-384-fp32`; see `research/track-violence.md` §5), NOT to
 #: labels: it maps the safe-corpus median margin (-0.0075) to p≈0.05 and the p99.9 margin
 #: (0.0874) to p≈0.90. Measured result: only 0.1% of COCO maps above p=0.9 — the score
 #: distribution does NOT saturate (the b-daemon defect that got the drugs proxy logistic
-#: rolled back). `p` is a monotone triage score. It is NOT a probability, ever.
+#: rolled back). `p` is a monotone triage score. It is NOT a probability, ever. This `p`
+#: is what b-engine writes to the ADR-15 sidecar; the tiers below are derived from IT.
 PLATT_A, PLATT_B = 54.0, -2.54
 
-#: FALSE-POSITIVE BUDGET thresholds in MARGIN space (never a recall fit — no positives
-#: exist on this machine). Each is a quantile of the safe-corpus margin distribution;
-#: measured FP rate on COCO val2017 in parentheses (§5 of the report has the full sweep):
-TAU_ALERT = 0.055       # severe-bank margin, COCO p99.9 (~0.12% FP) — the rarest tier
-TAU_VIOLATION = 0.071   # max(sev,vio) margin, COCO p99.5 (~0.5% FP)
-TAU_REVIEW = 0.044      # max(sev,vio) margin, COCO p95 (~5% FP) — the wide recall net
+#: FALSE-POSITIVE BUDGET tier thresholds — in the SAME SPACE as the stored score `p`
+#: ([0,1] after PLATT), ASCENDING, so ``store.derive_tiers`` (the ADR-15/B25d single
+#: source of truth that bands the ONE stored score) assigns the correct severity:
+#: p≥alert → alert, p≥violation → violation, p≥review → review, else none.
+#:
+#: LAW: these are `p`-space quantiles of the SAFE corpus, NEVER margin values. The
+#: 2026-07-22 nudityprobe incident (16 false `alert` + 79 `violation` on 202 swimwear
+#: images) was exactly a UNIT bug — margin-space taus (~0.05) applied by derive_tiers to
+#: `p`-space scores, with tau_alert < tau_violation inverting the severity order. Fixed
+#: by moving to ascending `p`-space bands. Measured FP on COCO val2017 in parens:
+TAU_ALERT = 0.95        # COCO p99.98 (~0.02% FP) — reserved for genuinely extreme imagery
+TAU_VIOLATION = 0.85    # COCO ~p99.7 (~0.3% FP)
+TAU_REVIEW = 0.46       # COCO p95 (~5% FP) — the wide recall-first net
+#: verified on the OOD swimwear corpus that triggered the incident: nudityprobe (n=202,
+#: max stored p=0.82) → 0 alert, 0 violation (0.82 < 0.85), ~10 review. Was 16 / 79.
 
 TIERS = ("alert", "violation", "review")
 
@@ -240,9 +251,21 @@ def _sigmoid(x):
     return 1.0 / (1.0 + np.exp(-np.asarray(x, np.float64)))
 
 
+def tier_of(p, pol: dict):
+    """`p`-space bands → ADR-14 tier(s). Ascending taus, highest first — byte-identical in
+    ordering to ``store.derive_tiers`` so the head and the recount/daemon never disagree.
+    Accepts a scalar or an array; returns the same shape (dtype=object for arrays)."""
+    ta, tv, tr = float(pol["tau_alert"]), float(pol["tau_violation"]), float(pol["tau_review"])
+    a = np.asarray(p, np.float64)
+    out = np.where(a >= ta, "alert",
+                   np.where(a >= tv, "violation",
+                            np.where(a >= tr, "review", "none")))
+    return out if out.ndim else str(out)
+
+
 # ── the user-rulable knobs live in CONFIG, not in code ────────────────────────────────
 DEFAULTS = {"tau_alert": TAU_ALERT, "tau_violation": TAU_VIOLATION,
-            "tau_review": TAU_REVIEW, "tier_margin": TIER_MARGIN}
+            "tau_review": TAU_REVIEW}
 
 
 def policy(config: dict | None = None) -> dict:
@@ -319,9 +342,14 @@ class ViolenceScorer:
         """emb: [N, D] L2-normalized image embeddings → per-image violence payload.
 
         Arrays throughout — a whole dataset costs four small matmuls and no decode.
-        `p` is the VIOLENT-or-worse triage score (max of the severe and violent margins,
-        mapped monotonically); ADR-15 stores it densely for every image, tiers derive
-        from it at read time.
+        `p` (max of the severe and violent background-margins, mapped through PLATT) is the
+        ONE score ADR-15 stores densely; **tiers are derived from `p` by ascending
+        `p`-space bands — byte-identical to ``store.derive_tiers`` (B25d: one mapping, so
+        the head, the daemon reader and the CLI recount cannot disagree)**. The CONTEXT
+        bank is scored for the reader's exceedance path and for the `context` diagnostic,
+        but it does NOT arbitrate here: a single stored scalar cannot carry a separate
+        demotion, so staged/clinical demotion rides the conservative violation/alert taus
+        (measured acceptable) plus the reader's own review-tier competition.
         """
         pol = self.pol
         emb = np.asarray(emb, np.float32)
@@ -333,21 +361,9 @@ class ViolenceScorer:
         m_vio = cv.max(1) - bg
         m_ctx = (emb @ self.context.T).max(1) - bg
         best = cv.argmax(1)
-        # the carried score: the worst thing the image looks like, before arbitration
-        m = np.maximum(m_sev, m_vio)
-        p = _sigmoid(PLATT_A * m + PLATT_B)
-
-        # ARBITRATION: a severe/violent hit must beat the staged+clinical bank by
-        # TIER_MARGIN, else it demotes to `review`. Nothing leaves the queue.
-        gap = float(pol["tier_margin"])
-        alert = (m_sev >= pol["tau_alert"]) & (m_sev >= m_ctx + gap)
-        viol = (m_vio >= pol["tau_violation"]) & (m_vio >= m_ctx + gap)
-        # anything that fired but lost arbitration, plus anything the CONTEXT bank itself
-        # claims above the review budget, lands at review
-        fired = (m_sev >= pol["tau_alert"]) | (m_vio >= pol["tau_violation"])
-        review = (m_ctx >= pol["tau_review"]) | (m >= pol["tau_review"]) | fired
-        tier = np.where(alert, "alert", np.where(viol, "violation",
-                                                 np.where(review, "review", "none")))
+        m = np.maximum(m_sev, m_vio)                      # the worst thing it looks like
+        p = _sigmoid(PLATT_A * m + PLATT_B)               # the stored score (ADR-15)
+        tier = tier_of(p, pol)                            # p-space bands, == derive_tiers
         return {"category": CATEGORY, "p": p, "tier": tier,
                 "margin": m, "margin_severe": m_sev, "margin_violent": m_vio,
                 "margin_context": m_ctx,
@@ -456,7 +472,6 @@ def track_spec() -> dict:
         "tau_alert": TAU_ALERT,
         "tau_violation": TAU_VIOLATION,
         "tau_review": TAU_REVIEW,
-        "tier_margin": TIER_MARGIN,
         # NOT "fitted": tau is a false-positive budget, never a recall fit. search.py
         # gates only on `calibration == "fitted"`, which is exactly the behaviour this
         # track wants — it must never gate until labelled ground truth exists.
