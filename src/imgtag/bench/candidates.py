@@ -234,7 +234,16 @@ def machine_header() -> dict:
 
 
 def load_ok(cores: int | None = None) -> tuple[bool, float]:
-    """BUDGETS noise protocol: 1-min load must be <= usable_cores * 0.6."""
+    """BUDGETS noise protocol: 1-min load must be <= usable_cores * 0.6.
+
+    STRUCTURAL FINDING (2026-07-22, b-bench, measured over a full held window): on THIS M3
+    proxy box the ≤9.6 gate (16*0.6) is UNREACHABLE — the user's desktop baseline
+    (herdr ~116%, WindowServer, replayd, browsers, ChatGPT/Codex) holds load at ~10-13 with
+    every swarm lane idle. So OK-status perf is unobtainable here regardless of lane holds;
+    the cleanest capture is ADVISORY at load ~10 with per-row loadavg + a desktop-baseline
+    caveat. **The ≤9.6 gate applies to the 🐧 Linux TARGET only — that is where B1 locks
+    (LOCK LAW).** Do not burn a window trying to reach it on the Mac; label ADVISORY and move.
+    """
     cores = cores or usable_cores()[0]
     l1 = os.getloadavg()[0]
     return l1 <= cores * 0.6, l1
